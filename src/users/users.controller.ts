@@ -11,6 +11,10 @@ import {
   CreateAdminDto, 
   AdminLoginDto 
 } from '../validators/admin.validators';
+import { 
+  ContactFormSchema, 
+  ContactFormDto 
+} from '../validators/user.validators';
 
 @ApiTags('Admin')
 @Controller('users')
@@ -137,6 +141,38 @@ export class UsersController {
         success: true,
         message: 'Admin profile retrieved successfully',
         data: admin,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Post('contact')
+  @ApiOperation({ summary: 'Submit contact form application' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        firstName: { type: 'string', example: 'John' },
+        lastName: { type: 'string', example: 'Doe' },
+        email: { type: 'string', example: 'john.doe@example.com' },
+        domainName: { type: 'string', example: 'My Wine Business' }
+      },
+      required: ['firstName', 'lastName', 'email', 'domainName']
+    }
+  })
+  @UsePipes(new ZodValidationPipe(ContactFormSchema))
+  async submitContactForm(@Body() contactFormDto: ContactFormDto) {
+    try {
+      const user = await this.usersService.submitContactForm(contactFormDto);
+      
+      // Remove sensitive fields from response
+      const { password, loginToken, ...userResponse } = user.toObject();
+      
+      return {
+        success: true,
+        message: 'Contact form submitted successfully. Your application is pending approval.',
+        data: userResponse,
       };
     } catch (error) {
       throw error;

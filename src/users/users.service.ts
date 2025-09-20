@@ -5,6 +5,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { User, UserRole, AccountStatus } from '../schemas/user.schema';
 import { CreateAdminDto, AdminLoginDto } from '../validators/admin.validators';
+import { ContactFormDto } from '../validators/user.validators';
 
 export interface AdminLoginResponse {
   user: {
@@ -163,5 +164,32 @@ export class UsersService {
     }
 
     return admin;
+  }
+
+  async submitContactForm(contactFormDto: ContactFormDto): Promise<User> {
+    const { firstName, lastName, email, domainName } = contactFormDto;
+
+    // Check if user with this email already exists
+    const existingUser = await this.userModel.findOne({ 
+      email: email.toLowerCase() 
+    });
+
+    if (existingUser) {
+      throw new ConflictException('User with this email already exists');
+    }
+
+    // Create new user with pending approval status
+    const newUser = new this.userModel({
+      firstName,
+      lastName,
+      email: email.toLowerCase(),
+      domainName,
+      role: UserRole.USER,
+      accountStatus: AccountStatus.PENDING_APPROVAL,
+      mustChangePassword: true,
+      submittedAt: new Date(),
+    });
+
+    return await newUser.save();
   }
 }
