@@ -304,6 +304,44 @@ export class UsersService {
     };
   }
 
+  async getRejectedUsers(query: PaginationQuery): Promise<PaginatedUsersResponse> {
+    const page = Math.max(1, query.page || 1);
+    const limit = Math.min(50, Math.max(1, query.limit || 10)); // Max 50 per page, default 10
+    const skip = (page - 1) * limit;
+
+    // Get total count for pagination
+    const totalUsers = await this.userModel.countDocuments({
+      role: UserRole.USER,
+      accountStatus: AccountStatus.REJECTED,
+    });
+
+    // Get users with pagination
+    const users = await this.userModel
+      .find({
+        role: UserRole.USER,
+        accountStatus: AccountStatus.REJECTED,
+      })
+      .select('-password -loginToken')
+      .sort({ approvedAt: -1, createdAt: -1 }) // Most recently rejected first
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalPages = Math.ceil(totalUsers / limit);
+
+    return {
+      users: users as User[],
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalUsers,
+        limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    };
+  }
+
   private generateRandomPassword(length: number = 12): string {
     const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
     let password = '';

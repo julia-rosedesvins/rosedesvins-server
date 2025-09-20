@@ -231,6 +231,30 @@ export class UsersController {
     }
   }
 
+  @Get('admin/rejected')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Get rejected users (paginated)' })
+  @ApiBearerAuth('admin-token')
+  @ApiQuery({ name: 'page', required: false, type: Number, example: 1, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10, description: 'Items per page (default: 10, max: 50)' })
+  async getRejectedUsers(
+    @CurrentAdmin() currentAdmin: any,
+    @Query(new ZodValidationPipe(PaginationQuerySchema)) query: PaginationQueryDto
+  ) {
+    try {
+      const result = await this.usersService.getRejectedUsers(query);
+      
+      return {
+        success: true,
+        message: 'Rejected users retrieved successfully',
+        data: result.users,
+        pagination: result.pagination,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
   @Put('admin/user-action')
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Approve or reject a user account' })
