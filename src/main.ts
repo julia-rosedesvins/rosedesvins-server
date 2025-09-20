@@ -6,6 +6,7 @@ import { join } from 'path';
 import * as cookieParser from 'cookie-parser';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { Logger, VersioningType } from '@nestjs/common';
+import { ValidationExceptionFilter } from './filters/validation-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -43,6 +44,9 @@ async function bootstrap() {
   });
 
   app.use(cookieParser());
+
+  // Apply global validation exception filter
+  app.useGlobalFilters(new ValidationExceptionFilter());
 
   const config = new DocumentBuilder()
     .setTitle('Rosedesvins API')

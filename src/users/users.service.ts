@@ -4,19 +4,7 @@ import { Model } from 'mongoose';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { User, UserRole, AccountStatus } from '../schemas/user.schema';
-
-export interface CreateAdminDto {
-  firstName: string;
-  lastName: string;
-  email: string;
-  password: string;
-  domainName?: string;
-}
-
-export interface AdminLoginDto {
-  email: string;
-  password: string;
-}
+import { CreateAdminDto, AdminLoginDto } from '../validators/admin.validators';
 
 export interface AdminLoginResponse {
   user: {
@@ -161,5 +149,19 @@ export class UsersService {
     return await this.userModel.find({
       role: UserRole.ADMIN,
     }).select('-password');
+  }
+
+  async getAdminProfile(adminId: string): Promise<User> {
+    const admin = await this.userModel.findOne({
+      _id: adminId,
+      role: UserRole.ADMIN,
+      accountStatus: { $in: [AccountStatus.ACTIVE, AccountStatus.APPROVED] }
+    }).select('-password');
+
+    if (!admin) {
+      throw new UnauthorizedException('Admin not found or access denied');
+    }
+
+    return admin;
   }
 }

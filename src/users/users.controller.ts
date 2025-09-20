@@ -1,9 +1,16 @@
-import { Controller, Post, Body, Res, HttpStatus, Get, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Res, HttpStatus, Get, UseGuards, UsePipes } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { Response } from 'express';
-import { UsersService, CreateAdminDto, AdminLoginDto } from './users.service';
+import { UsersService } from './users.service';
 import { AdminGuard } from '../guards/admin.guard';
 import { CurrentAdmin } from '../decorators/current-admin.decorator';
+import { ZodValidationPipe } from '../pipes/zod-validation.pipe';
+import { 
+  CreateAdminSchema, 
+  AdminLoginSchema, 
+  CreateAdminDto, 
+  AdminLoginDto 
+} from '../validators/admin.validators';
 
 @ApiTags('Admin')
 @Controller('users')
@@ -25,6 +32,7 @@ export class UsersController {
       required: ['firstName', 'lastName', 'email', 'password']
     }
   })
+  @UsePipes(new ZodValidationPipe(CreateAdminSchema))
   async createAdminUser(@Body() createAdminDto: CreateAdminDto) {
     try {
       const admin = await this.usersService.createAdminUser(createAdminDto);
@@ -54,6 +62,7 @@ export class UsersController {
       required: ['email', 'password']
     }
   })
+  @UsePipes(new ZodValidationPipe(AdminLoginSchema))
   async adminLogin(
     @Body() adminLoginDto: AdminLoginDto,
     @Res({ passthrough: true }) response: Response,
@@ -114,5 +123,23 @@ export class UsersController {
       success: true,
       message: 'Admin logout successful',
     };
+  }
+
+  @Get('admin/me')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Get current admin profile' })
+  @ApiBearerAuth('admin-token')
+  async getAdminProfile(@CurrentAdmin() currentAdmin: any) {
+    try {
+      const admin = await this.usersService.getAdminProfile(currentAdmin.sub);
+      
+      return {
+        success: true,
+        message: 'Admin profile retrieved successfully',
+        data: admin,
+      };
+    } catch (error) {
+      throw error;
+    }
   }
 }
