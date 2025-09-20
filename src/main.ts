@@ -22,22 +22,21 @@ async function bootstrap() {
   const clientUrls = configService.get<string>('CLIENT_URLS');
   const origins = clientUrls ? clientUrls.split(',').map(url => url.trim()) : [];
 
-  if (origins.length > 0) {
-    app.enableCors({
-      origin: origins,
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-      allowedHeaders: [
-        'Origin',
-        'X-Requested-With',
-        'Content-Type',
-        'Accept',
-        'Authorization',
-        'Cookie',
-      ],
-      exposedHeaders: ['Set-Cookie'],
-    });
-  }
+  // Enable CORS for development and production
+  app.enableCors({
+    origin: origins.length > 0 ? origins : true, // Allow all origins if CLIENT_URLS not set
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: [
+      'Origin',
+      'X-Requested-With',
+      'Content-Type',
+      'Accept',
+      'Authorization',
+      'Cookie',
+    ],
+    exposedHeaders: ['Set-Cookie'],
+  });
 
   app.useStaticAssets(join(__dirname, '..', 'uploads'), {
     prefix: '/uploads',
