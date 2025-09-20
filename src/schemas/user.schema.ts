@@ -41,7 +41,8 @@ export class User extends Document {
   @Prop({
     type: String,
     required: function() {
-      return this.accountStatus !== AccountStatus.PENDING_APPROVAL;
+      return this.accountStatus !== AccountStatus.PENDING_APPROVAL && 
+             this.accountStatus !== AccountStatus.REJECTED;
     }
   })
   password: string;

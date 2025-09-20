@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{title}}</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #2C2C2C;
+            background-color: #f8faf9;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 8px 24px rgba(58, 123, 89, 0.1);
+            border: 1px solid #e8f1ed;
+        }
+        .header {
+            background: linear-gradient(135deg, #3A7B59 0%, #2d5f44 100%);
+            color: #ffffff;
+            padding: 40px 30px;
+            text-align: center;
+        }
+        .logo {
+            max-width: 120px;
+            height: auto;
+            margin-bottom: 15px;
+            border-radius: 8px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        .header p {
+            margin: 8px 0 0 0;
+            font-size: 16px;
+            opacity: 0.9;
+            font-weight: 300;
+        }
+        .content {
+            padding: 40px 30px;
+            background-color: #ffffff;
+        }
+        .content h2 {
+            color: #3A7B59;
+            margin-top: 0;
+            margin-bottom: 20px;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        .content p {
+            margin-bottom: 16px;
+            color: #4a5568;
+            font-size: 16px;
+            line-height: 1.6;
+        }
+        .button {
+            display: inline-block;
+            padding: 14px 32px;
+            background: linear-gradient(135deg, #3A7B59 0%, #2d5f44 100%);
+            color: #ffffff !important;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 16px;
+            margin: 20px 0;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(58, 123, 89, 0.3);
+        }
+        .button:hover {
+            background: linear-gradient(135deg, #2d5f44 0%, #1f4230 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(58, 123, 89, 0.4);
+        }
+        .footer {
+            background-color: #f8faf9;
+            padding: 30px;
+            text-align: center;
+            border-top: 1px solid #e8f1ed;
+        }
+        .footer p {
+            margin: 0;
+            color: #718096;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .footer .divider {
+            margin: 15px 0;
+            height: 1px;
+            background-color: #e8f1ed;
+        }
+        .highlight {
+            background: linear-gradient(135deg, #f0f7f3 0%, #e8f1ed 100%);
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #3A7B59;
+            margin: 24px 0;
+        }
+        .highlight p {
+            margin: 0;
+            color: #3A7B59;
+            font-weight: 600;
+        }
+        .credentials {
+            background-color: #f8faf9;
+            padding: 24px;
+            border-radius: 8px;
+            margin: 24px 0;
+            border: 1px solid #e8f1ed;
+        }
+        .credentials h3 {
+            margin-top: 0;
+            margin-bottom: 16px;
+            color: #3A7B59;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .credentials .field {
+            margin-bottom: 12px;
+            padding: 12px;
+            background-color: #ffffff;
+            border-radius: 6px;
+            border: 1px solid #e8f1ed;
+        }
+        .credentials .field strong {
+            color: #3A7B59;
+            font-weight: 600;
+            display: inline-block;
+            min-width: 120px;
+        }
+        .credentials .field span {
+            color: #2C2C2C;
+            font-family: 'Courier New', monospace;
+            background-color: #f8faf9;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        .warning {
+            background: linear-gradient(135deg, #fff8e1 0%, #fff3c4 100%);
+            border-left: 4px solid #f59e0b;
+            padding: 16px 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        .warning p {
+            margin: 0;
+            color: #92400e;
+            font-weight: 500;
+        }
+        .success {
+            background: linear-gradient(135deg, #f0f7f3 0%, #e8f1ed 100%);
+            border-left: 4px solid #3A7B59;
+            padding: 16px 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        .success p {
+            margin: 0;
+            color: #3A7B59;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            {{#if logoUrl}}
+            <img src="{{logoUrl}}" alt="{{companyName}}" class="logo">
+            {{/if}}
+            <h1>{{companyName}}</h1>
+            {{#if subtitle}}
+            <p>{{subtitle}}</p>
+            {{/if}}
+        </div>
+        <div class="content">
+            {{{content}}}
+        </div>
+        <div class="footer">
+            <p><strong>© {{currentYear}} {{companyName}}. All rights reserved.</strong></p>
+            <div class="divider"></div>
+            <p>This email was sent automatically. Please do not reply to this email.</p>
+            {{#if supportEmail}}
+            <p>For support, please contact us at <a href="mailto:{{supportEmail}}" style="color: #3A7B59; text-decoration: none;">{{supportEmail}}</a></p>
+            {{/if}}
+        </div>
+    </div>
+</body>
+</html>

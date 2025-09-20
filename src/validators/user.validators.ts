@@ -40,5 +40,15 @@ export const PaginationQuerySchema = z.object({
     .refine((val) => val >= 1 && val <= 50, 'Limit must be between 1 and 50'),
 });
 
+export const UserActionSchema = z.object({
+  userId: z
+    .string()
+    .min(1, 'User ID is required'),
+  
+  action: z
+    .enum(['approve', 'reject']),
+});
+
 export type ContactFormDto = z.infer<typeof ContactFormSchema>;
 export type PaginationQueryDto = z.infer<typeof PaginationQuerySchema>;
+export type UserActionDto = z.infer<typeof UserActionSchema>;

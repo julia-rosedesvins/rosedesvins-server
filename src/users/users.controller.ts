@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Res, HttpStatus, Get, UseGuards, UsePipes, Query } from '@nestjs/common';
+import { Controller, Post, Body, Res, HttpStatus, Get, UseGuards, UsePipes, Query, Put, Param } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBody, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { Response } from 'express';
 import { UsersService } from './users.service';
@@ -15,7 +15,9 @@ import {
   ContactFormSchema, 
   ContactFormDto,
   PaginationQuerySchema,
-  PaginationQueryDto
+  PaginationQueryDto,
+  UserActionSchema,
+  UserActionDto
 } from '../validators/user.validators';
 
 @ApiTags('Admin')
@@ -223,6 +225,42 @@ export class UsersController {
         message: 'Approved users retrieved successfully',
         data: result.users,
         pagination: result.pagination,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Put('admin/user-action')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Approve or reject a user account' })
+  @ApiBearerAuth('admin-token')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        userId: { type: 'string', example: '60d0fe4f5311236168a109ca' },
+        action: { type: 'string', enum: ['approve', 'reject'], example: 'approve' }
+      },
+      required: ['userId', 'action']
+    }
+  })
+  async processUserAction(
+    @Body(new ZodValidationPipe(UserActionSchema)) userActionDto: UserActionDto,
+    @CurrentAdmin() currentAdmin: any
+  ) {
+    try {
+      const user = await this.usersService.processUserAction(userActionDto, currentAdmin.sub);
+      
+      // Remove sensitive fields from response
+      const { password, loginToken, ...userResponse } = user.toObject();
+      
+      return {
+        success: true,
+        message: userActionDto.action === 'approve' 
+          ? 'User account approved successfully. Login credentials sent via email.' 
+          : 'User account rejected successfully. Notification sent via email.',
+        data: userResponse,
       };
     } catch (error) {
       throw error;

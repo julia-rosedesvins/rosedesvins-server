@@ -1,11 +1,12 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { User, UserRole, AccountStatus } from '../schemas/user.schema';
 import { CreateAdminDto, AdminLoginDto } from '../validators/admin.validators';
-import { ContactFormDto } from '../validators/user.validators';
+import { ContactFormDto, UserActionDto } from '../validators/user.validators';
+import { EmailService } from '../email/email.service';
 
 export interface AdminLoginResponse {
   user: {
@@ -37,9 +38,12 @@ export interface PaginatedUsersResponse {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
     private jwtService: JwtService,
+    private emailService: EmailService,
   ) {}
 
   async createAdminUser(createAdminDto: CreateAdminDto): Promise<User> {
@@ -207,7 +211,21 @@ export class UsersService {
       submittedAt: new Date(),
     });
 
-    return await newUser.save();
+    const savedUser = await newUser.save();
+
+    // Send email notification to admin about new contact form submission
+    try {
+      await this.emailService.sendContactFormNotification({
+        fullName: `${firstName} ${lastName}`,
+        email: email.toLowerCase(),
+        domain: domainName,
+      });
+    } catch (emailError) {
+      console.error('Failed to send contact form notification email:', emailError);
+      // Don't fail the user creation if email fails
+    }
+
+    return savedUser;
   }
 
   async getPendingApprovalUsers(query: PaginationQuery): Promise<PaginatedUsersResponse> {
@@ -284,5 +302,99 @@ export class UsersService {
         hasPrevPage: page > 1,
       },
     };
+  }
+
+  private generateRandomPassword(length: number = 12): string {
+    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+    let password = '';
+    
+    // Ensure at least one character from each category
+    const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+    const numbers = '0123456789';
+    const symbols = '!@#$%^&*';
+    
+    password += uppercase[Math.floor(Math.random() * uppercase.length)];
+    password += lowercase[Math.floor(Math.random() * lowercase.length)];
+    password += numbers[Math.floor(Math.random() * numbers.length)];
+    password += symbols[Math.floor(Math.random() * symbols.length)];
+    
+    // Fill the rest of the password length
+    for (let i = 4; i < length; i++) {
+      password += charset[Math.floor(Math.random() * charset.length)];
+    }
+    
+    // Shuffle the password
+    return password.split('').sort(() => Math.random() - 0.5).join('');
+  }
+
+  async processUserAction(userActionDto: UserActionDto, adminId: string): Promise<User> {
+    const { userId, action } = userActionDto;
+
+    // Find the user
+    const user = await this.userModel.findOne({
+      _id: userId,
+      role: UserRole.USER,
+      accountStatus: AccountStatus.PENDING_APPROVAL,
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found or not in pending approval status');
+    }
+
+    if (action === 'approve') {
+      // Generate random password
+      const randomPassword = this.generateRandomPassword();
+      const saltRounds = 12;
+      const hashedPassword = await bcrypt.hash(randomPassword, saltRounds);
+
+      // Update user status to approved
+      user.accountStatus = AccountStatus.APPROVED;
+      user.password = hashedPassword;
+      user.approvedBy = adminId;
+      user.approvedAt = new Date();
+      user.mustChangePassword = true;
+
+      const savedUser = await user.save();
+
+      // Send welcome email with account details
+      try {
+        await this.emailService.sendWelcomeEmail({
+          fullName: `${user.firstName} ${user.lastName}`,
+          email: user.email,
+          password: randomPassword,
+          domain: user.domainName,
+        });
+      } catch (emailError) {
+        this.logger.error('Failed to send welcome email:', emailError);
+        // Don't fail the approval process if email fails
+      }
+
+      return savedUser;
+
+    } else if (action === 'reject') {
+      // Update user status to rejected
+      user.accountStatus = AccountStatus.REJECTED;
+      user.approvedBy = adminId;
+      user.approvedAt = new Date();
+
+      const savedUser = await user.save();
+
+      // Send rejection email
+      try {
+        await this.emailService.sendRejectionEmail({
+          fullName: `${user.firstName} ${user.lastName}`,
+          email: user.email,
+          domain: user.domainName,
+        });
+      } catch (emailError) {
+        this.logger.error('Failed to send rejection email:', emailError);
+        // Don't fail the rejection process if email fails
+      }
+
+      return savedUser;
+    }
+
+    throw new BadRequestException('Invalid action specified');
   }
 }

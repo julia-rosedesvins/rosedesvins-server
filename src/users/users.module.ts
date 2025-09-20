@@ -5,6 +5,7 @@ import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
 import { User, UserSchema } from '../schemas/user.schema';
 import { AdminGuard } from '../guards/admin.guard';
+import { EmailModule } from '../email/email.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { AdminGuard } from '../guards/admin.guard';
       secret: process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production',
       signOptions: { expiresIn: '24h' },
     }),
+    EmailModule,
   ],
   controllers: [UsersController],
   providers: [UsersService, AdminGuard],
