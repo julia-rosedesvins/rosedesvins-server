@@ -1,5 +1,5 @@
-import { Controller, Post, Body, Res, HttpStatus, Get, UseGuards, UsePipes } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Post, Body, Res, HttpStatus, Get, UseGuards, UsePipes, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBody, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { Response } from 'express';
 import { UsersService } from './users.service';
 import { AdminGuard } from '../guards/admin.guard';
@@ -13,7 +13,9 @@ import {
 } from '../validators/admin.validators';
 import { 
   ContactFormSchema, 
-  ContactFormDto 
+  ContactFormDto,
+  PaginationQuerySchema,
+  PaginationQueryDto
 } from '../validators/user.validators';
 
 @ApiTags('Admin')
@@ -173,6 +175,54 @@ export class UsersController {
         success: true,
         message: 'Contact form submitted successfully. Your application is pending approval.',
         data: userResponse,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Get('admin/pending-approval')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Get users with pending approval status (paginated)' })
+  @ApiBearerAuth('admin-token')
+  @ApiQuery({ name: 'page', required: false, type: Number, example: 1, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10, description: 'Items per page (default: 10, max: 50)' })
+  async getPendingApprovalUsers(
+    @CurrentAdmin() currentAdmin: any,
+    @Query(new ZodValidationPipe(PaginationQuerySchema)) query: PaginationQueryDto
+  ) {
+    try {
+      const result = await this.usersService.getPendingApprovalUsers(query);
+      
+      return {
+        success: true,
+        message: 'Pending approval users retrieved successfully',
+        data: result.users,
+        pagination: result.pagination,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Get('admin/approved')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Get approved/active users (paginated)' })
+  @ApiBearerAuth('admin-token')
+  @ApiQuery({ name: 'page', required: false, type: Number, example: 1, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10, description: 'Items per page (default: 10, max: 50)' })
+  async getApprovedUsers(
+    @CurrentAdmin() currentAdmin: any,
+    @Query(new ZodValidationPipe(PaginationQuerySchema)) query: PaginationQueryDto
+  ) {
+    try {
+      const result = await this.usersService.getApprovedUsers(query);
+      
+      return {
+        success: true,
+        message: 'Approved users retrieved successfully',
+        data: result.users,
+        pagination: result.pagination,
       };
     } catch (error) {
       throw error;

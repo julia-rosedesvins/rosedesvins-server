@@ -26,4 +26,19 @@ export const ContactFormSchema = z.object({
     .trim(),
 });
 
+export const PaginationQuerySchema = z.object({
+  page: z
+    .string()
+    .optional()
+    .transform((val) => val ? parseInt(val, 10) : 1)
+    .refine((val) => val >= 1, 'Page must be greater than 0'),
+  
+  limit: z
+    .string()
+    .optional()
+    .transform((val) => val ? parseInt(val, 10) : 10)
+    .refine((val) => val >= 1 && val <= 50, 'Limit must be between 1 and 50'),
+});
+
 export type ContactFormDto = z.infer<typeof ContactFormSchema>;
+export type PaginationQueryDto = z.infer<typeof PaginationQuerySchema>;

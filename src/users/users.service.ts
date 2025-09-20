@@ -18,6 +18,23 @@ export interface AdminLoginResponse {
   token: string;
 }
 
+export interface PaginationQuery {
+  page?: number;
+  limit?: number;
+}
+
+export interface PaginatedUsersResponse {
+  users: User[];
+  pagination: {
+    currentPage: number;
+    totalPages: number;
+    totalUsers: number;
+    limit: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
+  };
+}
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -191,5 +208,81 @@ export class UsersService {
     });
 
     return await newUser.save();
+  }
+
+  async getPendingApprovalUsers(query: PaginationQuery): Promise<PaginatedUsersResponse> {
+    const page = Math.max(1, query.page || 1);
+    const limit = Math.min(50, Math.max(1, query.limit || 10)); // Max 50 per page, default 10
+    const skip = (page - 1) * limit;
+
+    // Get total count for pagination
+    const totalUsers = await this.userModel.countDocuments({
+      role: UserRole.USER,
+      accountStatus: AccountStatus.PENDING_APPROVAL,
+    });
+
+    // Get users with pagination
+    const users = await this.userModel
+      .find({
+        role: UserRole.USER,
+        accountStatus: AccountStatus.PENDING_APPROVAL,
+      })
+      .select('-password -loginToken')
+      .sort({ submittedAt: -1 }) // Most recent first
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalPages = Math.ceil(totalUsers / limit);
+
+    return {
+      users: users as User[],
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalUsers,
+        limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    };
+  }
+
+  async getApprovedUsers(query: PaginationQuery): Promise<PaginatedUsersResponse> {
+    const page = Math.max(1, query.page || 1);
+    const limit = Math.min(50, Math.max(1, query.limit || 10)); // Max 50 per page, default 10
+    const skip = (page - 1) * limit;
+
+    // Get total count for pagination
+    const totalUsers = await this.userModel.countDocuments({
+      role: UserRole.USER,
+      accountStatus: { $in: [AccountStatus.APPROVED, AccountStatus.ACTIVE] },
+    });
+
+    // Get users with pagination
+    const users = await this.userModel
+      .find({
+        role: UserRole.USER,
+        accountStatus: { $in: [AccountStatus.APPROVED, AccountStatus.ACTIVE] },
+      })
+      .select('-password -loginToken')
+      .sort({ approvedAt: -1, createdAt: -1 }) // Most recently approved first
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalPages = Math.ceil(totalUsers / limit);
+
+    return {
+      users: users as User[],
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalUsers,
+        limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    };
   }
 }
