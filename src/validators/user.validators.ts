@@ -49,6 +49,19 @@ export const UserActionSchema = z.object({
     .enum(['approve', 'reject']),
 });
 
+export const UserLoginSchema = z.object({
+  email: z
+    .string()
+    .email('Invalid email format')
+    .toLowerCase()
+    .max(255, 'Email must not exceed 255 characters'),
+  
+  password: z
+    .string()
+    .min(1, 'Password is required'),
+});
+
 export type ContactFormDto = z.infer<typeof ContactFormSchema>;
 export type PaginationQueryDto = z.infer<typeof PaginationQuerySchema>;
 export type UserActionDto = z.infer<typeof UserActionSchema>;
+export type UserLoginDto = z.infer<typeof UserLoginSchema>;

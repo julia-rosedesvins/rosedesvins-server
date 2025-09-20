@@ -3,7 +3,9 @@ import { ApiTags, ApiOperation, ApiBody, ApiBearerAuth, ApiQuery } from '@nestjs
 import { Response } from 'express';
 import { UsersService } from './users.service';
 import { AdminGuard } from '../guards/admin.guard';
+import { UserGuard } from '../guards/user.guard';
 import { CurrentAdmin } from '../decorators/current-admin.decorator';
+import { CurrentUser } from '../decorators/current-user.decorator';
 import { ZodValidationPipe } from '../pipes/zod-validation.pipe';
 import { 
   CreateAdminSchema, 
@@ -17,7 +19,9 @@ import {
   PaginationQuerySchema,
   PaginationQueryDto,
   UserActionSchema,
-  UserActionDto
+  UserActionDto,
+  UserLoginSchema,
+  UserLoginDto
 } from '../validators/user.validators';
 
 @ApiTags('Admin')
@@ -89,6 +93,46 @@ export class UsersController {
       return {
         success: true,
         message: 'Admin login successful',
+        data: {
+          user: loginResult.user,
+        },
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Post('login')
+  @ApiOperation({ summary: 'User login' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        email: { type: 'string', example: 'user@example.com' },
+        password: { type: 'string', example: 'UserPassword123!' }
+      },
+      required: ['email', 'password']
+    }
+  })
+  @UsePipes(new ZodValidationPipe(UserLoginSchema))
+  async userLogin(
+    @Body() userLoginDto: UserLoginDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    try {
+      const loginResult = await this.usersService.userLogin(userLoginDto);
+
+      // Set JWT token in httpOnly cookie
+      response.cookie('user_token', loginResult.token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
+        sameSite: 'strict',
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      });
+
+      return {
+        success: true,
+        message: 'User login successful',
         data: {
           user: loginResult.user,
         },
@@ -285,6 +329,46 @@ export class UsersController {
           ? 'User account approved successfully. Login credentials sent via email.' 
           : 'User account rejected successfully. Notification sent via email.',
         data: userResponse,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Get('me')
+  @UseGuards(UserGuard)
+  @ApiOperation({ summary: 'Get current user profile' })
+  @ApiBearerAuth('user-token')
+  async getCurrentUser(@CurrentUser() currentUser: any) {
+    try {
+      const user = await this.usersService.getUserProfile(currentUser.sub);
+      
+      return {
+        success: true,
+        message: 'User profile retrieved successfully',
+        data: user,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Post('logout')
+  @UseGuards(UserGuard)
+  @ApiOperation({ summary: 'User logout' })
+  @ApiBearerAuth('user-token')
+  async userLogout(@Res({ passthrough: true }) response: Response) {
+    try {
+      // Clear the user token cookie
+      response.clearCookie('user_token', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+      });
+
+      return {
+        success: true,
+        message: 'User logout successful',
       };
     } catch (error) {
       throw error;

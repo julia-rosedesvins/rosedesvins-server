@@ -5,7 +5,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { User, UserRole, AccountStatus } from '../schemas/user.schema';
 import { CreateAdminDto, AdminLoginDto } from '../validators/admin.validators';
-import { ContactFormDto, UserActionDto } from '../validators/user.validators';
+import { ContactFormDto, UserActionDto, UserLoginDto } from '../validators/user.validators';
 import { EmailService } from '../email/email.service';
 
 export interface AdminLoginResponse {
@@ -15,6 +15,20 @@ export interface AdminLoginResponse {
     lastName: string;
     email: string;
     role: UserRole;
+  };
+  token: string;
+}
+
+export interface UserLoginResponse {
+  user: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    role: UserRole;
+    domainName: string;
+    mustChangePassword: boolean;
+    firstLogin: boolean;
   };
   token: string;
 }
@@ -160,6 +174,88 @@ export class UsersService {
     };
   }
 
+  async userLogin(userLoginDto: UserLoginDto): Promise<UserLoginResponse> {
+    const { email, password } = userLoginDto;
+
+    // Find user
+    const user = await this.userModel.findOne({
+      email: email.toLowerCase(),
+      role: UserRole.USER,
+      accountStatus: { $in: [AccountStatus.APPROVED, AccountStatus.ACTIVE] }
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials or account not approved');
+    }
+
+    // Check if account is suspended
+    if (user.accountStatus === AccountStatus.SUSPENDED) {
+      throw new UnauthorizedException('User account is suspended');
+    }
+
+    // Check if account is locked
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      throw new UnauthorizedException('User account is temporarily locked');
+    }
+
+    // Verify password
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+
+    if (!isPasswordValid) {
+      // Increment login attempts
+      user.loginAttempts += 1;
+      
+      // Lock account if too many failed attempts (5 attempts)
+      if (user.loginAttempts >= 5) {
+        user.lockedUntil = new Date(Date.now() + 30 * 60 * 1000); // Lock for 30 minutes
+      }
+      
+      await user.save();
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Reset login attempts on successful login
+    user.loginAttempts = 0;
+    user.lockedUntil = null as any;
+    user.lastLoginAt = new Date();
+    
+    // Check if this is the first login
+    const isFirstLogin = !user.firstLoginAt;
+    if (isFirstLogin) {
+      user.firstLoginAt = new Date();
+    }
+    
+    await user.save();
+
+    // Generate JWT token
+    const payload = {
+      sub: user._id,
+      email: user.email,
+      role: user.role,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      domainName: user.domainName,
+    };
+
+    const token = this.jwtService.sign(payload, {
+      expiresIn: '24h', // Token expires in 24 hours
+    });
+
+    return {
+      user: {
+        id: (user._id as any).toString(),
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        role: user.role,
+        domainName: user.domainName,
+        mustChangePassword: user.mustChangePassword,
+        firstLogin: isFirstLogin,
+      },
+      token,
+    };
+  }
+
   async findAdminByEmail(email: string): Promise<User | null> {
     return await this.userModel.findOne({
       email: email.toLowerCase(),
@@ -185,6 +281,20 @@ export class UsersService {
     }
 
     return admin;
+  }
+
+  async getUserProfile(userId: string): Promise<User> {
+    const user = await this.userModel.findOne({
+      _id: userId,
+      role: UserRole.USER,
+      accountStatus: { $in: [AccountStatus.ACTIVE, AccountStatus.APPROVED] }
+    }).select('-password -loginToken');
+
+    if (!user) {
+      throw new UnauthorizedException('User not found or access denied');
+    }
+
+    return user;
   }
 
   async submitContactForm(contactFormDto: ContactFormDto): Promise<User> {
