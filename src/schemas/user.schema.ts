@@ -62,6 +62,41 @@ export class User extends Document {
 
   @Prop({
     type: String,
+    required: false,
+    default: null
+  })
+  phoneNumber: string;
+
+  @Prop({
+    type: String,
+    required: false,
+    default: null
+  })
+  address: string;
+
+  @Prop({
+    type: String,
+    required: false,
+    default: null
+  })
+  codePostal: string;
+
+  @Prop({
+    type: String,
+    required: false,
+    default: null
+  })
+  city: string;
+
+  @Prop({
+    type: String,
+    required: false,
+    default: null
+  })
+  siteWeb: string;
+
+  @Prop({
+    type: String,
     enum: AccountStatus,
     default: AccountStatus.PENDING_APPROVAL
   })
