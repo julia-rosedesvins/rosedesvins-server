@@ -5,7 +5,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { User, UserRole, AccountStatus } from '../schemas/user.schema';
 import { CreateAdminDto, AdminLoginDto } from '../validators/admin.validators';
-import { ContactFormDto, UserActionDto, UserLoginDto } from '../validators/user.validators';
+import { ContactFormDto, UserActionDto, UserLoginDto, ChangePasswordDto } from '../validators/user.validators';
 import { EmailService } from '../email/email.service';
 
 export interface AdminLoginResponse {
@@ -544,5 +544,50 @@ export class UsersService {
     }
 
     throw new BadRequestException('Invalid action specified');
+  }
+
+  async changeUserPassword(changePasswordDto: ChangePasswordDto, userId: string): Promise<{ message: string }> {
+    const { currentPassword, newPassword } = changePasswordDto;
+
+    // Find the user
+    const user = await this.userModel.findOne({
+      _id: userId,
+      role: UserRole.USER,
+      accountStatus: { $in: [AccountStatus.APPROVED, AccountStatus.ACTIVE] }
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found or access denied');
+    }
+
+    // Verify current password
+    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+
+    if (!isCurrentPasswordValid) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    // Check if new password is different from current password
+    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+    if (isSamePassword) {
+      throw new BadRequestException('New password must be different from current password');
+    }
+
+    // Hash the new password
+    const saltRounds = 12;
+    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update user password and related fields
+    user.password = hashedNewPassword;
+    user.mustChangePassword = false;
+    user.lastPasswordChange = new Date();
+    
+    await user.save();
+
+    this.logger.log(`User ${user.email} successfully changed password`);
+
+    return {
+      message: 'Password changed successfully'
+    };
   }
 }

@@ -21,7 +21,9 @@ import {
   UserActionSchema,
   UserActionDto,
   UserLoginSchema,
-  UserLoginDto
+  UserLoginDto,
+  ChangePasswordSchema,
+  ChangePasswordDto
 } from '../validators/user.validators';
 
 @ApiTags('Admin')
@@ -369,6 +371,36 @@ export class UsersController {
       return {
         success: true,
         message: 'User logout successful',
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Post('change-password')
+  @UseGuards(UserGuard)
+  @ApiOperation({ summary: 'Change user password' })
+  @ApiBearerAuth('user-token')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        currentPassword: { type: 'string', example: 'CurrentPassword123!' },
+        newPassword: { type: 'string', example: 'NewPassword123!' }
+      },
+      required: ['currentPassword', 'newPassword']
+    }
+  })
+  async changeUserPassword(
+    @Body(new ZodValidationPipe(ChangePasswordSchema)) changePasswordDto: ChangePasswordDto,
+    @CurrentUser() user: any
+  ) {
+    try {
+      const result = await this.usersService.changeUserPassword(changePasswordDto, user.sub);
+      
+      return {
+        success: true,
+        message: result.message,
       };
     } catch (error) {
       throw error;
