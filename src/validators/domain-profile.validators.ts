@@ -1,13 +1,13 @@
 import { z } from 'zod';
 
 const ServiceSchema = z.object({
-  name: z
+  serviceName: z
     .string()
     .min(2, 'Service name must be at least 2 characters')
     .max(100, 'Service name must not exceed 100 characters')
     .trim(),
   
-  description: z
+  serviceDescription: z
     .string()
     .min(10, 'Service description must be at least 10 characters')
     .max(1000, 'Service description must not exceed 1000 characters')
@@ -50,35 +50,47 @@ export const CreateOrUpdateDomainProfileSchema = z.object({
     .string()
     .min(2, 'Domain name must be at least 2 characters')
     .max(100, 'Domain name must not exceed 100 characters')
-    .trim(),
+    .trim()
+    .optional(),
   
   domainDescription: z
     .string()
     .min(10, 'Domain description must be at least 10 characters')
     .max(2000, 'Domain description must not exceed 2000 characters')
-    .trim(),
+    .trim()
+    .optional(),
+
+  domainType: z
+    .string()
+    .max(100, 'Domain type must not exceed 100 characters')
+    .trim()
+    .optional(),
+
+  domainTag: z
+    .string()
+    .max(100, 'Domain tag must not exceed 100 characters')
+    .trim()
+    .optional(),
   
   domainProfilePictureUrl: z
     .string()
-    .url('Invalid profile picture URL')
     .max(500, 'Profile picture URL must not exceed 500 characters')
     .optional(),
   
   domainLogoUrl: z
     .string()
-    .url('Invalid logo URL')
     .max(500, 'Logo URL must not exceed 500 characters')
     .optional(),
   
-  colorCode: z
+  domainColor: z
     .string()
-    .regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/, 'Color code must be a valid hex color (e.g., #3A7B59 or #FFF)')
-    .default('#3A7B59'),
+    .regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/, 'Color must be a valid hex color (e.g., #3A7B59 or #FFF)')
+    .optional(),
   
   services: z
     .array(ServiceSchema)
     .max(20, 'Maximum 20 services allowed')
-    .default([])
+    .optional()
 });
 
 export type CreateOrUpdateDomainProfileDto = z.infer<typeof CreateOrUpdateDomainProfileSchema>;

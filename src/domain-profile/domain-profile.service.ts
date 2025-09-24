@@ -3,16 +3,20 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { DomainProfile } from '../schemas/domain-profile.schema';
 import { User } from '../schemas/user.schema';
+import { promises as fs } from 'fs';
+import { join } from 'path';
 
 export interface CreateOrUpdateDomainProfileServiceDto {
-  domainName: string;
-  domainDescription: string;
+  domainName?: string;
+  domainDescription?: string;
+  domainType?: string;
+  domainTag?: string;
+  domainColor?: string;
   domainProfilePictureUrl?: string;
   domainLogoUrl?: string;
-  colorCode: string;
-  services: Array<{
-    name: string;
-    description: string;
+  services?: Array<{
+    serviceName: string;
+    serviceDescription: string;
     numberOfPeople: number;
     pricePerPerson: number;
     timeOfServiceInMinutes: number;
@@ -31,32 +35,60 @@ export class DomainProfileService {
 
   async createOrUpdateDomainProfile(
     userId: string,
-    domainProfileDto: CreateOrUpdateDomainProfileServiceDto
+    domainProfileDto: CreateOrUpdateDomainProfileServiceDto,
+    files?: { 
+      domainProfilePicture?: Express.Multer.File[];
+      domainLogo?: Express.Multer.File[];
+    }
   ): Promise<{
     domainProfile: DomainProfile;
     isNew: boolean;
   }> {
     const userObjectId = new Types.ObjectId(userId);
 
-    // Update user's domain name
-    await this.userModel.findByIdAndUpdate(
-      userObjectId,
-      { domainName: domainProfileDto.domainName },
-      { new: true }
-    );
+    // Update user's domain name if provided
+    if (domainProfileDto.domainName) {
+      await this.userModel.findByIdAndUpdate(
+        userObjectId,
+        { domainName: domainProfileDto.domainName },
+        { new: true }
+      );
+    }
 
-    // Check if domain profile already exists
+    // Check if domain profile already exists for file cleanup
     const existingDomainProfile = await this.domainProfileModel.findOne({
       userId: userObjectId
     });
 
+    // Handle file uploads
+    let domainProfilePictureUrl = domainProfileDto.domainProfilePictureUrl;
+    let domainLogoUrl = domainProfileDto.domainLogoUrl;
+
+    if (files?.domainProfilePicture?.[0]) {
+      // Clean up old file if exists
+      if (existingDomainProfile?.domainProfilePictureUrl) {
+        await this.deleteFile(existingDomainProfile.domainProfilePictureUrl);
+      }
+      domainProfilePictureUrl = `/uploads/domain-profiles/${files.domainProfilePicture[0].filename}`;
+    }
+
+    if (files?.domainLogo?.[0]) {
+      // Clean up old file if exists
+      if (existingDomainProfile?.domainLogoUrl) {
+        await this.deleteFile(existingDomainProfile.domainLogoUrl);
+      }
+      domainLogoUrl = `/uploads/domain-profiles/${files.domainLogo[0].filename}`;
+    }
+
     const profileData = {
       userId: userObjectId,
       domainDescription: domainProfileDto.domainDescription,
-      domainProfilePictureUrl: domainProfileDto.domainProfilePictureUrl,
-      domainLogoUrl: domainProfileDto.domainLogoUrl,
-      colorCode: domainProfileDto.colorCode,
-      services: domainProfileDto.services
+      domainType: domainProfileDto.domainType,
+      domainTag: domainProfileDto.domainTag,
+      domainColor: domainProfileDto.domainColor,
+      domainProfilePictureUrl,
+      domainLogoUrl,
+      services: domainProfileDto.services || []
     };
 
     if (existingDomainProfile) {
@@ -106,5 +138,20 @@ export class DomainProfileService {
       .exec();
 
     return domainProfile;
+  }
+
+  /**
+   * Delete a file from the server
+   * @param filePath - The file path to delete (relative URL like /uploads/domain-profiles/filename.jpg)
+   */
+  private async deleteFile(filePath: string): Promise<void> {
+    try {
+      // Convert relative URL to absolute file path
+      const absolutePath = join(process.cwd(), filePath.replace(/^\//, ''));
+      await fs.unlink(absolutePath);
+      console.log(`Deleted file: ${absolutePath}`);
+    } catch (error) {
+      console.warn(`Failed to delete file ${filePath}:`, error.message);
+    }
   }
 }
