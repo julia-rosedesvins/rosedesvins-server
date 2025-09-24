@@ -149,9 +149,20 @@ export class DomainProfileService {
   async addService(userId: string, serviceData: any): Promise<DomainProfile> {
     const userObjectId = new Types.ObjectId(userId);
     
+    const mappedServiceData = {
+      name: serviceData.serviceName,
+      description: serviceData.serviceDescription,
+      numberOfPeople: serviceData.numberOfPeople,
+      pricePerPerson: serviceData.pricePerPerson,
+      timeOfServiceInMinutes: serviceData.timeOfServiceInMinutes,
+      numberOfWinesTasted: serviceData.numberOfWinesTasted,
+      languagesOffered: serviceData.languagesOffered,
+      isActive: serviceData.isActive
+    };
+    
     const domainProfile = await this.domainProfileModel.findOneAndUpdate(
       { userId: userObjectId },
-      { $push: { services: serviceData } },
+      { $push: { services: mappedServiceData } },
       { new: true, upsert: true }
     ).populate('userId', 'firstName lastName email domainName').exec();
 
@@ -174,7 +185,19 @@ export class DomainProfileService {
       .findOne({ userId: userObjectId })
       .exec();
 
-    return domainProfile?.services || [];
+    const services = domainProfile?.services || [];
+    
+    // Map database fields back to API format
+    return services.map(service => ({
+      serviceName: service.name,
+      serviceDescription: service.description,
+      numberOfPeople: service.numberOfPeople,
+      pricePerPerson: service.pricePerPerson,
+      timeOfServiceInMinutes: service.timeOfServiceInMinutes,
+      numberOfWinesTasted: service.numberOfWinesTasted,
+      languagesOffered: service.languagesOffered,
+      isActive: service.isActive
+    }));
   }
 
   /**
@@ -197,8 +220,40 @@ export class DomainProfileService {
       throw new NotFoundException('Service not found at the specified index');
     }
 
+    console.log('Update data before mapping:', JSON.stringify(updateData, null, 2));
+
+    // Map API fields to database schema fields
+    const mappedUpdateData: any = {};
+    
+    if (updateData.serviceName !== undefined) {
+      mappedUpdateData.name = updateData.serviceName;
+    }
+    if (updateData.serviceDescription !== undefined) {
+      mappedUpdateData.description = updateData.serviceDescription;
+    }
+    if (updateData.numberOfPeople !== undefined) {
+      mappedUpdateData.numberOfPeople = updateData.numberOfPeople;
+    }
+    if (updateData.pricePerPerson !== undefined) {
+      mappedUpdateData.pricePerPerson = updateData.pricePerPerson;
+    }
+    if (updateData.timeOfServiceInMinutes !== undefined) {
+      mappedUpdateData.timeOfServiceInMinutes = updateData.timeOfServiceInMinutes;
+    }
+    if (updateData.numberOfWinesTasted !== undefined) {
+      mappedUpdateData.numberOfWinesTasted = updateData.numberOfWinesTasted;
+    }
+    if (updateData.languagesOffered !== undefined) {
+      mappedUpdateData.languagesOffered = updateData.languagesOffered;
+    }
+    if (updateData.isActive !== undefined) {
+      mappedUpdateData.isActive = updateData.isActive;
+    }
+
+    console.log('Mapped update data for database:', JSON.stringify(mappedUpdateData, null, 2));
+
     // Update the service at the specified index
-    Object.assign(domainProfile.services[serviceIndex], updateData);
+    Object.assign(domainProfile.services[serviceIndex], mappedUpdateData);
     
     await domainProfile.save();
     

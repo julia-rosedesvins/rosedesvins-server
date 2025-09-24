@@ -20,6 +20,7 @@ import { DomainProfileService } from './domain-profile.service';
 import { z } from 'zod';
 import { domainProfileImageOptions } from '../common/multer.config';
 import { CreateOrUpdateDomainProfileSchema, CreateOrUpdateDomainProfileDto } from '../validators/domain-profile.validators';
+import { ServiceSchema, UpdateServiceSchema } from '../validators/service.validators';
 import { ZodValidationPipe } from '../pipes/zod-validation.pipe';
 import { CurrentUser } from 'src/decorators/current-user.decorator';
 
@@ -113,11 +114,11 @@ export class DomainProfileController {
         throw new HttpException({
           success: false,
           message: 'Validation failed',
-          errors: error.errors.map(err => ({
-            field: err.path.join('.'),
+          errors: error.errors?.map(err => ({
+            field: err.path?.join('.') || 'unknown',
             message: err.message,
             value: err.input
-          }))
+          })) || []
         }, HttpStatus.BAD_REQUEST);
       }
       throw error;
@@ -196,19 +197,8 @@ export class DomainProfileController {
     try {
       const userId = user.sub;
 
-      // Validate service data
-      const serviceSchema = z.object({
-        serviceName: z.string().min(2).max(100).trim(),
-        serviceDescription: z.string().min(10).max(1000).trim(),
-        numberOfPeople: z.number().int().min(1).max(100),
-        pricePerPerson: z.number().min(0).max(10000),
-        timeOfServiceInMinutes: z.number().int().min(15).max(1440),
-        numberOfWinesTasted: z.number().int().min(0),
-        languagesOffered: z.array(z.string().min(2)).min(1).max(10),
-        isActive: z.boolean().default(true)
-      });
+      const validatedService = ServiceSchema.parse(serviceData);
 
-      const validatedService = serviceSchema.parse(serviceData);
       const result = await this.domainProfileService.addService(userId, validatedService);
 
       return {
@@ -217,16 +207,15 @@ export class DomainProfileController {
         data: result
       };
     } catch (error) {
-      console.error('Error adding service:', error);
       if (error.name === 'ZodError') {
         throw new HttpException({
           success: false,
           message: 'Service validation failed',
-          errors: error.errors.map(err => ({
-            field: err.path.join('.'),
+          errors: error.errors?.map(err => ({
+            field: err.path?.join('.') || 'unknown',
             message: err.message,
             value: err.input
-          }))
+          })) || []
         }, HttpStatus.BAD_REQUEST);
       }
       throw error;
@@ -301,19 +290,10 @@ export class DomainProfileController {
         throw new HttpException('Invalid service index', HttpStatus.BAD_REQUEST);
       }
 
-      // Validate service data (all fields optional for updates)
-      const serviceSchema = z.object({
-        serviceName: z.string().min(2).max(100).trim().optional(),
-        serviceDescription: z.string().min(10).max(1000).trim().optional(),
-        numberOfPeople: z.number().int().min(1).max(100).optional(),
-        pricePerPerson: z.number().min(0).max(10000).optional(),
-        timeOfServiceInMinutes: z.number().int().min(15).max(1440).optional(),
-        numberOfWinesTasted: z.number().int().min(0).optional(),
-        languagesOffered: z.array(z.string().min(2)).min(1).max(10).optional(),
-        isActive: z.boolean().optional()
-      });
+      // Validate service data using the imported UpdateServiceSchema
+      const validatedService = UpdateServiceSchema.parse(serviceData);
 
-      const validatedService = serviceSchema.parse(serviceData);
+      console.log('Validated update service data:', JSON.stringify(validatedService, null, 2));
       const result = await this.domainProfileService.updateService(userId, index, validatedService);
 
       return {
@@ -327,11 +307,11 @@ export class DomainProfileController {
         throw new HttpException({
           success: false,
           message: 'Service validation failed',
-          errors: error.errors.map(err => ({
-            field: err.path.join('.'),
+          errors: error.errors?.map(err => ({
+            field: err.path?.join('.') || 'unknown',
             message: err.message,
             value: err.input
-          }))
+          })) || []
         }, HttpStatus.BAD_REQUEST);
       }
       throw error;
