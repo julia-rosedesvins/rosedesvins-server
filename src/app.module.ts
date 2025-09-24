@@ -6,9 +6,10 @@ import { UsersModule } from './users/users.module';
 import { EmailModule } from './email/email.module';
 import { ContactDetailsModule } from './contact-details/contact-details.module';
 import { SubscriptionModule } from './subscription/subscription.module';
+import { DomainProfileModule } from './domain-profile/domain-profile.module';
 
 @Module({
-  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule],
+  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule],
   controllers: [AppController],
   providers: [AppService],
 })
