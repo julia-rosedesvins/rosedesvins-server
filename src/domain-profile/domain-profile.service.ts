@@ -141,6 +141,140 @@ export class DomainProfileService {
   }
 
   /**
+   * Add a new service to user's domain profile
+   * @param userId - User ID
+   * @param serviceData - Service data to add
+   * @returns Updated domain profile
+   */
+  async addService(userId: string, serviceData: any): Promise<DomainProfile> {
+    const userObjectId = new Types.ObjectId(userId);
+    
+    const domainProfile = await this.domainProfileModel.findOneAndUpdate(
+      { userId: userObjectId },
+      { $push: { services: serviceData } },
+      { new: true, upsert: true }
+    ).populate('userId', 'firstName lastName email domainName').exec();
+
+    if (!domainProfile) {
+      throw new NotFoundException('Domain profile not found');
+    }
+
+    return domainProfile;
+  }
+
+  /**
+   * Get all services for user's domain profile
+   * @param userId - User ID
+   * @returns Array of services
+   */
+  async getServices(userId: string): Promise<any[]> {
+    const userObjectId = new Types.ObjectId(userId);
+    
+    const domainProfile = await this.domainProfileModel
+      .findOne({ userId: userObjectId })
+      .exec();
+
+    return domainProfile?.services || [];
+  }
+
+  /**
+   * Update a service by index
+   * @param userId - User ID
+   * @param serviceIndex - Index of the service to update
+   * @param updateData - Update data
+   * @returns Updated domain profile
+   */
+  async updateService(userId: string, serviceIndex: number, updateData: any): Promise<DomainProfile> {
+    const userObjectId = new Types.ObjectId(userId);
+    
+    const domainProfile = await this.domainProfileModel.findOne({ userId: userObjectId });
+    
+    if (!domainProfile) {
+      throw new NotFoundException('Domain profile not found');
+    }
+
+    if (serviceIndex >= domainProfile.services.length || serviceIndex < 0) {
+      throw new NotFoundException('Service not found at the specified index');
+    }
+
+    // Update the service at the specified index
+    Object.assign(domainProfile.services[serviceIndex], updateData);
+    
+    await domainProfile.save();
+    
+    const updatedProfile = await this.domainProfileModel
+      .findById(domainProfile._id)
+      .populate('userId', 'firstName lastName email domainName')
+      .exec();
+
+    if (!updatedProfile) {
+      throw new NotFoundException('Failed to retrieve updated domain profile');
+    }
+
+    return updatedProfile;
+  }
+
+  /**
+   * Delete a service by index
+   * @param userId - User ID
+   * @param serviceIndex - Index of the service to delete
+   */
+  async deleteService(userId: string, serviceIndex: number): Promise<void> {
+    const userObjectId = new Types.ObjectId(userId);
+    
+    const domainProfile = await this.domainProfileModel.findOne({ userId: userObjectId });
+    
+    if (!domainProfile) {
+      throw new NotFoundException('Domain profile not found');
+    }
+
+    if (serviceIndex >= domainProfile.services.length || serviceIndex < 0) {
+      throw new NotFoundException('Service not found at the specified index');
+    }
+
+    // Remove the service at the specified index
+    domainProfile.services.splice(serviceIndex, 1);
+    
+    await domainProfile.save();
+  }
+
+  /**
+   * Toggle service active status
+   * @param userId - User ID
+   * @param serviceIndex - Index of the service to toggle
+   * @returns Updated domain profile
+   */
+  async toggleServiceActive(userId: string, serviceIndex: number): Promise<DomainProfile> {
+    const userObjectId = new Types.ObjectId(userId);
+    
+    const domainProfile = await this.domainProfileModel.findOne({ userId: userObjectId });
+    
+    if (!domainProfile) {
+      throw new NotFoundException('Domain profile not found');
+    }
+
+    if (serviceIndex >= domainProfile.services.length || serviceIndex < 0) {
+      throw new NotFoundException('Service not found at the specified index');
+    }
+
+    // Toggle the isActive status
+    domainProfile.services[serviceIndex].isActive = !domainProfile.services[serviceIndex].isActive;
+    
+    await domainProfile.save();
+    
+    const updatedProfile = await this.domainProfileModel
+      .findById(domainProfile._id)
+      .populate('userId', 'firstName lastName email domainName')
+      .exec();
+
+    if (!updatedProfile) {
+      throw new NotFoundException('Failed to retrieve updated domain profile');
+    }
+
+    return updatedProfile;
+  }
+
+  /**
    * Delete a file from the server
    * @param filePath - The file path to delete (relative URL like /uploads/domain-profiles/filename.jpg)
    */

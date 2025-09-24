@@ -85,11 +85,6 @@ export const CreateOrUpdateDomainProfileSchema = z.object({
   domainColor: z
     .string()
     .regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/, 'Color must be a valid hex color (e.g., #3A7B59 or #FFF)')
-    .optional(),
-  
-  services: z
-    .array(ServiceSchema)
-    .max(20, 'Maximum 20 services allowed')
     .optional()
 });
 

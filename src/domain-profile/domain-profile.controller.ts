@@ -2,7 +2,10 @@ import {
   Controller,
   Post,
   Get,
+  Put,
+  Delete,
   Body,
+  Param,
   UseGuards,
   Request,
   HttpStatus,
@@ -53,10 +56,6 @@ export class DomainProfileController {
           type: 'string',
           format: 'binary',
           description: 'Domain logo file (JPEG, PNG, GIF, WebP, max 5MB)'
-        },
-        services: {
-          type: 'string',
-          description: 'JSON stringified array of services'
         }
       }
     }
@@ -76,31 +75,23 @@ export class DomainProfileController {
     try {
       const userId = user.sub;
 
-      // Parse services if provided as JSON string
-      let parsedServices;
-      if (body.services) {
-        try {
-          parsedServices = JSON.parse(body.services);
-        } catch (error) {
-          throw new HttpException('Invalid services JSON format', HttpStatus.BAD_REQUEST);
-        }
-      }
-
       // Files are already organized by FileFieldsInterceptor
       const organizedFiles = {
         domainProfilePicture: files?.domainProfilePicture,
         domainLogo: files?.domainLogo
       };
 
-      // Prepare data for validation and service
+      // Prepare data for validation and service (exclude services from main validation)
       const domainProfileData = {
         domainName: body.domainName,
         domainDescription: body.domainDescription,
         domainType: body.domainType,
         domainTag: body.domainTag,
         domainColor: body.domainColor,
-        services: parsedServices
+        // Remove services from here as they'll be managed separately
       };
+
+      console.log('Domain profile data for validation:', JSON.stringify(domainProfileData, null, 2));
 
       // Validate the data (excluding files)
       const validatedData = CreateOrUpdateDomainProfileSchema.parse(domainProfileData);
@@ -120,8 +111,13 @@ export class DomainProfileController {
       console.error('Error creating/updating domain profile:', error);
       if (error.name === 'ZodError') {
         throw new HttpException({
+          success: false,
           message: 'Validation failed',
-          errors: error.errors
+          errors: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            value: err.input
+          }))
         }, HttpStatus.BAD_REQUEST);
       }
       throw error;
@@ -158,6 +154,250 @@ export class DomainProfileController {
       };
     } catch (error) {
       console.error('Error retrieving domain profile:', error);
+      throw error;
+    }
+  }
+
+  // Service Management Endpoints
+  @Post('services')
+  @UseGuards(UserGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Add a new service to current user domain profile' })
+  @ApiBody({
+    description: 'Service data',
+    schema: {
+      type: 'object',
+      required: ['serviceName', 'serviceDescription', 'numberOfPeople', 'pricePerPerson', 'timeOfServiceInMinutes', 'numberOfWinesTasted', 'languagesOffered'],
+      properties: {
+        serviceName: { type: 'string', minLength: 2, maxLength: 100 },
+        serviceDescription: { type: 'string', minLength: 10, maxLength: 1000 },
+        numberOfPeople: { type: 'integer', minimum: 1, maximum: 100 },
+        pricePerPerson: { type: 'number', minimum: 0, maximum: 10000 },
+        timeOfServiceInMinutes: { type: 'integer', minimum: 15, maximum: 1440 },
+        numberOfWinesTasted: { type: 'integer', minimum: 0 },
+        languagesOffered: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
+          maxItems: 10
+        },
+        isActive: { type: 'boolean', default: true }
+      }
+    }
+  })
+  async addService(
+    @Body() serviceData: any,
+    @CurrentUser() user: any
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: any;
+  }> {
+    try {
+      const userId = user.sub;
+
+      // Validate service data
+      const serviceSchema = z.object({
+        serviceName: z.string().min(2).max(100).trim(),
+        serviceDescription: z.string().min(10).max(1000).trim(),
+        numberOfPeople: z.number().int().min(1).max(100),
+        pricePerPerson: z.number().min(0).max(10000),
+        timeOfServiceInMinutes: z.number().int().min(15).max(1440),
+        numberOfWinesTasted: z.number().int().min(0),
+        languagesOffered: z.array(z.string().min(2)).min(1).max(10),
+        isActive: z.boolean().default(true)
+      });
+
+      const validatedService = serviceSchema.parse(serviceData);
+      const result = await this.domainProfileService.addService(userId, validatedService);
+
+      return {
+        success: true,
+        message: 'Service added successfully',
+        data: result
+      };
+    } catch (error) {
+      console.error('Error adding service:', error);
+      if (error.name === 'ZodError') {
+        throw new HttpException({
+          success: false,
+          message: 'Service validation failed',
+          errors: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            value: err.input
+          }))
+        }, HttpStatus.BAD_REQUEST);
+      }
+      throw error;
+    }
+  }
+
+  @Get('services')
+  @UseGuards(UserGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get all services for current user domain profile' })
+  async getServices(
+    @CurrentUser() user: any
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: any[];
+  }> {
+    try {
+      const userId = user.sub;
+      const services = await this.domainProfileService.getServices(userId);
+
+      return {
+        success: true,
+        message: 'Services retrieved successfully',
+        data: services
+      };
+    } catch (error) {
+      console.error('Error retrieving services:', error);
+      throw error;
+    }
+  }
+
+  @Put('services/:serviceIndex')
+  @UseGuards(UserGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update a service by index' })
+  @ApiBody({
+    description: 'Updated service data',
+    schema: {
+      type: 'object',
+      properties: {
+        serviceName: { type: 'string', minLength: 2, maxLength: 100 },
+        serviceDescription: { type: 'string', minLength: 10, maxLength: 1000 },
+        numberOfPeople: { type: 'integer', minimum: 1, maximum: 100 },
+        pricePerPerson: { type: 'number', minimum: 0, maximum: 10000 },
+        timeOfServiceInMinutes: { type: 'integer', minimum: 15, maximum: 1440 },
+        numberOfWinesTasted: { type: 'integer', minimum: 0 },
+        languagesOffered: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
+          maxItems: 10
+        },
+        isActive: { type: 'boolean' }
+      }
+    }
+  })
+  async updateService(
+    @Param('serviceIndex') serviceIndex: string,
+    @Body() serviceData: any,
+    @CurrentUser() user: any
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: any;
+  }> {
+    try {
+      const userId = user.sub;
+      const index = parseInt(serviceIndex);
+      
+      if (isNaN(index) || index < 0) {
+        throw new HttpException('Invalid service index', HttpStatus.BAD_REQUEST);
+      }
+
+      // Validate service data (all fields optional for updates)
+      const serviceSchema = z.object({
+        serviceName: z.string().min(2).max(100).trim().optional(),
+        serviceDescription: z.string().min(10).max(1000).trim().optional(),
+        numberOfPeople: z.number().int().min(1).max(100).optional(),
+        pricePerPerson: z.number().min(0).max(10000).optional(),
+        timeOfServiceInMinutes: z.number().int().min(15).max(1440).optional(),
+        numberOfWinesTasted: z.number().int().min(0).optional(),
+        languagesOffered: z.array(z.string().min(2)).min(1).max(10).optional(),
+        isActive: z.boolean().optional()
+      });
+
+      const validatedService = serviceSchema.parse(serviceData);
+      const result = await this.domainProfileService.updateService(userId, index, validatedService);
+
+      return {
+        success: true,
+        message: 'Service updated successfully',
+        data: result
+      };
+    } catch (error) {
+      console.error('Error updating service:', error);
+      if (error.name === 'ZodError') {
+        throw new HttpException({
+          success: false,
+          message: 'Service validation failed',
+          errors: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            value: err.input
+          }))
+        }, HttpStatus.BAD_REQUEST);
+      }
+      throw error;
+    }
+  }
+
+  @Delete('services/:serviceIndex')
+  @UseGuards(UserGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Delete a service by index' })
+  async deleteService(
+    @Param('serviceIndex') serviceIndex: string,
+    @CurrentUser() user: any
+  ): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    try {
+      const userId = user.sub;
+      const index = parseInt(serviceIndex);
+      
+      if (isNaN(index) || index < 0) {
+        throw new HttpException('Invalid service index', HttpStatus.BAD_REQUEST);
+      }
+
+      await this.domainProfileService.deleteService(userId, index);
+
+      return {
+        success: true,
+        message: 'Service deleted successfully'
+      };
+    } catch (error) {
+      console.error('Error deleting service:', error);
+      throw error;
+    }
+  }
+
+  @Put('services/:serviceIndex/toggle-active')
+  @UseGuards(UserGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Toggle service active status' })
+  async toggleServiceActive(
+    @Param('serviceIndex') serviceIndex: string,
+    @CurrentUser() user: any
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: any;
+  }> {
+    try {
+      const userId = user.sub;
+      const index = parseInt(serviceIndex);
+      
+      if (isNaN(index) || index < 0) {
+        throw new HttpException('Invalid service index', HttpStatus.BAD_REQUEST);
+      }
+
+      const result = await this.domainProfileService.toggleServiceActive(userId, index);
+
+      return {
+        success: true,
+        message: 'Service status updated successfully',
+        data: result
+      };
+    } catch (error) {
+      console.error('Error toggling service status:', error);
       throw error;
     }
   }
