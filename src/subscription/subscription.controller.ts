@@ -61,7 +61,8 @@ export class SubscriptionController {
         userId: subscriptionDto.userId,
         startDate: new Date(subscriptionDto.startDate),
         endDate: new Date(subscriptionDto.endDate),
-        notes: subscriptionDto.notes
+        notes: subscriptionDto.notes,
+        isActive: subscriptionDto.isActive
       };
 
       const result = await this.subscriptionService.createOrUpdateSubscription(admin.sub, subscriptionData);

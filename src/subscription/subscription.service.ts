@@ -9,6 +9,7 @@ export interface CreateOrUpdateSubscriptionServiceDto {
   startDate: Date;
   endDate: Date;
   notes?: string;
+  isActive?: boolean;
 }
 
 export interface GetAllSubscriptionsQueryDto {
@@ -54,17 +55,24 @@ export class SubscriptionService {
 
     if (existingSubscription) {
       // Update existing subscription
+      const updateData: any = {
+        startDate: subscriptionDto.startDate,
+        endDate: subscriptionDto.endDate,
+        notes: subscriptionDto.notes,
+        adminId: adminId,
+      };
+
+      // Handle isActive field - use provided value or keep existing, but default to true if deactivating
+      if (subscriptionDto.isActive !== undefined) {
+        updateData.isActive = subscriptionDto.isActive;
+        // If deactivating, clear cancellation fields; if activating, also clear them
+        updateData.cancelledById = null;
+        updateData.cancelledAt = null;
+      }
+
       const updatedSubscription = await this.subscriptionModel.findByIdAndUpdate(
         existingSubscription._id,
-        {
-          startDate: subscriptionDto.startDate,
-          endDate: subscriptionDto.endDate,
-          notes: subscriptionDto.notes,
-          adminId: adminId,
-          isActive: true,
-          cancelledById: null,
-          cancelledAt: null
-        },
+        updateData,
         { new: true }
       ).populate('userId', 'firstName lastName email domainName')
        .populate('adminId', 'firstName lastName email')
@@ -86,7 +94,7 @@ export class SubscriptionService {
         startDate: subscriptionDto.startDate,
         endDate: subscriptionDto.endDate,
         notes: subscriptionDto.notes,
-        isActive: true
+        isActive: subscriptionDto.isActive !== undefined ? subscriptionDto.isActive : true
       });
 
       const savedSubscription = await newSubscription.save();

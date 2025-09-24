@@ -17,6 +17,10 @@ export const CreateOrUpdateSubscriptionSchema = z.object({
   notes: z
     .string()
     .max(500, 'Notes must not exceed 500 characters')
+    .optional(),
+  
+  isActive: z
+    .boolean()
     .optional()
 }).refine((data) => {
   const startDate = new Date(data.startDate);
