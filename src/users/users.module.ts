@@ -4,12 +4,16 @@ import { JwtModule } from '@nestjs/jwt';
 import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
 import { User, UserSchema } from '../schemas/user.schema';
+import { Subscription, SubscriptionSchema } from '../schemas/subscriptions.schema';
 import { AdminGuard } from '../guards/admin.guard';
 import { EmailModule } from '../email/email.module';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
+    MongooseModule.forFeature([
+      { name: User.name, schema: UserSchema },
+      { name: Subscription.name, schema: SubscriptionSchema }
+    ]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production',
       signOptions: { expiresIn: '24h' },

@@ -1,9 +1,10 @@
 import { Injectable, UnauthorizedException, ConflictException, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { User, UserRole, AccountStatus } from '../schemas/user.schema';
+import { Subscription } from '../schemas/subscriptions.schema';
 import { CreateAdminDto, AdminLoginDto } from '../validators/admin.validators';
 import { ContactFormDto, UserActionDto, UserLoginDto, ChangePasswordDto } from '../validators/user.validators';
 import { EmailService } from '../email/email.service';
@@ -56,6 +57,7 @@ export class UsersService {
 
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
+    @InjectModel(Subscription.name) private subscriptionModel: Model<Subscription>,
     private jwtService: JwtService,
     private emailService: EmailService,
   ) {}
@@ -283,7 +285,7 @@ export class UsersService {
     return admin;
   }
 
-  async getUserProfile(userId: string): Promise<User> {
+  async getUserProfile(userId: string): Promise<any> {
     const user = await this.userModel.findOne({
       _id: userId,
       role: UserRole.USER,
@@ -293,8 +295,19 @@ export class UsersService {
     if (!user) {
       throw new UnauthorizedException('User not found or access denied');
     }
+    const userObjectId = new Types.ObjectId(userId);
 
-    return user;
+    // Get user's current subscription
+    const subscription = await this.subscriptionModel
+      .findOne({ userId: userObjectId })
+      .populate('cancelledById', 'firstName lastName email')
+      .exec();
+
+    const userObject = user.toObject();
+    return {
+      ...userObject,
+      subscription: subscription?.toObject() || null
+    };
   }
 
   async submitContactForm(contactFormDto: ContactFormDto): Promise<User> {
