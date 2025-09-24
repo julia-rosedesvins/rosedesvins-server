@@ -127,7 +127,13 @@ export class SubscriptionService {
     const skip = (page - 1) * limit;
 
     const filter: any = {};
-    if (status) filter.isActive = status === 'active';
+    if (status) {
+      if (status === 'active') {
+        filter.isActive = true;
+      } else if (status === 'inactive') {
+        filter.isActive = false;
+      }
+    }
     if (userId) filter.userId = new Types.ObjectId(userId);
 
     const [subscriptions, total] = await Promise.all([
@@ -142,6 +148,13 @@ export class SubscriptionService {
         .exec(),
       this.subscriptionModel.countDocuments(filter)
     ]);
+
+    console.log(`Found ${total} total subscriptions with filter:`, filter);
+
+    // Debug: Let's also check total counts
+    const totalActive = await this.subscriptionModel.countDocuments({ isActive: true });
+    const totalInactive = await this.subscriptionModel.countDocuments({ isActive: false });
+    console.log(`Database stats: Total active: ${totalActive}, Total inactive: ${totalInactive}`);
 
     return {
       subscriptions,
