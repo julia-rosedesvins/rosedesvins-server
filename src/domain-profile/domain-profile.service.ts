@@ -46,11 +46,6 @@ export class DomainProfileService {
   }> {
     const userObjectId = new Types.ObjectId(userId);
 
-    console.log('CreateOrUpdate called with DTO:', JSON.stringify({
-      ...domainProfileDto,
-      services: domainProfileDto.services ? `[${domainProfileDto.services.length} services]` : 'undefined'
-    }, null, 2));
-
     // Update user's domain name if provided
     if (domainProfileDto.domainName) {
       await this.userModel.findByIdAndUpdate(
@@ -64,8 +59,6 @@ export class DomainProfileService {
     const existingDomainProfile = await this.domainProfileModel.findOne({
       userId: userObjectId
     });
-
-    console.log('Existing profile has services count:', existingDomainProfile?.services?.length || 0);
 
     // Handle file uploads
     let domainProfilePictureUrl = domainProfileDto.domainProfilePictureUrl;
@@ -126,11 +119,6 @@ export class DomainProfileService {
         updateData.services = domainProfileDto.services;
       }
 
-      console.log('Update data for existing profile:', JSON.stringify({
-        ...updateData,
-        services: updateData.services ? `[${updateData.services.length} services]` : 'not included'
-      }, null, 2));
-
       const updatedDomainProfile = await this.domainProfileModel.findByIdAndUpdate(
         existingDomainProfile._id,
         updateData,
@@ -141,8 +129,6 @@ export class DomainProfileService {
       if (!updatedDomainProfile) {
         throw new NotFoundException('Failed to update domain profile');
       }
-
-      console.log('Updated profile services count:', updatedDomainProfile.services?.length || 0);
 
       return {
         domainProfile: updatedDomainProfile,
