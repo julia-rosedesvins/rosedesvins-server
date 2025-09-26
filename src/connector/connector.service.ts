@@ -189,8 +189,9 @@ export class ConnectorService {
       throw new NotFoundException('Orange connector not found for this user');
     }
 
-    if (connector.connector_creds?.orange) {
-      connector.connector_creds.orange.isActive = false;
+    // Clear the orange credentials by setting to null
+    if (connector.connector_creds) {
+      connector.connector_creds.orange = null;
       await connector.save();
     }
   }

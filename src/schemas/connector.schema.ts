@@ -40,13 +40,13 @@ export const MicrosoftCredentialsSchema = SchemaFactory.createForClass(Microsoft
 @Schema({ _id: false })
 export class ConnectorCredentials {
   @Prop({ type: OrangeCredentialsSchema, default: null })
-  orange?: OrangeCredentials;
+  orange?: OrangeCredentials | null;
 
   @Prop({ type: OvhCredentialsSchema, default: null })
-  ovh?: OvhCredentials;
+  ovh?: OvhCredentials | null;
 
   @Prop({ type: MicrosoftCredentialsSchema, default: null })
-  microsoft?: MicrosoftCredentials;
+  microsoft?: MicrosoftCredentials | null;
 }
 
 export const ConnectorCredentialsSchema = SchemaFactory.createForClass(ConnectorCredentials);
