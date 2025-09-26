@@ -8,9 +8,10 @@ import { ContactDetailsModule } from './contact-details/contact-details.module';
 import { SubscriptionModule } from './subscription/subscription.module';
 import { DomainProfileModule } from './domain-profile/domain-profile.module';
 import { ConnectorModule } from './connector/connector.module';
+import { AvailabilityModule } from './availability/availability.module';
 
 @Module({
-  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule],
+  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule],
   controllers: [AppController],
   providers: [AppService],
 })
