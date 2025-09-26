@@ -7,9 +7,10 @@ import { EmailModule } from './email/email.module';
 import { ContactDetailsModule } from './contact-details/contact-details.module';
 import { SubscriptionModule } from './subscription/subscription.module';
 import { DomainProfileModule } from './domain-profile/domain-profile.module';
+import { ConnectorModule } from './connector/connector.module';
 
 @Module({
-  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule],
+  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule],
   controllers: [AppController],
   providers: [AppService],
 })
