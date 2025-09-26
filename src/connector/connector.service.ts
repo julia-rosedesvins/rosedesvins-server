@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import * as bcrypt from 'bcryptjs';
 import * as dav from 'dav';
+import { EncryptionService } from '../common/encryption.service';
 import { Connector } from '../schemas/connector.schema';
 import { User } from '../schemas/user.schema';
 
@@ -81,9 +81,8 @@ export class ConnectorService {
       await this.validateOrangeCalDAVCredentials(connectorData.username, connectorData.password);
       console.log('✅ CalDAV credentials validated successfully');
 
-      // Hash the password before storing (for security)
-      const saltRounds = 12;
-      const hashedPassword = await bcrypt.hash(connectorData.password, saltRounds);
+      // Encrypt password using AES (reversible for CalDAV operations)
+      const encryptedPassword = EncryptionService.encrypt(connectorData.password);
 
       // Check if connector already exists for this user and Orange
       const existingConnector = await this.connectorModel.findOne({ 
@@ -97,7 +96,7 @@ export class ConnectorService {
           ...existingConnector.connector_creds,
           orange: {
             username: connectorData.username,
-            password: hashedPassword,
+            password: encryptedPassword,
             isActive: true,
             isValid: true
           }
@@ -123,7 +122,7 @@ export class ConnectorService {
           connector_creds: {
             orange: {
               username: connectorData.username,
-              password: hashedPassword,
+              password: encryptedPassword,
               isActive: true,
               isValid: true
             },
@@ -197,48 +196,27 @@ export class ConnectorService {
   }
 
   /**
-   * Verify Orange calendar credentials (for future use)
-   * @param userId - User ID
-   * @param password - Plain text password to verify
-   * @returns Boolean indicating if password matches
-   */
-  async verifyOrangeCredentials(userId: string, password: string): Promise<boolean> {
-    const connector = await this.getOrangeConnector(userId);
-    
-    if (!connector?.connector_creds?.orange?.password) {
-      return false;
-    }
-
-    return await bcrypt.compare(password, connector.connector_creds.orange.password);
-  }
-
-  /**
    * Get Orange CalDAV client for event operations
-   * Note: This requires storing the original password temporarily or using a different approach
-   * For production, consider using app-specific passwords or OAuth tokens
+   * Now uses encrypted credentials that can be decrypted for CalDAV
    * @param userId - User ID
-   * @param plainPassword - The original password (needed for CalDAV operations)
    * @returns CalDAV account object or null
    */
-  async getOrangeCalDAVClient(userId: string, plainPassword: string): Promise<any> {
+  async getOrangeCalDAVClient(userId: string): Promise<any> {
     try {
       const connector = await this.getOrangeConnector(userId);
       
-      if (!connector?.connector_creds?.orange?.username) {
-        throw new NotFoundException('Orange connector not found for this user');
+      if (!connector?.connector_creds?.orange?.username || !connector?.connector_creds?.orange?.password) {
+        throw new NotFoundException('Orange connector not found or incomplete for this user');
       }
 
-      // Verify the provided password matches stored hash
-      const isValidPassword = await bcrypt.compare(plainPassword, connector.connector_creds.orange.password);
-      if (!isValidPassword) {
-        throw new BadRequestException('Invalid password provided');
-      }
+      // Decrypt password for CalDAV operations
+      const decryptedPassword = EncryptionService.decrypt(connector.connector_creds.orange.password);
 
-      // Create CalDAV client with plain text credentials
+      // Create CalDAV client with decrypted credentials
       const xhr = new dav.transport.Basic(
         new dav.Credentials({
           username: connector.connector_creds.orange.username,
-          password: plainPassword // CalDAV needs plain text password
+          password: decryptedPassword // Now we can decrypt for CalDAV
         })
       );
 
@@ -252,6 +230,68 @@ export class ConnectorService {
       return account;
     } catch (error) {
       console.error('Error creating CalDAV client:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Verify Orange calendar credentials using stored encrypted password
+   * @param userId - User ID
+   * @param plainPassword - Plain text password to verify against stored encrypted version
+   * @returns Boolean indicating if password matches
+   */
+  async verifyOrangeCredentials(userId: string, plainPassword: string): Promise<boolean> {
+    try {
+      const connector = await this.getOrangeConnector(userId);
+      
+      if (!connector?.connector_creds?.orange?.password) {
+        return false;
+      }
+
+      // Decrypt stored password and compare
+      const decryptedStoredPassword = EncryptionService.decrypt(connector.connector_creds.orange.password);
+      return plainPassword === decryptedStoredPassword;
+    } catch (error) {
+      console.error('Error verifying credentials:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Example: Create CalDAV event (for future implementation)
+   * This demonstrates how encrypted passwords work with CalDAV operations
+   * @param userId - User ID
+   * @param eventData - Event details
+   * @returns Event creation result
+   */
+  async createOrangeCalendarEvent(userId: string, eventData: any): Promise<any> {
+    try {
+      console.log('🗓️ Creating Orange calendar event...');
+
+      // Get CalDAV client with automatically decrypted credentials
+      const account = await this.getOrangeCalDAVClient(userId);
+      
+      if (!account.calendars || account.calendars.length === 0) {
+        throw new NotFoundException('No calendars found for this user');
+      }
+
+      // Use first calendar (you can add calendar selection logic)
+      const calendar = account.calendars[0];
+      console.log(`📅 Using calendar: ${calendar.displayName || 'Default Calendar'}`);
+
+      // Here you would implement the actual event creation
+      // using your existing OrangeMailCalendarClient logic from app.js
+      console.log('📝 Event data received:', eventData);
+      console.log('🔑 Credentials decrypted and ready for CalDAV operations');
+
+      return {
+        success: true,
+        message: 'CalDAV client ready for event creation',
+        calendarUrl: calendar.url,
+        calendarName: calendar.displayName
+      };
+    } catch (error) {
+      console.error('Error creating CalDAV event:', error);
       throw error;
     }
   }
