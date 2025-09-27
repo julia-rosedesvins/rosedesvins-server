@@ -11,9 +11,10 @@ import { ConnectorModule } from './connector/connector.module';
 import { AvailabilityModule } from './availability/availability.module';
 import { NotificationPreferencesModule } from './notification-preferences/notification-preferences.module';
 import { PaymentMethodsModule } from './payment-methods/payment-methods.module';
+import { WidgetModule } from './widget/widget.module';
 
 @Module({
-  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule, NotificationPreferencesModule, PaymentMethodsModule],
+  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule, NotificationPreferencesModule, PaymentMethodsModule, WidgetModule],
   controllers: [AppController],
   providers: [AppService],
 })

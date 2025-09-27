@@ -2,7 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { User } from './user.schema';
 
-@Schema({ _id: false })
+@Schema()
 export class Service {
   @Prop({ required: true, trim: true })
   name: string;
