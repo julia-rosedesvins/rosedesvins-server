@@ -9,9 +9,10 @@ import { SubscriptionModule } from './subscription/subscription.module';
 import { DomainProfileModule } from './domain-profile/domain-profile.module';
 import { ConnectorModule } from './connector/connector.module';
 import { AvailabilityModule } from './availability/availability.module';
+import { NotificationPreferencesModule } from './notification-preferences/notification-preferences.module';
 
 @Module({
-  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule],
+  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule, NotificationPreferencesModule],
   controllers: [AppController],
   providers: [AppService],
 })
