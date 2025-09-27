@@ -45,4 +45,24 @@ export class NotificationPreferencesService {
       throw error;
     }
   }
+
+  /**
+   * Get notification preferences for a user
+   * @param userId - The user ID
+   * @returns Notification preferences document or null if not found
+   */
+  async getNotificationPreferences(
+    userId: string,
+  ): Promise<NotificationPreferencesDocument | null> {
+    try {
+      const notificationPreferences = await this.notificationPreferencesModel
+        .findOne({ userId })
+        .exec();
+
+      return notificationPreferences;
+    } catch (error) {
+      console.error('Error in getNotificationPreferences:', error);
+      throw error;
+    }
+  }
 }

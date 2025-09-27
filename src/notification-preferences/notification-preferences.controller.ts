@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { UserGuard } from '../guards/user.guard';
@@ -87,6 +87,49 @@ export class NotificationPreferencesController {
       return {
         success: true,
         message: 'Notification preferences saved successfully',
+        data: responseData,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Get()
+  @UseGuards(UserGuard)
+  @ApiOperation({ 
+    summary: 'Get notification preferences',
+    description: 'Retrieves notification preferences for the current user'
+  })
+  @ApiBearerAuth('user-token')
+  async getNotificationPreferences(
+    @CurrentUser() currentUser: any,
+  ) {
+    try {      
+      const notificationPreferences = await this.notificationPreferencesService
+        .getNotificationPreferences(currentUser.sub);
+
+      if (!notificationPreferences) {
+        return {
+          success: true,
+          message: 'No notification preferences found for user',
+          data: null,
+        };
+      }
+
+      // Transform the response to include human-readable labels
+      const responseData = {
+        ...notificationPreferences.toObject(),
+        // Add human-readable labels for frontend display
+        labels: {
+          customerNotificationBefore: NOTIFICATION_OPTION_LABELS[notificationPreferences.customerNotificationBefore],
+          providerNotificationBefore: NOTIFICATION_OPTION_LABELS[notificationPreferences.providerNotificationBefore],
+          bookingAdvanceLimit: NOTIFICATION_OPTION_LABELS[notificationPreferences.bookingAdvanceLimit],
+        }
+      };
+
+      return {
+        success: true,
+        message: 'Notification preferences retrieved successfully',
         data: responseData,
       };
     } catch (error) {
