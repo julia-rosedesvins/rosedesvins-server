@@ -13,9 +13,10 @@ import { NotificationPreferencesModule } from './notification-preferences/notifi
 import { PaymentMethodsModule } from './payment-methods/payment-methods.module';
 import { WidgetModule } from './widget/widget.module';
 import { UserBookingsModule } from './user-bookings/user-bookings.module';
+import { EventsModule } from './events/events.module';
 
 @Module({
-  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule, NotificationPreferencesModule, PaymentMethodsModule, WidgetModule, UserBookingsModule],
+  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule, NotificationPreferencesModule, PaymentMethodsModule, WidgetModule, UserBookingsModule, EventsModule],
   controllers: [AppController],
   providers: [AppService],
 })

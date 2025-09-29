@@ -6,6 +6,7 @@ import { UserBooking, UserBookingSchema } from '../schemas/user-bookings.schema'
 import { User, UserSchema } from '../schemas/user.schema';
 import { DomainProfile, DomainProfileSchema } from '../schemas/domain-profile.schema';
 import { Subscription, SubscriptionSchema } from '../schemas/subscriptions.schema';
+import { Event, EventSchema } from '../schemas/events.schema';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { Subscription, SubscriptionSchema } from '../schemas/subscriptions.schem
       { name: User.name, schema: UserSchema },
       { name: DomainProfile.name, schema: DomainProfileSchema },
       { name: Subscription.name, schema: SubscriptionSchema },
+      { name: Event.name, schema: EventSchema },
     ]),
   ],
   controllers: [UserBookingsController],
