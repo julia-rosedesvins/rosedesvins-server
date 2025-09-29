@@ -17,12 +17,27 @@ export class BankCardDetails {
 
 export const BankCardDetailsSchema = SchemaFactory.createForClass(BankCardDetails);
 
+// Payment method sub-schema for cheque details
+@Schema({ _id: false })
+export class ChequeDetails {
+  @Prop({ required: true, trim: true })
+  chequeNumber: string;
+
+  @Prop({ required: true, trim: true })
+  bankName: string;
+
+  @Prop({ required: true, type: Date })
+  issueDate: Date;
+}
+
+export const ChequeDetailsSchema = SchemaFactory.createForClass(ChequeDetails);
+
 // Payment method sub-schema
 @Schema({ _id: false })
 export class PaymentMethodDetails {
   @Prop({ 
     required: true, 
-    enum: ['bank_card', 'cheque', 'stripe'],
+    enum: ['bank_card', 'cheque', 'stripe', 'cash_on_onsite'],
     lowercase: true 
   })
   method: string;
@@ -30,8 +45,11 @@ export class PaymentMethodDetails {
   @Prop({ type: BankCardDetailsSchema, required: false })
   bankCardDetails?: BankCardDetails;
 
-  // For cheque and stripe, just the method name is stored
-  // bankCardDetails will be null for these methods
+  @Prop({ type: ChequeDetailsSchema, required: false })
+  chequeDetails?: ChequeDetails;
+
+  // For stripe and cash_on_onsite, just the method name is stored
+  // All details will be null for these methods
 }
 
 export const PaymentMethodDetailsSchema = SchemaFactory.createForClass(PaymentMethodDetails);

@@ -22,20 +22,45 @@ export const BankCardDetailsSchema = z.object({
     .trim(),
 });
 
+export const ChequeDetailsSchema = z.object({
+  chequeNumber: z
+    .string()
+    .min(1, 'Cheque number is required')
+    .max(50, 'Cheque number must not exceed 50 characters')
+    .trim(),
+  
+  bankName: z
+    .string()
+    .min(2, 'Bank name must be at least 2 characters')
+    .max(100, 'Bank name must not exceed 100 characters')
+    .trim(),
+  
+  issueDate: z
+    .string()
+    .refine((val) => !isNaN(Date.parse(val)), 'Invalid issue date format')
+    .transform((val) => new Date(val)),
+});
+
 export const PaymentMethodSchema = z.object({
   method: z
-    .enum(['bank_card', 'cheque', 'stripe'])
+    .enum(['bank_card', 'cheque', 'stripe', 'cash_on_onsite'])
     .refine((val) => val !== undefined, 'Payment method is required'),
   
   bankCardDetails: z.optional(BankCardDetailsSchema),
+  chequeDetails: z.optional(ChequeDetailsSchema),
 }).refine((data) => {
+  // Validate required fields based on payment method
   if (data.method === 'bank_card' && !data.bankCardDetails) {
     return false;
   }
+  if (data.method === 'cheque' && !data.chequeDetails) {
+    return false;
+  }
+  // stripe and cash_on_onsite don't require additional details
   return true;
 }, {
-  message: 'Bank card details are required when payment method is bank_card',
-  path: ['bankCardDetails']
+  message: 'Payment method details are required for the selected payment method',
+  path: ['paymentMethod']
 });
 
 export const CreateBookingSchema = z.object({
@@ -112,3 +137,4 @@ export const CreateBookingSchema = z.object({
 export type CreateBookingDto = z.infer<typeof CreateBookingSchema>;
 export type PaymentMethodDto = z.infer<typeof PaymentMethodSchema>;
 export type BankCardDetailsDto = z.infer<typeof BankCardDetailsSchema>;
+export type ChequeDetailsDto = z.infer<typeof ChequeDetailsSchema>;

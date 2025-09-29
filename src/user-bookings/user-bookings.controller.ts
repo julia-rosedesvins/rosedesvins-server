@@ -78,7 +78,7 @@ export class UserBookingsController {
           properties: {
             method: {
               type: 'string',
-              enum: ['bank_card', 'cheque', 'stripe'],
+              enum: ['bank_card', 'cheque', 'stripe', 'cash_on_onsite'],
               example: 'bank_card',
               description: 'Payment method type'
             },
@@ -90,6 +90,15 @@ export class UserBookingsController {
                 accountNumber: { type: 'string', example: '1234567890' }
               },
               description: 'Required when payment method is bank_card'
+            },
+            chequeDetails: {
+              type: 'object',
+              properties: {
+                chequeNumber: { type: 'string', example: '0123456' },
+                bankName: { type: 'string', example: 'Crédit Agricole' },
+                issueDate: { type: 'string', format: 'date', example: '2025-09-29' }
+              },
+              description: 'Required when payment method is cheque'
             }
           },
           required: ['method']
