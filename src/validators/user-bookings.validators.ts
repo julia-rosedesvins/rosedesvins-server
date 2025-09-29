@@ -77,7 +77,16 @@ export const CreateBookingSchema = z.object({
   bookingDate: z
     .string()
     .refine((val) => !isNaN(Date.parse(val)), 'Invalid booking date format')
-    .transform((val) => new Date(val)),
+    .transform((val) => {
+      // Handle both ISO string and YYYY-MM-DD formats properly
+      if (val.includes('T')) {
+        // Already has time information (ISO string format)
+        return new Date(val);
+      } else {
+        // Just date string (YYYY-MM-DD format), create date at midnight UTC
+        return new Date(val + 'T00:00:00.000Z');
+      }
+    }),
   
   bookingTime: z
     .string()

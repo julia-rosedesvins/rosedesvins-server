@@ -25,10 +25,12 @@ export class UserBookingsService {
       const serviceObjectId = new Types.ObjectId(createBookingDto.serviceId);
 
       // Create booking data with proper field mapping
+      const parsedDate = createBookingDto.bookingDate;
+      
       const bookingData = {
         userId: userObjectId,
         serviceId: serviceObjectId,
-        bookingDate: new Date(createBookingDto.bookingDate),
+        bookingDate: parsedDate,
         bookingTime: createBookingDto.bookingTime,
         participantsAdults: createBookingDto.participantsAdults,
         participantsEnfants: createBookingDto.participantsEnfants,
@@ -55,7 +57,7 @@ export class UserBookingsService {
           userId: userObjectId, // The wine business owner who receives the booking
           bookingId: savedBooking._id, // Reference to the created booking
           eventName: `Booking: ${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
-          eventDate: new Date(createBookingDto.bookingDate),
+          eventDate: parsedDate, // Use the same parsed date
           eventTime: createBookingDto.bookingTime,
           eventDescription: createBookingDto.additionalNotes || `Wine tasting booking for ${createBookingDto.participantsAdults + createBookingDto.participantsEnfants} people`,
           eventType: 'booking', // This is a booking-related event
