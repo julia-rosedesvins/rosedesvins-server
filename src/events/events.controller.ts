@@ -1,5 +1,5 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Get, UseGuards, Param } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { EventsService } from './events.service';
 import { UserGuard } from '../guards/user.guard';
 import { CurrentUser } from '../decorators/current-user.decorator';
@@ -24,6 +24,30 @@ export class EventsController {
         success: true,
         message: 'Events retrieved successfully',
         data: events,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Get('public/user/:userId/schedule')
+  @ApiOperation({ 
+    summary: 'Get public user schedule',
+    description: 'Public endpoint to get user event dates and times only. No authentication required. Only returns eventDate and eventTime for active events.'
+  })
+  @ApiParam({
+    name: 'userId',
+    description: 'User ID to get schedule for',
+    type: 'string'
+  })
+  async getPublicUserSchedule(@Param('userId') userId: string) {
+    try {
+      const schedule = await this.eventsService.getPublicUserSchedule(userId);
+      
+      return {
+        success: true,
+        message: 'User schedule retrieved successfully',
+        data: schedule,
       };
     } catch (error) {
       throw error;

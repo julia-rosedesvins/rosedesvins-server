@@ -30,4 +30,29 @@ export class EventsService {
       throw error;
     }
   }
+
+  /**
+   * Get public schedule for a specific user - only date and time information
+   * @param userId - User ID to get schedule for
+   * @returns Promise with user's event dates and times only
+   */
+  async getPublicUserSchedule(userId: string): Promise<{ eventDate: Date; eventTime: string }[]> {
+    try {
+      const userObjectId = new Types.ObjectId(userId);
+      
+      const schedule = await this.eventModel
+        .find({ 
+          userId: userObjectId,
+          eventStatus: 'active' // Only return active events
+        })
+        .select('eventDate eventTime') // Only select date and time fields
+        .sort({ eventDate: 1, eventTime: 1 }) // Sort by date and time ascending
+        .lean()
+        .exec();
+
+      return schedule;
+    } catch (error) {
+      throw error;
+    }
+  }
 }
