@@ -215,9 +215,11 @@ export class DomainProfileService {
       .exec();
 
     const services = domainProfile?.services || [];
+    console.log('Retrieved services from database:', JSON.stringify(services, null, 2));
     
     // Map database fields back to API format
     return services.map(service => ({
+      _id: (service as any)._id,
       serviceName: service.name,
       serviceDescription: service.description,
       numberOfPeople: service.numberOfPeople,
