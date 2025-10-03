@@ -5,6 +5,7 @@ import { NotificationsController } from './notifications.controller';
 import { Event, EventSchema } from '../schemas/events.schema';
 import { NotificationPreferences, NotificationPreferencesSchema } from '../schemas/notification-preferences.schema';
 import { User, UserSchema } from '../schemas/user.schema';
+import { EmailModule } from 'src/email/email.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { User, UserSchema } from '../schemas/user.schema';
       { name: NotificationPreferences.name, schema: NotificationPreferencesSchema },
       { name: User.name, schema: UserSchema },
     ]),
+    EmailModule
   ],
   controllers: [NotificationsController],
   providers: [NotificationsService],

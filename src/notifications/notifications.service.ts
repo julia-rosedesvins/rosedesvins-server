@@ -5,6 +5,8 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { Event } from '../schemas/events.schema';
 import { NotificationPreferences } from '../schemas/notification-preferences.schema';
 import { User } from '../schemas/user.schema';
+import { EmailService, EmailJob } from '../email/email.service';
+import { TemplateService } from '../email/template.service';
 
 // Notification timing constants
 const NOTIFICATION_OPTIONS = {
@@ -34,10 +36,12 @@ export class NotificationsService {
     private readonly logger = new Logger(NotificationsService.name);
 
     constructor(
-        @InjectModel(Event.name) private eventModel: Model<Event>,
-        @InjectModel(NotificationPreferences.name) private notificationPreferencesModel: Model<NotificationPreferences>,
-        @InjectModel(User.name) private userModel: Model<User>,
-    ) { }
+    @InjectModel(Event.name) private eventModel: Model<Event>,
+    @InjectModel(NotificationPreferences.name) private notificationPreferencesModel: Model<NotificationPreferences>,
+    @InjectModel(User.name) private userModel: Model<User>,
+    private emailService: EmailService,
+    private templateService: TemplateService,
+  ) {}
 
     /**
      * Cron job that runs every 30 minutes to check for upcoming events
@@ -276,52 +280,137 @@ export class NotificationsService {
      * Send notification to customer
      */
     private async sendCustomerNotification(event: any, preferences: any): Promise<void> {
-        const eventDateTime = this.combineDateTime(event.eventDate, event.eventTime);
-        const timeUntilEvent = this.getTimeUntilEvent(eventDateTime);
+        try {
+            const eventDateTime = this.combineDateTime(event.eventDate, event.eventTime);
+            const timeUntilEvent = this.getTimeUntilEvent(eventDateTime);
 
-        console.log('\n🔔 CUSTOMER NOTIFICATION:');
-        console.log('=====================================');
-        console.log(`📧 To: ${event.userId.email}`);
-        console.log(`👤 Customer: ${event.userId.firstName} ${event.userId.lastName}`);
-        console.log(`🎯 Event: ${event.eventName}`);
-        console.log(`📅 Date: ${event.eventDate.toDateString()}`);
-        console.log(`⏰ Time: ${event.eventTime} (${DEFAULT_TIMEZONE})`);
-        console.log(`🌍 Event DateTime: ${this.formatDateTimeForDisplay(eventDateTime)}`);
-        console.log(`⏳ Time until event: ${timeUntilEvent}`);
-        console.log(`🔔 Notification preference: ${preferences.customerNotificationBefore}`);
-        console.log(`📝 Description: ${event.eventDescription || 'No description'}`);
-        console.log(`🕐 Timezone: ${DEFAULT_TIMEZONE}`);
-        console.log('=====================================\n');
+            // Format date for display
+            const eventDateFormatted = event.eventDate.toLocaleDateString('fr-FR', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+            });
 
-        // Here you would integrate with email/SMS service
-        // await this.emailService.sendCustomerReminder(event, preferences);
-        // await this.smsService.sendCustomerReminder(event, preferences);
+            // Get hours before event for notification
+            const hoursBeforeEvent = this.getHoursFromNotificationSetting(preferences.customerNotificationBefore);
+
+            // Prepare email data
+            const emailData = {
+                customerName: `${event.userId.firstName} ${event.userId.lastName}`,
+                customerEmail: event.userId.email,
+                eventTitle: event.eventName,
+                eventDate: eventDateFormatted,
+                eventTime: event.eventTime,
+                eventTimezone: DEFAULT_TIMEZONE,
+                eventLocation: event.location || 'Rose des Vins',
+                eventDescription: event.eventDescription,
+                providerName: 'Rose des Vins Team',
+                hoursBeforeEvent: hoursBeforeEvent,
+            };
+
+            // Generate email HTML
+            const emailHtml = this.templateService.generateCustomerNotificationEmail(emailData);
+
+            // Send email
+            const emailJob: EmailJob = {
+                to: event.userId.email,
+                subject: `Reminder: Your wine experience "${event.eventName}" is in ${hoursBeforeEvent} hours`,
+                html: emailHtml,
+            };
+            await this.emailService.sendEmail(emailJob);
+
+            console.log(`✅ Customer notification email sent successfully:
+                📧 To: ${event.userId.email} (${event.userId.firstName} ${event.userId.lastName})
+                🎯 Event: ${event.eventName}
+                ⏰ Time: ${event.eventTime} (${DEFAULT_TIMEZONE})
+                ⌛ Notice: ${hoursBeforeEvent} hours before event`);
+
+        } catch (error) {
+            console.error(`❌ Failed to send customer notification email:`, error);
+            
+            // Fallback to console notification if email fails
+            const eventDateTime = this.combineDateTime(event.eventDate, event.eventTime);
+            console.log('\n� FALLBACK CUSTOMER NOTIFICATION:');
+            console.log('=====================================');
+            console.log(`📧 To: ${event.userId.email}`);
+            console.log(`👤 Customer: ${event.userId.firstName} ${event.userId.lastName}`);
+            console.log(`🎯 Event: ${event.eventName}`);
+            console.log(`📅 Date: ${event.eventDate.toDateString()}`);
+            console.log(`⏰ Time: ${event.eventTime} (${DEFAULT_TIMEZONE})`);
+            console.log('=====================================\n');
+        }
     }
 
     /**
      * Send notification to provider (domain owner)
      */
     private async sendProviderNotification(event: any, preferences: any): Promise<void> {
-        const eventDateTime = this.combineDateTime(event.eventDate, event.eventTime);
-        const timeUntilEvent = this.getTimeUntilEvent(eventDateTime);
+        try {
+            const eventDateTime = this.combineDateTime(event.eventDate, event.eventTime);
+            
+            // Format date for display
+            const eventDateFormatted = event.eventDate.toLocaleDateString('fr-FR', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+            });
 
-        console.log('\n🔔 PROVIDER NOTIFICATION:');
-        console.log('=====================================');
-        console.log(`🏢 Provider notification for booking`);
-        console.log(`👤 Customer: ${event.userId.firstName} ${event.userId.lastName}`);
-        console.log(`📧 Customer Email: ${event.userId.email}`);
-        console.log(`🎯 Event: ${event.eventName}`);
-        console.log(`📅 Date: ${event.eventDate.toDateString()}`);
-        console.log(`⏰ Time: ${event.eventTime} (${DEFAULT_TIMEZONE})`);
-        console.log(`🌍 Event DateTime: ${this.formatDateTimeForDisplay(eventDateTime)}`);
-        console.log(`⏳ Time until event: ${timeUntilEvent}`);
-        console.log(`🔔 Notification preference: ${preferences.providerNotificationBefore}`);
-        console.log(`📝 Description: ${event.eventDescription || 'No description'}`);
-        console.log(`🕐 Timezone: ${DEFAULT_TIMEZONE}`);
-        console.log('=====================================\n');
+            // Get hours before event for notification
+            const hoursBeforeEvent = this.getHoursFromNotificationSetting(preferences.providerNotificationBefore);
 
-        // Here you would send notification to domain owner
-        // await this.emailService.sendProviderReminder(event, preferences);
+            // Get provider email - could be admin email or domain owner email
+            const providerEmail = preferences.domainId?.ownerEmail || process.env.ADMIN_EMAIL || 'admin@rosedesvins.com';
+            const providerName = preferences.domainId?.ownerName || 'Rose des Vins Team';
+
+            // Prepare email data
+            const emailData = {
+                providerName: providerName,
+                providerEmail: providerEmail,
+                customerName: `${event.userId.firstName} ${event.userId.lastName}`,
+                eventTitle: event.eventName,
+                eventDate: eventDateFormatted,
+                eventTime: event.eventTime,
+                eventTimezone: DEFAULT_TIMEZONE,
+                eventLocation: event.location || 'Rose des Vins',
+                eventDescription: event.eventDescription,
+                hoursBeforeEvent: hoursBeforeEvent,
+            };
+
+            // Generate email HTML
+            const emailHtml = this.templateService.generateProviderNotificationEmail(emailData);
+
+            // Send email
+            const emailJob: EmailJob = {
+                to: providerEmail,
+                subject: `Upcoming Guest Experience: ${event.eventName} in ${hoursBeforeEvent} hours`,
+                html: emailHtml,
+            };
+            await this.emailService.sendEmail(emailJob);
+
+            console.log(`✅ Provider notification email sent successfully:
+                � To: ${providerEmail} (${providerName})
+                👤 Guest: ${event.userId.firstName} ${event.userId.lastName}
+                🎯 Event: ${event.eventName}
+                ⏰ Time: ${event.eventTime} (${DEFAULT_TIMEZONE})
+                ⌛ Notice: ${hoursBeforeEvent} hours before event`);
+
+        } catch (error) {
+            console.error(`❌ Failed to send provider notification email:`, error);
+            
+            // Fallback to console notification if email fails
+            const eventDateTime = this.combineDateTime(event.eventDate, event.eventTime);
+            console.log('\n🔔 FALLBACK PROVIDER NOTIFICATION:');
+            console.log('=====================================');
+            console.log(`🏢 Provider notification for booking`);
+            console.log(`👤 Customer: ${event.userId.firstName} ${event.userId.lastName}`);
+            console.log(`� Customer Email: ${event.userId.email}`);
+            console.log(`🎯 Event: ${event.eventName}`);
+            console.log(`� Date: ${event.eventDate.toDateString()}`);
+            console.log(`⏰ Time: ${event.eventTime} (${DEFAULT_TIMEZONE})`);
+            console.log('=====================================\n');
+        }
     }
 
     /**
@@ -364,6 +453,30 @@ export class NotificationsService {
             second: '2-digit',
             hour12: false
         });
+    }
+
+    /**
+     * Convert notification setting to hours
+     */
+    private getHoursFromNotificationSetting(setting: string): number {
+        switch (setting) {
+            case '15min':
+                return 0.25;
+            case '30min':
+                return 0.5;
+            case '1hr':
+                return 1;
+            case '2hr':
+                return 2;
+            case '4hr':
+                return 4;
+            case '1day':
+                return 24;
+            case '2day':
+                return 48;
+            default:
+                return 2; // Default to 2 hours
+        }
     }
 
     /**

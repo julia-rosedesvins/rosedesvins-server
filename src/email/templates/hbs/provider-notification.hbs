@@ -1,0 +1,77 @@
+<div style="color: #4a4a4a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+  <h2 style="color: #8B4513; font-weight: 600; margin-bottom: 24px;">
+    Upcoming Guest Experience Alert 📅
+  </h2>
+  
+  <p style="margin-bottom: 16px; line-height: 1.6;">
+    Hello {{providerName}}, this is a reminder about an upcoming wine experience with one of your guests.
+  </p>
+
+  <div style="background-color: #f8f4f0; border-left: 4px solid #8B4513; padding: 20px; margin: 24px 0; border-radius: 4px;">
+    <h3 style="color: #8B4513; margin: 0 0 16px 0; font-size: 18px;">Experience Details</h3>
+    
+    <p style="margin: 8px 0; color: #4a4a4a;">
+      <strong>Guest:</strong> {{customerName}}
+    </p>
+    
+    <p style="margin: 8px 0; color: #4a4a4a;">
+      <strong>Experience:</strong> {{eventTitle}}
+    </p>
+    
+    <p style="margin: 8px 0; color: #4a4a4a;">
+      <strong>Date:</strong> {{eventDate}}
+    </p>
+    
+    <p style="margin: 8px 0; color: #4a4a4a;">
+      <strong>Time:</strong> {{eventTime}} ({{eventTimezone}})
+    </p>
+    
+    {{#if eventDuration}}
+    <p style="margin: 8px 0; color: #4a4a4a;">
+      <strong>Duration:</strong> {{eventDuration}}
+    </p>
+    {{/if}}
+    
+    {{#if eventLocation}}
+    <p style="margin: 8px 0; color: #4a4a4a;">
+      <strong>Location:</strong> {{eventLocation}}
+    </p>
+    {{/if}}
+    
+    {{#if eventDescription}}
+    <p style="margin: 16px 0 0 0; color: #4a4a4a;">
+      <strong>Description:</strong><br>
+      {{eventDescription}}
+    </p>
+    {{/if}}
+  </div>
+
+  <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 16px; margin: 24px 0; border-radius: 4px;">
+    <p style="margin: 0; color: #856404; font-weight: 500;">
+      ⏰ <strong>Reminder:</strong> This experience is scheduled to begin in {{hoursBeforeEvent}} hours.
+    </p>
+  </div>
+
+  <p style="margin: 24px 0 16px 0; line-height: 1.6;">
+    Please ensure everything is prepared for {{customerName}}'s visit. This includes:
+  </p>
+
+  <ul style="margin: 16px 0; padding-left: 24px; color: #4a4a4a;">
+    <li style="margin-bottom: 8px;">Wine selection and tasting setup</li>
+    <li style="margin-bottom: 8px;">Venue preparation and ambiance</li>
+    <li style="margin-bottom: 8px;">Any special requests or dietary considerations</li>
+    <li style="margin-bottom: 8px;">Welcome materials and information</li>
+  </ul>
+
+  <div style="text-align: center; margin: 32px 0;">
+    <a href="{{adminPanelUrl}}" 
+       style="background-color: #8B4513; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500; display: inline-block;">
+      View All Reservations
+    </a>
+  </div>
+
+  <p style="margin-top: 32px; color: #666; font-size: 14px; line-height: 1.6;">
+    Thank you for providing exceptional wine experiences at Rose des Vins!<br>
+    Have a wonderful session with your guest. 🍷
+  </p>
+</div>

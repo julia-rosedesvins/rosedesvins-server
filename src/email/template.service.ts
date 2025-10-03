@@ -28,6 +28,34 @@ export interface ContactFormEmailData {
   message?: string;
 }
 
+export interface CustomerNotificationEmailData {
+  customerName: string;
+  customerEmail: string;
+  eventTitle: string;
+  eventDate: string;
+  eventTime: string;
+  eventTimezone: string;
+  eventDuration?: string;
+  eventLocation?: string;
+  eventDescription?: string;
+  providerName?: string;
+  hoursBeforeEvent: number;
+}
+
+export interface ProviderNotificationEmailData {
+  providerName: string;
+  providerEmail: string;
+  customerName: string;
+  eventTitle: string;
+  eventDate: string;
+  eventTime: string;
+  eventTimezone: string;
+  eventDuration?: string;
+  eventLocation?: string;
+  eventDescription?: string;
+  hoursBeforeEvent: number;
+}
+
 @Injectable()
 export class TemplateService {
   private templatesPath: string;
@@ -110,6 +138,36 @@ export class TemplateService {
       ...this.getBaseData(),
       title: 'New Contact Form Submission',
       subtitle: 'Admin Notification',
+      content: contentHtml,
+    });
+  }
+
+  generateCustomerNotificationEmail(data: CustomerNotificationEmailData): string {
+    const customerNotificationTemplate = this.loadTemplate('customer-notification');
+    const contentHtml = customerNotificationTemplate({
+      ...data,
+      loginUrl: this.getBaseData().loginUrl,
+    });
+
+    return this.baseTemplate({
+      ...this.getBaseData(),
+      title: 'Upcoming Wine Experience Reminder',
+      subtitle: `Your reservation is in ${data.hoursBeforeEvent} hours`,
+      content: contentHtml,
+    });
+  }
+
+  generateProviderNotificationEmail(data: ProviderNotificationEmailData): string {
+    const providerNotificationTemplate = this.loadTemplate('provider-notification');
+    const contentHtml = providerNotificationTemplate({
+      ...data,
+      adminPanelUrl: this.getBaseData().adminPanelUrl,
+    });
+
+    return this.baseTemplate({
+      ...this.getBaseData(),
+      title: 'Upcoming Wine Experience - Guest Reminder',
+      subtitle: `Reservation in ${data.hoursBeforeEvent} hours`,
       content: contentHtml,
     });
   }
