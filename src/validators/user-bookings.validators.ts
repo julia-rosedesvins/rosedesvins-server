@@ -128,6 +128,14 @@ export const CreateBookingSchema = z.object({
     .max(20, 'Phone number must not exceed 20 characters')
     .trim(),
   
+  customerEmail: z
+    .string()
+    .email('Invalid email format')
+    .min(5, 'Email must be at least 5 characters')
+    .max(255, 'Email must not exceed 255 characters')
+    .trim()
+    .toLowerCase(),
+  
   additionalNotes: z
     .string()
     .max(1000, 'Additional notes must not exceed 1000 characters')

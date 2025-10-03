@@ -54,6 +54,7 @@ export class UserBookingsService {
         userContactFirstname: createBookingDto.userContactFirstname,
         userContactLastname: createBookingDto.userContactLastname,
         phoneNo: createBookingDto.phoneNo,
+        customerEmail: createBookingDto.customerEmail,
         additionalNotes: createBookingDto.additionalNotes,
         paymentMethod: createBookingDto.paymentMethod,
         bookingStatus: 'pending', // Default status
@@ -76,6 +77,7 @@ export class UserBookingsService {
           eventDate: parsedDate, // Use the same parsed date
           eventTime: createBookingDto.bookingTime,
           eventDescription: createBookingDto.additionalNotes || `Wine tasting booking for ${createBookingDto.participantsAdults + createBookingDto.participantsEnfants} people`,
+          customerEmail: createBookingDto.customerEmail, // Store customer email for easy access
           eventType: 'booking', // This is a booking-related event
           eventStatus: 'active', // Default status for new events
           isAllDay: false, // Bookings are time-specific

@@ -134,6 +134,14 @@ export class UserBooking extends Document {
   phoneNo: string; // Phone number with country code as string (e.g., "+33123456789")
 
   @Prop({ 
+    required: true, 
+    trim: true,
+    lowercase: true,
+    match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ // Email validation regex
+  })
+  customerEmail: string; // Customer's email address for booking notifications
+
+  @Prop({ 
     trim: true,
     maxlength: 1000 
   })
