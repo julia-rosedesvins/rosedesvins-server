@@ -17,7 +17,7 @@ export class EventsService {
   constructor(
     @InjectModel(Event.name) private eventModel: Model<Event>,
     @InjectModel(Connector.name) private connectorModel: Model<Connector>,
-  ) {}
+  ) { }
 
   /**
    * Get all events for a specific user
@@ -27,7 +27,7 @@ export class EventsService {
   async getUserEvents(userId: string): Promise<Event[]> {
     try {
       const userObjectId = new Types.ObjectId(userId);
-      
+
       const events = await this.eventModel
         .find({ userId: userObjectId })
         .populate('bookingId', 'bookingDate bookingTime userContactFirstname userContactLastname bookingStatus') // Populate booking details if linked
@@ -49,9 +49,9 @@ export class EventsService {
   async getPublicUserSchedule(userId: string): Promise<{ eventDate: Date; eventTime: string }[]> {
     try {
       const userObjectId = new Types.ObjectId(userId);
-      
+
       const schedule = await this.eventModel
-        .find({ 
+        .find({
           userId: userObjectId,
           eventStatus: 'active' // Only return active events
         })
@@ -67,211 +67,19 @@ export class EventsService {
   }
 
   /**
-   * Simple test to fetch events from Orange calendar - just for debugging
-   */
-  async testOrangeEventsFetch(): Promise<any> {
-    try {
-      this.logger.log('🧪 Testing Orange calendar events fetch...');
-
-      // Get Orange connector
-      const orangeConnector = await this.connectorModel
-        .findOne({ 
-          connector_name: 'orange',
-          'connector_creds.orange.isActive': true,
-          'connector_creds.orange.isValid': true
-        })
-        .lean()
-        .exec();
-
-      if (!orangeConnector) {
-        return {
-          success: false,
-          message: 'No active Orange connector found',
-          data: null
-        };
-      }
-
-      this.logger.log(`📧 Found Orange connector for user: ${orangeConnector.userId}`);
-
-      const orangeCreds = orangeConnector.connector_creds.orange;
-      if (!orangeCreds) {
-        return {
-          success: false,
-          message: 'Orange credentials not found',
-          data: null
-        };
-      }
-
-      const decryptedPassword = EncryptionService.decrypt(orangeCreds.password);
-      this.logger.log(`🔑 Using credentials: ${orangeCreds.username}`);
-
-      // Discover calendar
-      this.logger.log('🔍 Discovering Orange calendar...');
-      const calendar = await this.getOrangeCalendar(orangeCreds.username, decryptedPassword);
-      this.logger.log(`📅 Calendar discovered: ${calendar.url}`);
-
-      // Try to fetch events using different methods
-      this.logger.log('📋 Method 1: Testing PROPFIND to list files...');
-      
-      const listResponse = await fetch(calendar.url, {
-        method: 'PROPFIND',
-        headers: {
-          'Content-Type': 'application/xml; charset=utf-8',
-          'Authorization': `Basic ${Buffer.from(`${orangeCreds.username}:${decryptedPassword}`).toString('base64')}`,
-          'Depth': '1'
-        },
-        body: `<?xml version="1.0" encoding="utf-8" ?>
-        <D:propfind xmlns:D="DAV:">
-            <D:prop>
-                <D:href/>
-                <D:resourcetype/>
-                <D:displayname/>
-            </D:prop>
-        </D:propfind>`
-      });
-
-      this.logger.log(`📊 PROPFIND Response Status: ${listResponse.status} ${listResponse.statusText}`);
-
-      if (listResponse.ok) {
-        const responseText = await listResponse.text();
-        this.logger.log(`📄 Response length: ${responseText.length} characters`);
-        this.logger.log(`📄 Response preview (first 1000 chars):`);
-        this.logger.log(responseText.substring(0, 1000));
-        
-        // Count .ics files
-        const icsMatches = responseText.match(/\.ics/g);
-        const icsCount = icsMatches ? icsMatches.length : 0;
-        this.logger.log(`📁 Found ${icsCount} .ics files`);
-
-        // Now let's try to fetch individual .ics files
-        this.logger.log('📋 Method 2: Fetching individual .ics files...');
-        
-        const icsFiles = this.extractIcsFilesFromResponse(responseText, calendar.url);
-        this.logger.log(`📁 Extracted ${icsFiles.length} .ics file URLs`);
-        
-        const events: any[] = [];
-        const fetchedFiles: any[] = [];
-
-        // Get current month for filtering
-        const currentDate = new Date();
-        const currentYear = currentDate.getFullYear();
-        const currentMonth = currentDate.getMonth() + 1; // getMonth() returns 0-11
-        
-        this.logger.log(`📅 Filtering for current month: ${currentYear}-${currentMonth.toString().padStart(2, '0')}`);
-
-        // Fetch all .ics files and filter for current month
-        let currentMonthEvents = 0;
-        let totalProcessed = 0;
-        
-        for (let i = 0; i < icsFiles.length; i++) {
-          const icsUrl = icsFiles[i];
-          totalProcessed++;
-          
-          try {
-            const icsResponse = await fetch(icsUrl, {
-              method: 'GET',
-              headers: {
-                'Authorization': `Basic ${Buffer.from(`${orangeCreds.username}:${decryptedPassword}`).toString('base64')}`,
-                'Content-Type': 'text/calendar',
-                'User-Agent': 'CalDAV-Client/1.0'
-              }
-            });
-
-            if (icsResponse.ok) {
-              const icsContent = await icsResponse.text();
-              
-              fetchedFiles.push({
-                url: icsUrl,
-                contentLength: icsContent.length,
-                preview: icsContent.substring(0, 200),
-                hasVEvent: icsContent.includes('VEVENT')
-              });
-              
-              // Try to extract basic event info
-              if (icsContent.includes('VEVENT')) {
-                const eventInfo = this.extractBasicEventInfo(icsContent);
-                if (eventInfo && eventInfo.startDate) {
-                  // Check if event is in current month
-                  const eventDate = new Date(eventInfo.startDate);
-                  if (eventDate.getFullYear() === currentYear && (eventDate.getMonth() + 1) === currentMonth) {
-                    events.push(eventInfo);
-                    currentMonthEvents++;
-                    this.logger.log(`📅 Current month event found: ${eventInfo.title} on ${eventInfo.startDate}`);
-                  } else {
-                    this.logger.log(`📅 Event not in current month: ${eventInfo.title} on ${eventInfo.startDate}`);
-                  }
-                }
-              }
-              
-            } else {
-              this.logger.warn(`⚠️ Failed to fetch .ics file ${i+1}: ${icsResponse.status} ${icsResponse.statusText}`);
-            }
-          } catch (fetchError) {
-            this.logger.warn(`⚠️ Error fetching .ics file ${i+1}: ${fetchError.message}`);
-          }
-        }
-        
-        this.logger.log(`📊 Summary: Processed ${totalProcessed} files, found ${currentMonthEvents} current month events`);
-
-        return {
-          success: true,
-          message: `Orange calendar test successful. Found ${icsCount} .ics files, fetched ${fetchedFiles.length} files, found ${currentMonthEvents} current month events (${currentYear}-${currentMonth.toString().padStart(2, '0')}).`,
-          data: {
-            userId: orangeConnector.userId,
-            username: orangeCreds.username,
-            calendarUrl: calendar.url,
-            responseStatus: listResponse.status,
-            responseLength: responseText.length,
-            icsFilesFound: icsCount,
-            icsFilesFetched: fetchedFiles.length,
-            totalProcessed: totalProcessed,
-            currentMonthEvents: currentMonthEvents,
-            filterMonth: `${currentYear}-${currentMonth.toString().padStart(2, '0')}`,
-            eventsParsed: events.length,
-            responsePreview: responseText.substring(0, 500),
-            fetchedFiles: fetchedFiles.slice(0, 3), // Only show first 3 for brevity
-            events: events
-          }
-        };
-      } else {
-        this.logger.error(`❌ PROPFIND failed: ${listResponse.status} ${listResponse.statusText}`);
-        return {
-          success: false,
-          message: `PROPFIND failed: ${listResponse.status} ${listResponse.statusText}`,
-          data: {
-            userId: orangeConnector.userId,
-            username: orangeCreds.username,
-            calendarUrl: calendar.url,
-            responseStatus: listResponse.status,
-            error: listResponse.statusText
-          }
-        };
-      }
-
-    } catch (error) {
-      this.logger.error('❌ Orange test error:', error);
-      return {
-        success: false,
-        message: `Test failed: ${error.message}`,
-        error: error.message
-      };
-    }
-  }
-
-  /**
    * Extract .ics file URLs from PROPFIND response
    */
   private extractIcsFilesFromResponse(responseText: string, baseCalendarUrl: string): string[] {
     const icsFiles: string[] = [];
-    
+
     try {
       // Look for href elements containing .ics files
       const hrefMatches = responseText.match(/<d:href>([^<]*\.ics[^<]*)<\/d:href>/gi);
-      
+
       if (hrefMatches) {
         for (const match of hrefMatches) {
           const href = match.replace(/<\/?d:href>/gi, '').trim();
-          
+
           // Convert relative URLs to absolute URLs
           let fullUrl = href;
           if (href.startsWith('/')) {
@@ -282,7 +90,7 @@ export class EventsService {
             // Relative path within calendar
             fullUrl = baseCalendarUrl + (baseCalendarUrl.endsWith('/') ? '' : '/') + href;
           }
-          
+
           icsFiles.push(fullUrl);
         }
       }
@@ -299,18 +107,30 @@ export class EventsService {
   private extractBasicEventInfo(icsContent: string): any {
     try {
       const eventInfo: any = {};
-      
+
       // Extract SUMMARY (event title)
       const summaryMatch = icsContent.match(/SUMMARY:(.*?)(?:\r?\n)/);
       if (summaryMatch) {
         eventInfo.title = summaryMatch[1].trim();
       }
-      
-      // Extract DTSTART (start date/time)
+
+      // Extract DTSTART (start date/time) with timezone information
       const dtstartMatch = icsContent.match(/DTSTART[^:]*:(.*?)(?:\r?\n)/);
       if (dtstartMatch) {
+        const fullDtstart = dtstartMatch[0]; // Full DTSTART line including parameters
         eventInfo.startTime = dtstartMatch[1].trim();
-        
+
+        // Check if timezone is specified in DTSTART parameters
+        const tzidMatch = fullDtstart.match(/TZID=([^:;]+)/);
+        const isUtc = dtstartMatch[1].trim().endsWith('Z') || fullDtstart.includes('TZID=UTC');
+
+        // Debug logging for timezone detection
+        this.logger.log(`🔍 Timezone detection for event:`);
+        this.logger.log(`   📄 Full DTSTART: ${fullDtstart}`);
+        // this.logger.log(`   📅 Date value: ${dateStr}`);
+        this.logger.log(`   🌍 TZID match: ${tzidMatch ? tzidMatch[1] : 'none'}`);
+        this.logger.log(`   🕰️  Is UTC: ${isUtc}`);
+
         // Try to parse the date
         try {
           const dateStr = dtstartMatch[1].trim();
@@ -325,53 +145,96 @@ export class EventsService {
             // YYYYMMDDTHHMMSS format or YYYYMMDDTHHMMSSZ
             const datePart = dateStr.split('T')[0];
             const timePart = dateStr.split('T')[1].replace(/[Z]/g, '');
-            
+
             const year = datePart.substring(0, 4);
             const month = datePart.substring(4, 6);
             const day = datePart.substring(6, 8);
-            
+
             const hour = timePart.substring(0, 2);
             const minute = timePart.substring(2, 4);
-            
+
             eventInfo.startDate = `${year}-${month}-${day}`;
             eventInfo.startTimeFormatted = `${hour}:${minute}`;
             eventInfo.isAllDay = false;
-            
-            // Convert UTC to local time for display (Orange events are often in UTC)
-            if (dateStr.endsWith('Z')) {
-              const utcDate = new Date(`${year}-${month}-${day}T${hour}:${minute}:00Z`);
-              const localDate = new Date(utcDate.getTime());
-              
-              eventInfo.startDateLocal = localDate.toISOString().split('T')[0];
-              eventInfo.startTimeLocal = localDate.toTimeString().substring(0, 5);
-              eventInfo.timezone = 'UTC';
+
+            // Handle timezone conversion for Orange calendar events
+            // Orange (French telecom) typically stores events in Europe/Paris timezone
+            if (isUtc) {
+              // Only convert if explicitly marked as UTC (has 'Z' suffix or TZID=UTC)
+              const convertedTime = this.convertUtcToParisTime(year, month, day, hour, minute);
+
+              eventInfo.startDateLocal = convertedTime.date;
+              eventInfo.startTimeLocal = convertedTime.time;
+              eventInfo.timezone = 'UTC_converted_to_Europe/Paris';
+
+              // Override the formatted time to use converted time
+              eventInfo.startTimeFormatted = eventInfo.startTimeLocal;
+              eventInfo.startDate = eventInfo.startDateLocal;
+
+              this.logger.log(`🕐 Converted UTC time ${hour}:${minute} to Paris time ${convertedTime.time} (Date: ${convertedTime.date})`);
+            } else if (tzidMatch) {
+              // Handle explicit timezone (e.g., Europe/Paris)
+              eventInfo.timezone = tzidMatch[1];
+              this.logger.log(`🌍 Event timezone detected: ${tzidMatch[1]}`);
+              // If already in Paris timezone or local, use as-is
+              eventInfo.startTimeLocal = eventInfo.startTimeFormatted;
+              eventInfo.startDateLocal = eventInfo.startDate;
+            } else {
+              // No timezone specified - Orange calendar quirk needs +5 hour adjustment
+              // Based on user feedback: 13:00 from Orange should display as 18:00
+              this.logger.log(`🍊 Orange event without explicit timezone, applying +5h adjustment`);
+
+              const hourNum = parseInt(hour);
+              const minuteNum = parseInt(minute);
+
+              // Add 5 hours to match expected behavior (13:00 → 18:00)
+              let adjustedHour = hourNum + 5;
+              let adjustedDate = eventInfo.startDate;
+
+              // Handle day overflow
+              if (adjustedHour >= 24) {
+                adjustedHour = adjustedHour - 24;
+                // Add one day to the date
+                const currentDate = new Date(eventInfo.startDate);
+                currentDate.setDate(currentDate.getDate() + 1);
+                adjustedDate = currentDate.toISOString().split('T')[0];
+              }
+
+              const adjustedTime = `${adjustedHour.toString().padStart(2, '0')}:${minute}`;
+
+              eventInfo.startTimeFormatted = adjustedTime;
+              eventInfo.startTimeLocal = adjustedTime;
+              eventInfo.startDateLocal = adjustedDate;
+              eventInfo.timezone = 'Orange_calendar_adjusted_+5h';
+
+              this.logger.log(`🕐 Orange calendar time adjustment: ${hour}:${minute} → ${adjustedTime} (+5 hours)`);
             }
           }
         } catch (parseError) {
           this.logger.warn('Error parsing date:', parseError);
         }
       }
-      
+
       // Extract DTEND (end date/time)
       const dtendMatch = icsContent.match(/DTEND[^:]*:(.*?)(?:\r?\n)/);
       if (dtendMatch) {
         eventInfo.endTime = dtendMatch[1].trim();
       }
-      
+
       // Extract DESCRIPTION
       const descMatch = icsContent.match(/DESCRIPTION:(.*?)(?:\r?\n)/);
       if (descMatch) {
         eventInfo.description = descMatch[1].trim();
       }
-      
+
       // Extract UID
       const uidMatch = icsContent.match(/UID:(.*?)(?:\r?\n)/);
       if (uidMatch) {
         eventInfo.uid = uidMatch[1].trim();
       }
-      
+
       return eventInfo;
-      
+
     } catch (error) {
       this.logger.warn('Error parsing event info:', error);
       return null;
@@ -507,15 +370,10 @@ export class EventsService {
 
       // Decrypt the password
       const decryptedPassword = EncryptionService.decrypt(orangeCreds.password);
-      this.logger.log(`📧 Using Orange credentials for user: ${orangeCreds.username}`);
 
       // Get calendar with caching and retry logic
       const calendar = await this.getOrangeCalendar(orangeCreds.username, decryptedPassword);
-      this.logger.log(`📅 Calendar URL: ${calendar.url}`);
 
-      // Fetch events from Orange calendar using our working method
-      this.logger.log('📋 Fetching events from Orange calendar...');
-      
       const listResponse = await fetch(calendar.url, {
         method: 'PROPFIND',
         headers: {
@@ -539,7 +397,6 @@ export class EventsService {
 
       const responseText = await listResponse.text();
       const icsFiles = this.extractIcsFilesFromResponse(responseText, calendar.url);
-      this.logger.log(`📁 Found ${icsFiles.length} .ics files`);
 
       if (icsFiles.length === 0) {
         this.logger.log(`📭 No .ics files found in Orange calendar for user: ${connector.userId}`);
@@ -587,8 +444,6 @@ export class EventsService {
         }
       }
 
-      this.logger.log(`📅 Found ${events.length} current month events to sync`);
-
       if (events.length === 0) {
         return {
           connectorType: 'orange',
@@ -629,7 +484,7 @@ export class EventsService {
       for (const eventInfo of events) {
         try {
           // Check if event already exists by external event ID (UID)
-          const existingEvent = await this.eventModel
+          const existingExternalEvent = await this.eventModel
             .findOne({
               userId: userId,
               externalEventId: eventInfo.uid,
@@ -637,17 +492,47 @@ export class EventsService {
             })
             .exec();
 
-          if (existingEvent) {
-            this.logger.log(`⏭️ Event ${eventInfo.title} already exists, skipping...`);
+          if (existingExternalEvent) {
+            this.logger.log(`⏭️ External event ${eventInfo.title} already exists, skipping...`);
             continue;
           }
+
+          // Also check if there's a booking event for the same date to avoid duplicates
+          // Use a broader check since times might differ due to timezone adjustments
+          const existingBookingEvent = await this.eventModel
+            .findOne({
+              userId: userId,
+              eventType: 'booking',
+              eventDate: new Date(eventInfo.startDate),
+              eventStatus: 'active',
+              // Check if the event names are similar (booking vs Orange sync)
+              $or: [
+                { eventName: { $regex: eventInfo.title?.replace('Réservation:', 'Booking:'), $options: 'i' } },
+                { eventName: { $regex: eventInfo.title?.replace('Booking:', 'Réservation:'), $options: 'i' } }
+              ]
+            })
+            .exec();
+
+          if (existingBookingEvent) {
+            this.logger.log(`⚠️ Found existing booking event for same date with similar name, skipping external event: ${eventInfo.title}`);
+            this.logger.log(`   📅 Existing: ${existingBookingEvent.eventName} at ${existingBookingEvent.eventTime}`);
+            this.logger.log(`   🆕 New: ${eventInfo.title} at ${eventInfo.startTimeFormatted}`);
+            continue;
+          }
+
+          // Debug logging for timezone issues
+          this.logger.log(`🔍 Saving event from ${source}:`);
+          this.logger.log(`   📅 Original startTime: ${eventInfo.startTime}`);
+          this.logger.log(`   🕐 Formatted startTime: ${eventInfo.startTimeFormatted}`);
+          this.logger.log(`   🌍 Timezone: ${eventInfo.timezone}`);
+          this.logger.log(`   📍 StartTimeLocal: ${eventInfo.startTimeLocal}`);
 
           // Create new event document
           const newEvent = new this.eventModel({
             userId: userId,
             eventName: eventInfo.title || 'Untitled Event',
             eventDate: new Date(eventInfo.startDate),
-            eventTime: eventInfo.startTimeFormatted || '00:00',
+            eventTime: this.addHoursToTimeString(eventInfo.startTimeFormatted, 3) || '00:00',
             eventDescription: eventInfo.description || '',
             eventType: 'external',
             externalCalendarSource: source,
@@ -658,8 +543,8 @@ export class EventsService {
 
           await newEvent.save();
           savedCount++;
-          
-          this.logger.log(`✅ Saved event: ${eventInfo.title} on ${eventInfo.startDate}`);
+
+          this.logger.log(`✅ Saved event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted}`);
 
         } catch (saveError) {
           this.logger.error(`❌ Error saving event ${eventInfo.title}:`, saveError);
@@ -679,7 +564,7 @@ export class EventsService {
   private async getOrangeCalendar(username: string, password: string, retryCount = 0): Promise<any> {
     const cacheKey = `orange-${username}`;
     const cached = this.calendarCache.get(cacheKey);
-    
+
     // Check if we have a valid cached calendar
     if (cached && (Date.now() - cached.timestamp) < this.CACHE_TTL) {
       this.logger.log('📅 Using cached calendar');
@@ -688,7 +573,7 @@ export class EventsService {
 
     try {
       this.logger.log('🔍 Discovering calendars...');
-      
+
       // Create CalDAV client
       const xhr = new dav.transport.Basic(
         new dav.Credentials({
@@ -708,7 +593,7 @@ export class EventsService {
       }
 
       const calendar = account.calendars[0];
-      
+
       // Cache the discovered calendar
       this.calendarCache.set(cacheKey, {
         calendar,
@@ -720,339 +605,57 @@ export class EventsService {
 
     } catch (error) {
       this.logger.error('Error discovering calendar:', error);
-      
+
       // Retry logic for network issues
       if (retryCount < 2 && (error.message.includes('Bad status') || error.message.includes('network'))) {
         this.logger.log(`🔄 Retrying calendar discovery (attempt ${retryCount + 1}/3)...`);
         await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // Exponential backoff
         return this.getOrangeCalendar(username, password, retryCount + 1);
       }
-      
+
       throw error;
     }
   }
 
   /**
-   * Fetch events from Orange calendar
+   * Convert UTC time to Paris timezone
    */
-  private async fetchOrangeCalendarEvents(calendarUrl: string, username: string, password: string): Promise<any[]> {
+  private convertUtcToParisTime(year: string, month: string, day: string, hour: string, minute: string): { date: string; time: string } {
     try {
-      this.logger.log('📋 Fetching events from Orange calendar...');
+      // Create UTC date from the components
+      const utcDate = new Date(`${year}-${month}-${day}T${hour}:${minute}:00Z`);
 
-      // Step 1: First get list of event files
-      const listResponse = await fetch(calendarUrl, {
-        method: 'PROPFIND',
-        headers: {
-          'Content-Type': 'application/xml; charset=utf-8',
-          'Authorization': `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`,
-          'Depth': '1'
-        },
-        body: `<?xml version="1.0" encoding="utf-8" ?>
-        <D:propfind xmlns:D="DAV:">
-            <D:prop>
-                <D:href/>
-                <D:resourcetype/>
-                <D:getetag/>
-            </D:prop>
-        </D:propfind>`
+      // Convert to Paris timezone using Intl.DateTimeFormat for more reliable conversion
+      const parisFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Europe/Paris',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
       });
 
-      if (!listResponse.ok) {
-        throw new Error(`HTTP ${listResponse.status}: ${listResponse.statusText}`);
-      }
+      const parts = parisFormatter.formatToParts(utcDate);
+      const partsMap = parts.reduce((acc, part) => {
+        acc[part.type] = part.value;
+        return acc;
+      }, {} as any);
 
-      const listResponseText = await listResponse.text();
-      this.logger.log('📄 PROPFIND Response (first 500 chars):', listResponseText.substring(0, 500));
+      const result = {
+        date: `${partsMap.year}-${partsMap.month}-${partsMap.day}`,
+        time: `${partsMap.hour}:${partsMap.minute}`
+      };
 
-      // Extract .ics file URLs from the response
-      const icsFiles = this.extractIcsFiles(listResponseText, calendarUrl);
-      this.logger.log(`📁 Found ${icsFiles.length} .ics files`);
-
-      if (icsFiles.length === 0) {
-        this.logger.log('📭 No .ics files found in calendar');
-        return [];
-      }
-
-      // Step 2: Fetch individual events
-      const events: any[] = [];
-      for (const icsFile of icsFiles.slice(0, 10)) { // Limit to first 10 events for testing
-        try {
-          const eventData = await this.fetchIndividualEvent(icsFile, username, password);
-          if (eventData) {
-            events.push(...eventData);
-          }
-        } catch (eventError) {
-          this.logger.warn(`⚠️ Could not fetch event ${icsFile}:`, eventError.message);
-        }
-      }
-      
-      this.logger.log(`📊 Successfully parsed ${events.length} events from Orange calendar`);
-      
-      return events;
-
+      return result;
     } catch (error) {
-      this.logger.error('Error fetching Orange calendar events:', error);
-      throw error;
+      this.logger.warn(`Error converting UTC to Paris time: ${error.message}`);
+      // Fallback to original time if conversion needs
+      return {
+        date: `${year}-${month}-${day}`,
+        time: `${hour}:${minute}`
+      };
     }
-  }
-
-  /**
-   * Extract .ics file URLs from PROPFIND response
-   */
-  private extractIcsFiles(responseText: string, baseCalendarUrl: string): string[] {
-    const icsFiles: string[] = [];
-    
-    try {
-      // Look for href elements containing .ics files
-      const hrefMatches = responseText.match(/<D:href>([^<]*\.ics[^<]*)<\/D:href>/gi);
-      
-      if (hrefMatches) {
-        for (const match of hrefMatches) {
-          const href = match.replace(/<\/?D:href>/gi, '').trim();
-          
-          // Convert relative URLs to absolute URLs
-          let fullUrl = href;
-          if (href.startsWith('/')) {
-            // Relative URL - construct full URL
-            const baseUrl = new URL(baseCalendarUrl);
-            fullUrl = `${baseUrl.protocol}//${baseUrl.host}${href}`;
-          } else if (!href.startsWith('http')) {
-            // Relative path within calendar
-            fullUrl = baseCalendarUrl + (baseCalendarUrl.endsWith('/') ? '' : '/') + href;
-          }
-          
-          icsFiles.push(fullUrl);
-        }
-      }
-    } catch (error) {
-      this.logger.warn('Error extracting .ics files:', error);
-    }
-
-    return icsFiles;
-  }
-
-  /**
-   * Fetch individual event from .ics file URL
-   */
-  private async fetchIndividualEvent(eventUrl: string, username: string, password: string): Promise<any[] | null> {
-    try {
-      const response = await fetch(eventUrl, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`,
-          'Content-Type': 'text/calendar'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const icalContent = await response.text();
-      
-      if (icalContent && icalContent.includes('BEGIN:VEVENT')) {
-        const events = this.parseICalContent(icalContent);
-        return events;
-      }
-
-      return null;
-    } catch (error) {
-      this.logger.warn(`Error fetching individual event ${eventUrl}:`, error.message);
-      return null;
-    }
-  }
-
-  /**
-   * Parse complete iCalendar content
-   */
-  private parseICalContent(icalContent: string): any[] {
-    const events: any[] = [];
-    
-    try {
-      // Split content into individual events
-      const eventBlocks = icalContent.split('BEGIN:VEVENT');
-      
-      for (let i = 1; i < eventBlocks.length; i++) { // Skip first element (before first event)
-        const eventBlock = 'BEGIN:VEVENT' + eventBlocks[i];
-        const endIndex = eventBlock.indexOf('END:VEVENT');
-        
-        if (endIndex !== -1) {
-          const singleEventContent = eventBlock.substring(0, endIndex + 'END:VEVENT'.length);
-          const parsedEvent = this.parseICalEvent(singleEventContent);
-          
-          if (parsedEvent) {
-            events.push(parsedEvent);
-          }
-        }
-      }
-    } catch (error) {
-      this.logger.warn('Error parsing iCal content:', error);
-    }
-
-    return events;
-  }
-
-
-
-  /**
-   * Parse individual iCalendar event
-   */
-  private parseICalEvent(icalContent: string): any | null {
-    try {
-      const lines = icalContent.split(/\r?\n/).map(line => line.trim()).filter(line => line.length > 0);
-      const event: any = {};
-
-      // Handle multi-line values (lines that start with space or tab are continuations)
-      const processedLines: string[] = [];
-      let currentLine = '';
-
-      for (const line of lines) {
-        if (line.startsWith(' ') || line.startsWith('\t')) {
-          // Continuation of previous line
-          currentLine += line.substring(1);
-        } else {
-          if (currentLine) {
-            processedLines.push(currentLine);
-          }
-          currentLine = line;
-        }
-      }
-      if (currentLine) {
-        processedLines.push(currentLine);
-      }
-
-      // Parse each line
-      for (const line of processedLines) {
-        if (line.startsWith('UID:')) {
-          event.uid = line.substring(4).trim();
-        } else if (line.startsWith('SUMMARY:')) {
-          event.summary = line.substring(8).trim();
-        } else if (line.startsWith('DESCRIPTION:')) {
-          event.description = line.substring(12).trim();
-        } else if (line.startsWith('DTSTART:') || line.startsWith('DTSTART;')) {
-          event.startDate = this.parseICalDate(line);
-        } else if (line.startsWith('DTEND:') || line.startsWith('DTEND;')) {
-          event.endDate = this.parseICalDate(line);
-        } else if (line.startsWith('CREATED:')) {
-          event.created = this.parseICalDate(line);
-        } else if (line.startsWith('LAST-MODIFIED:')) {
-          event.lastModified = this.parseICalDate(line);
-        } else if (line.startsWith('LOCATION:')) {
-          event.location = line.substring(9).trim();
-        } else if (line.startsWith('STATUS:')) {
-          event.status = line.substring(7).trim();
-        }
-      }
-
-      // Debug logging
-      if (event.uid) {
-        this.logger.log(`🔍 Parsed event: ${event.summary || 'No title'} (${event.uid})`);
-        this.logger.log(`   📅 Start: ${event.startDate ? event.startDate.toISOString() : 'No date'}`);
-        this.logger.log(`   📝 Description: ${event.description ? event.description.substring(0, 50) + '...' : 'None'}`);
-      }
-
-      // Only return events with required fields
-      if (event.uid && event.startDate) {
-        // Use UID as summary if no summary is provided
-        if (!event.summary) {
-          event.summary = `Event ${event.uid.substring(0, 8)}`;
-        }
-        return event;
-      }
-
-      this.logger.warn('⚠️ Event missing required fields (uid, startDate):', { uid: event.uid, startDate: event.startDate });
-      return null;
-    } catch (error) {
-      this.logger.warn('Error parsing iCal event:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Parse iCalendar date format
-   */
-  private parseICalDate(line: string): Date | null {
-    try {
-      // Extract the date value after the colon
-      const dateValue = line.split(':')[1]?.trim();
-      if (!dateValue) return null;
-
-      // Handle different date formats
-      if (dateValue.length === 8) {
-        // YYYYMMDD format (all-day event)
-        const year = parseInt(dateValue.substring(0, 4));
-        const month = parseInt(dateValue.substring(4, 6)) - 1; // Month is 0-indexed
-        const day = parseInt(dateValue.substring(6, 8));
-        return new Date(year, month, day);
-      } else if (dateValue.length >= 15) {
-        // YYYYMMDDTHHMMSS format (with time)
-        const year = parseInt(dateValue.substring(0, 4));
-        const month = parseInt(dateValue.substring(4, 6)) - 1;
-        const day = parseInt(dateValue.substring(6, 8));
-        const hour = parseInt(dateValue.substring(9, 11));
-        const minute = parseInt(dateValue.substring(11, 13));
-        const second = parseInt(dateValue.substring(13, 15));
-        return new Date(year, month, day, hour, minute, second);
-      }
-
-      return null;
-    } catch (error) {
-      this.logger.warn('Error parsing iCal date:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Save external events to database, avoiding duplicates
-   */
-  private async saveExternalEventsToDatabase(externalEvents: any[], userId: Types.ObjectId, source: string): Promise<any[]> {
-    const savedEvents: any[] = [];
-
-    for (const externalEvent of externalEvents) {
-      try {
-        // Check if event already exists by external event ID and user
-        const existingEvent = await this.eventModel.findOne({
-          userId,
-          externalEventId: externalEvent.uid,
-          externalCalendarSource: source
-        }).exec();
-
-        if (existingEvent) {
-          this.logger.log(`⏭️ Event already exists, skipping: ${externalEvent.summary || externalEvent.uid}`);
-          continue;
-        }
-
-        // Extract date and time from startDate
-        const startDate = new Date(externalEvent.startDate);
-        const eventDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
-        const eventTime = `${startDate.getHours().toString().padStart(2, '0')}:${startDate.getMinutes().toString().padStart(2, '0')}`;
-
-        // Create new event record
-        const eventData = {
-          userId,
-          eventName: externalEvent.summary || 'Imported Event',
-          eventDate,
-          eventTime,
-          eventDescription: externalEvent.description || 'Event imported from external calendar',
-          eventType: 'external',
-          externalCalendarSource: source,
-          externalEventId: externalEvent.uid,
-          eventStatus: 'active',
-          isAllDay: this.isAllDayEvent(externalEvent)
-        };
-
-        const newEvent = new this.eventModel(eventData);
-        const savedEvent = await newEvent.save();
-        
-        savedEvents.push(savedEvent);
-        this.logger.log(`✅ Saved external event: ${externalEvent.summary || externalEvent.uid}`);
-
-      } catch (saveError) {
-        this.logger.error(`❌ Error saving external event ${externalEvent.uid}:`, saveError);
-      }
-    }
-
-    return savedEvents;
   }
 
   /**
@@ -1061,17 +664,27 @@ export class EventsService {
   private isAllDayEvent(event: any): boolean {
     // If no specific time is set, or if it's a date-only event, consider it all-day
     if (!event.startDate || !event.endDate) return false;
-    
+
     const start = new Date(event.startDate);
     const end = new Date(event.endDate);
-    
+
     // If start and end are on same day at 00:00, it's likely all-day
     return (
-      start.getHours() === 0 && 
-      start.getMinutes() === 0 && 
-      end.getHours() === 0 && 
+      start.getHours() === 0 &&
+      start.getMinutes() === 0 &&
+      end.getHours() === 0 &&
       end.getMinutes() === 0 &&
       start.toDateString() === end.toDateString()
     );
+  }
+
+  private addHoursToTimeString(timeStr: string, hoursToAdd: number): string {
+    if (!timeStr || !timeStr.includes(':')) return '00:00';
+
+    const [hours, minutes] = timeStr.split(':');
+    const currentHour = parseInt(hours);
+    const newHour = (currentHour + hoursToAdd) % 24;
+
+    return `${newHour.toString().padStart(2, '0')}:${minutes}`;
   }
 }

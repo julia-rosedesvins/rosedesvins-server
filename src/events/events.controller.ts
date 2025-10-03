@@ -54,42 +54,12 @@ export class EventsController {
     }
   }
 
-  @Get('test-orange-events')
-  @ApiOperation({ 
-    summary: 'Test Orange calendar events fetch',
-    description: 'Simple test endpoint to check if we can fetch events from Orange calendar'
-  })
-  async testOrangeEvents() {
-    try {
-      const testResult = await this.eventsService.testOrangeEventsFetch();
-      
-      return testResult;
-    } catch (error) {
-      throw error;
-    }
-  }
-
   @Get('sync')
   @ApiOperation({ 
     summary: 'Sync events from calendar connectors (GET)',
     description: 'Public GET endpoint to sync events from all active calendar connectors (Orange, OVH, Microsoft) to the events table. Prevents duplicate events by checking external event IDs.'
   })
   async syncEventsFromConnectorsGet() {
-    try {
-      const syncResult = await this.eventsService.syncEventsFromConnectors();
-      
-      return syncResult;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  @Post('sync/connectors')
-  @ApiOperation({ 
-    summary: 'Sync events from calendar connectors',
-    description: 'Public endpoint to sync events from all active calendar connectors (Orange, OVH, Microsoft) to the events table. Prevents duplicate events by checking external event IDs.'
-  })
-  async syncEventsFromConnectors() {
     try {
       const syncResult = await this.eventsService.syncEventsFromConnectors();
       
