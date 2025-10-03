@@ -14,9 +14,10 @@ import { PaymentMethodsModule } from './payment-methods/payment-methods.module';
 import { WidgetModule } from './widget/widget.module';
 import { UserBookingsModule } from './user-bookings/user-bookings.module';
 import { EventsModule } from './events/events.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
-  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule, NotificationPreferencesModule, PaymentMethodsModule, WidgetModule, UserBookingsModule, EventsModule],
+  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule, NotificationPreferencesModule, PaymentMethodsModule, WidgetModule, UserBookingsModule, EventsModule,  ScheduleModule.forRoot()],
   controllers: [AppController],
   providers: [AppService],
 })

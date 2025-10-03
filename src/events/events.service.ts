@@ -5,7 +5,7 @@ import { Event } from '../schemas/events.schema';
 import { Connector } from '../schemas/connector.schema';
 import { EncryptionService } from '../common/encryption.service';
 import { Buffer } from 'buffer';
-
+import { Cron, CronExpression } from '@nestjs/schedule';
 const dav = require('dav');
 
 @Injectable()
@@ -686,5 +686,20 @@ export class EventsService {
     const newHour = (currentHour + hoursToAdd) % 24;
 
     return `${newHour.toString().padStart(2, '0')}:${minutes}`;
+  }
+
+  /*
+   @desc - run cron job to sync events every 6 hours
+  */
+  @Cron(CronExpression.EVERY_6_HOURS)
+  handleCron() {
+    this.logger.log('🕒 Cron job triggered: Syncing calendar events...');
+    this.syncEventsFromConnectors()
+      .then(result => {
+        this.logger.log(`🕒 Cron job completed: ${result.message}`);
+      })
+      .catch(error => {
+        this.logger.error('❌ Cron job error during calendar sync:', error);
+      });
   }
 }
