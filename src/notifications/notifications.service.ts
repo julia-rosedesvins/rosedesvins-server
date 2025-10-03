@@ -5,6 +5,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { Event } from '../schemas/events.schema';
 import { NotificationPreferences } from '../schemas/notification-preferences.schema';
 import { User } from '../schemas/user.schema';
+import { UserBooking } from '../schemas/user-bookings.schema';
 import { EmailService, EmailJob } from '../email/email.service';
 import { TemplateService } from '../email/template.service';
 
@@ -39,6 +40,7 @@ export class NotificationsService {
     @InjectModel(Event.name) private eventModel: Model<Event>,
     @InjectModel(NotificationPreferences.name) private notificationPreferencesModel: Model<NotificationPreferences>,
     @InjectModel(User.name) private userModel: Model<User>,
+    @InjectModel(UserBooking.name) private userBookingModel: Model<UserBooking>,
     private emailService: EmailService,
     private templateService: TemplateService,
   ) {}
@@ -84,7 +86,7 @@ export class NotificationsService {
                     $gte: today,
                     $lte: tomorrow
                 }
-            }).populate('userId').exec();
+            }).populate('userId').populate('bookingId').exec();
 
             this.logger.log(`📅 Found ${upcomingEvents.length} upcoming booking events to check`);
 
@@ -295,10 +297,21 @@ export class NotificationsService {
             // Get hours before event for notification
             const hoursBeforeEvent = this.getHoursFromNotificationSetting(preferences.customerNotificationBefore);
 
+            // Get booking details to access customer information
+            const booking = event.bookingId;
+            if (!booking) {
+                console.log('❌ No booking data found for event, skipping customer notification');
+                return;
+            }
+
+            // Get customer info from booking data
+            const customerName = `${booking.userContactFirstname} ${booking.userContactLastname}`;
+            const customerEmail = booking.customerEmail;
+
             // Prepare email data
             const emailData = {
-                customerName: `${event.userId.firstName} ${event.userId.lastName}`,
-                customerEmail: event.userId.email,
+                customerName: customerName,
+                customerEmail: customerEmail,
                 eventTitle: event.eventName,
                 eventDate: eventDateFormatted,
                 eventTime: event.eventTime,
@@ -312,16 +325,16 @@ export class NotificationsService {
             // Generate email HTML
             const emailHtml = this.templateService.generateCustomerNotificationEmail(emailData);
 
-            // Send email
+            // Send email to customer
             const emailJob: EmailJob = {
-                to: event.userId.email,
+                to: customerEmail,
                 subject: `Reminder: Your wine experience "${event.eventName}" is in ${hoursBeforeEvent} hours`,
                 html: emailHtml,
             };
             await this.emailService.sendEmail(emailJob);
 
             console.log(`✅ Customer notification email sent successfully:
-                📧 To: ${event.userId.email} (${event.userId.firstName} ${event.userId.lastName})
+                📧 To: ${customerEmail} (${customerName})
                 🎯 Event: ${event.eventName}
                 ⏰ Time: ${event.eventTime} (${DEFAULT_TIMEZONE})
                 ⌛ Notice: ${hoursBeforeEvent} hours before event`);
@@ -360,15 +373,26 @@ export class NotificationsService {
             // Get hours before event for notification
             const hoursBeforeEvent = this.getHoursFromNotificationSetting(preferences.providerNotificationBefore);
 
-            // Get provider email - could be admin email or domain owner email
-            const providerEmail = preferences.domainId?.ownerEmail || process.env.ADMIN_EMAIL || 'admin@rosedesvins.com';
-            const providerName = preferences.domainId?.ownerName || 'Rose des Vins Team';
+            // Get booking details to access customer information
+            const booking = event.bookingId;
+            if (!booking) {
+                console.log('❌ No booking data found for event, skipping provider notification');
+                return;
+            }
+
+            // Provider is the wine business owner (event.userId)
+            const provider = event.userId;
+            const providerEmail = provider.email;
+            const providerName = `${provider.firstName} ${provider.lastName}`;
+
+            // Customer info comes from booking data
+            const customerName = `${booking.userContactFirstname} ${booking.userContactLastname}`;
 
             // Prepare email data
             const emailData = {
                 providerName: providerName,
                 providerEmail: providerEmail,
-                customerName: `${event.userId.firstName} ${event.userId.lastName}`,
+                customerName: customerName,
                 eventTitle: event.eventName,
                 eventDate: eventDateFormatted,
                 eventTime: event.eventTime,
@@ -509,8 +533,8 @@ export class NotificationsService {
      */
     async sendTestNotificationEmails(eventId: string): Promise<any> {
         try {
-            // Find the event and populate user details
-            const event = await this.eventModel.findById(eventId).populate('userId').exec();
+            // Find the event and populate user details and booking details
+            const event = await this.eventModel.findById(eventId).populate('userId').populate('bookingId').exec();
 
             if (!event) {
                 throw new Error(`Event not found: ${eventId}`);
@@ -538,8 +562,13 @@ export class NotificationsService {
                 this.logger.warn(`No notification preferences found for user ${event.userId._id}, using defaults`);
             }
 
-            // Cast event.userId to access populated user data
-            const user = event.userId as any;
+            // Get booking and user data
+            const booking = event.bookingId as any;
+            const provider = event.userId as any;
+
+            if (!booking) {
+                throw new Error(`No booking data found for event ${eventId}`);
+            }
 
             const results = {
                 eventDetails: {
@@ -547,8 +576,10 @@ export class NotificationsService {
                     name: event.eventName,
                     date: event.eventDate,
                     time: event.eventTime,
-                    customer: `${user.firstName} ${user.lastName}`,
-                    customerEmail: user.email
+                    provider: `${provider.firstName} ${provider.lastName}`,
+                    providerEmail: provider.email,
+                    customer: `${booking.userContactFirstname} ${booking.userContactLastname}`,
+                    customerEmail: booking.customerEmail
                 },
                 emailsSent: [] as any[]
             };
@@ -558,14 +589,14 @@ export class NotificationsService {
                 await this.sendCustomerNotification(event, preferences);
                 results.emailsSent.push({
                     type: 'customer',
-                    to: user.email,
+                    to: booking.customerEmail,
                     status: 'success',
                     message: 'Customer notification email sent successfully'
                 });
             } catch (error) {
                 results.emailsSent.push({
                     type: 'customer',
-                    to: user.email,
+                    to: booking.customerEmail,
                     status: 'error',
                     message: error.message
                 });
@@ -574,18 +605,16 @@ export class NotificationsService {
             // Send provider notification email
             try {
                 await this.sendProviderNotification(event, preferences);
-                const providerEmail = process.env.ADMIN_EMAIL || 'admin@rosedesvins.com';
                 results.emailsSent.push({
                     type: 'provider',
-                    to: providerEmail,
+                    to: provider.email,
                     status: 'success',
                     message: 'Provider notification email sent successfully'
                 });
             } catch (error) {
-                const providerEmail = process.env.ADMIN_EMAIL || 'admin@rosedesvins.com';
                 results.emailsSent.push({
                     type: 'provider',
-                    to: providerEmail,
+                    to: provider.email,
                     status: 'error',
                     message: error.message
                 });
