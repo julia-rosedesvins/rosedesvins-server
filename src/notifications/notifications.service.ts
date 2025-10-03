@@ -503,4 +503,246 @@ export class NotificationsService {
             this.logger.error(`Error testing notification for event ${eventId}:`, error);
         }
     }
+
+    /**
+     * Send test notification emails for specific event (both customer and provider)
+     */
+    async sendTestNotificationEmails(eventId: string): Promise<any> {
+        try {
+            // Find the event and populate user details
+            const event = await this.eventModel.findById(eventId).populate('userId').exec();
+
+            if (!event) {
+                throw new Error(`Event not found: ${eventId}`);
+            }
+
+            if (event.eventType !== 'booking') {
+                throw new Error(`Event ${eventId} is not a booking event`);
+            }
+
+            this.logger.log(`📧 Sending test notification emails for event: ${event.eventName}`);
+
+            // Find user's notification preferences (or use defaults)
+            let preferences = await this.notificationPreferencesModel
+                .findOne({ userId: event.userId._id })
+                .populate('domainId')
+                .exec();
+
+            // If no preferences found, create default preferences object for testing
+            if (!preferences) {
+                preferences = {
+                    userId: event.userId._id,
+                    customerNotificationBefore: '2_hours' as any,
+                    providerNotificationBefore: '2_hours' as any,
+                } as any;
+                this.logger.warn(`No notification preferences found for user ${event.userId._id}, using defaults`);
+            }
+
+            // Cast event.userId to access populated user data
+            const user = event.userId as any;
+
+            const results = {
+                eventDetails: {
+                    id: event._id,
+                    name: event.eventName,
+                    date: event.eventDate,
+                    time: event.eventTime,
+                    customer: `${user.firstName} ${user.lastName}`,
+                    customerEmail: user.email
+                },
+                emailsSent: [] as any[]
+            };
+
+            // Send customer notification email
+            try {
+                await this.sendCustomerNotification(event, preferences);
+                results.emailsSent.push({
+                    type: 'customer',
+                    to: user.email,
+                    status: 'success',
+                    message: 'Customer notification email sent successfully'
+                });
+            } catch (error) {
+                results.emailsSent.push({
+                    type: 'customer',
+                    to: user.email,
+                    status: 'error',
+                    message: error.message
+                });
+            }
+
+            // Send provider notification email
+            try {
+                await this.sendProviderNotification(event, preferences);
+                const providerEmail = process.env.ADMIN_EMAIL || 'admin@rosedesvins.com';
+                results.emailsSent.push({
+                    type: 'provider',
+                    to: providerEmail,
+                    status: 'success',
+                    message: 'Provider notification email sent successfully'
+                });
+            } catch (error) {
+                const providerEmail = process.env.ADMIN_EMAIL || 'admin@rosedesvins.com';
+                results.emailsSent.push({
+                    type: 'provider',
+                    to: providerEmail,
+                    status: 'error',
+                    message: error.message
+                });
+            }
+
+            return results;
+
+        } catch (error) {
+            this.logger.error(`Error sending test notification emails for event ${eventId}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Send quick test emails with mock data (useful for testing without real events)
+     */
+    async sendQuickTestEmails(email: string): Promise<any> {
+        try {
+            this.logger.log(`📧 Sending quick test notification emails to: ${email}`);
+
+            // Create mock event data for testing
+            const mockEventDate = new Date();
+            mockEventDate.setDate(mockEventDate.getDate() + 1); // Tomorrow
+
+            const mockEvent = {
+                _id: 'mock-event-id',
+                eventName: 'Wine Tasting Experience - Test Event',
+                eventDate: mockEventDate,
+                eventTime: '18:00',
+                eventDescription: 'This is a test email for our wine tasting experience. Discover exceptional wines in our beautiful vineyard setting.',
+                location: 'Rose des Vins Vineyard',
+                userId: {
+                    _id: 'mock-user-id',
+                    firstName: 'John',
+                    lastName: 'Doe',
+                    email: email
+                }
+            };
+
+            const results = {
+                testData: {
+                    eventName: mockEvent.eventName,
+                    eventDate: mockEvent.eventDate.toLocaleDateString('fr-FR'),
+                    eventTime: mockEvent.eventTime,
+                    recipientEmail: email,
+                    testType: 'Mock data test'
+                },
+                emailsSent: [] as any[]
+            };
+
+            // Send customer notification email
+            try {
+                // Format date for display
+                const eventDateFormatted = mockEvent.eventDate.toLocaleDateString('fr-FR', { 
+                    weekday: 'long', 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                });
+
+                // Prepare customer email data
+                const customerEmailData = {
+                    customerName: `${mockEvent.userId.firstName} ${mockEvent.userId.lastName}`,
+                    customerEmail: mockEvent.userId.email,
+                    eventTitle: mockEvent.eventName,
+                    eventDate: eventDateFormatted,
+                    eventTime: mockEvent.eventTime,
+                    eventTimezone: DEFAULT_TIMEZONE,
+                    eventLocation: mockEvent.location,
+                    eventDescription: mockEvent.eventDescription,
+                    providerName: 'Rose des Vins Team',
+                    hoursBeforeEvent: 24,
+                };
+
+                // Generate and send customer email
+                const customerEmailHtml = this.templateService.generateCustomerNotificationEmail(customerEmailData);
+                const customerEmailJob: EmailJob = {
+                    to: email,
+                    subject: `[TEST] Reminder: Your wine experience "${mockEvent.eventName}" is tomorrow`,
+                    html: customerEmailHtml,
+                };
+                await this.emailService.sendEmail(customerEmailJob);
+
+                results.emailsSent.push({
+                    type: 'customer',
+                    to: email,
+                    status: 'success',
+                    message: 'Customer notification test email sent successfully'
+                });
+
+                this.logger.log(`✅ Customer test email sent to: ${email}`);
+            } catch (error) {
+                results.emailsSent.push({
+                    type: 'customer',
+                    to: email,
+                    status: 'error',
+                    message: error.message
+                });
+                this.logger.error(`❌ Failed to send customer test email:`, error);
+            }
+
+            // Send provider notification email
+            try {
+                // Format date for display
+                const eventDateFormatted = mockEvent.eventDate.toLocaleDateString('fr-FR', { 
+                    weekday: 'long', 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                });
+
+                // Prepare provider email data
+                const providerEmailData = {
+                    providerName: 'Wine Experience Host',
+                    providerEmail: email,
+                    customerName: `${mockEvent.userId.firstName} ${mockEvent.userId.lastName}`,
+                    eventTitle: mockEvent.eventName,
+                    eventDate: eventDateFormatted,
+                    eventTime: mockEvent.eventTime,
+                    eventTimezone: DEFAULT_TIMEZONE,
+                    eventLocation: mockEvent.location,
+                    eventDescription: mockEvent.eventDescription,
+                    hoursBeforeEvent: 24,
+                };
+
+                // Generate and send provider email
+                const providerEmailHtml = this.templateService.generateProviderNotificationEmail(providerEmailData);
+                const providerEmailJob: EmailJob = {
+                    to: email,
+                    subject: `[TEST] Upcoming Guest Experience: ${mockEvent.eventName} tomorrow`,
+                    html: providerEmailHtml,
+                };
+                await this.emailService.sendEmail(providerEmailJob);
+
+                results.emailsSent.push({
+                    type: 'provider',
+                    to: email,
+                    status: 'success',
+                    message: 'Provider notification test email sent successfully'
+                });
+
+                this.logger.log(`✅ Provider test email sent to: ${email}`);
+            } catch (error) {
+                results.emailsSent.push({
+                    type: 'provider',
+                    to: email,
+                    status: 'error',
+                    message: error.message
+                });
+                this.logger.error(`❌ Failed to send provider test email:`, error);
+            }
+
+            return results;
+
+        } catch (error) {
+            this.logger.error(`Error sending quick test emails to ${email}:`, error);
+            throw error;
+        }
+    }
 }

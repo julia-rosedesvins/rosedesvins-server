@@ -60,6 +60,58 @@ export class NotificationsController {
   }
 
   /**
+   * Send test notification emails for specific event
+   */
+  @Post('send-test-emails/:eventId')
+  @ApiOperation({
+    summary: 'Send test notification emails',
+    description: 'Send actual test notification emails (both customer and provider) for a specific event ID'
+  })
+  async sendTestEmails(@Param('eventId') eventId: string) {
+    try {
+      this.logger.log(`📧 Sending test notification emails for event: ${eventId}`);
+      const result = await this.notificationsService.sendTestNotificationEmails(eventId);
+      return {
+        success: true,
+        message: `Test notification emails sent successfully for event ${eventId}`,
+        details: result
+      };
+    } catch (error) {
+      this.logger.error(`Error sending test notification emails for event ${eventId}:`, error);
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+  }
+
+  /**
+   * Send quick test emails with mock data
+   */
+  @Post('send-quick-test/:email')
+  @ApiOperation({
+    summary: 'Send quick test emails with mock data',
+    description: 'Send test notification emails using mock event data to specified email address'
+  })
+  async sendQuickTestEmails(@Param('email') email: string) {
+    try {
+      this.logger.log(`📧 Sending quick test notification emails to: ${email}`);
+      const result = await this.notificationsService.sendQuickTestEmails(email);
+      return {
+        success: true,
+        message: `Quick test notification emails sent successfully to ${email}`,
+        details: result
+      };
+    } catch (error) {
+      this.logger.error(`Error sending quick test emails to ${email}:`, error);
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+  }
+
+  /**
    * Get notification status
    */
   @Get('status')
