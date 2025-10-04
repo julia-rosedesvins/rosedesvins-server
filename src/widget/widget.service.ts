@@ -78,7 +78,8 @@ export class WidgetService {
       },
       domainProfile: {
         domainDescription: domainProfile.domainDescription,
-        domainProfilePictureUrl: domainProfile.domainProfilePictureUrl,
+        // domainProfilePictureUrl: domainProfile.domainProfilePictureUrl,
+        domainProfilePictureUrl: service.serviceBannerUrl || domainProfile.domainProfilePictureUrl,
         domainLogoUrl: domainProfile.domainLogoUrl,
         colorCode: domainProfile.colorCode,
       },
