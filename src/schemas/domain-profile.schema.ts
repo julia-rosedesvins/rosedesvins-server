@@ -25,6 +25,9 @@ export class Service {
   @Prop({ type: [String], required: true })
   languagesOffered: string[];
 
+  @Prop({ required: false, trim: true })
+  serviceBannerUrl: string;
+
   @Prop({ default: true })
   isActive: boolean;
 }
