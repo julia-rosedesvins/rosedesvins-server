@@ -22,6 +22,7 @@ export interface CreateOrUpdateDomainProfileServiceDto {
     timeOfServiceInMinutes: number;
     numberOfWinesTasted: number;
     languagesOffered: string[];
+    serviceBannerUrl?: string;
     isActive: boolean;
   }>;
 }
@@ -173,10 +174,22 @@ export class DomainProfileService {
    * Add a new service to user's domain profile
    * @param userId - User ID
    * @param serviceData - Service data to add
+   * @param files - Uploaded files (serviceBanner)
    * @returns Updated domain profile
    */
-  async addService(userId: string, serviceData: any): Promise<DomainProfile> {
+  async addService(
+    userId: string, 
+    serviceData: any,
+    files?: { serviceBanner?: Express.Multer.File[] }
+  ): Promise<DomainProfile> {
     const userObjectId = new Types.ObjectId(userId);
+    
+    // Handle service banner file upload
+    let serviceBannerUrl = serviceData.serviceBannerUrl;
+    
+    if (files?.serviceBanner?.[0]) {
+      serviceBannerUrl = `/uploads/domain-profiles/${files.serviceBanner[0].filename}`;
+    }
     
     const mappedServiceData = {
       name: serviceData.serviceName,
@@ -186,6 +199,7 @@ export class DomainProfileService {
       timeOfServiceInMinutes: serviceData.timeOfServiceInMinutes,
       numberOfWinesTasted: serviceData.numberOfWinesTasted,
       languagesOffered: serviceData.languagesOffered,
+      serviceBannerUrl: serviceBannerUrl,
       isActive: serviceData.isActive
     };
     
@@ -227,6 +241,7 @@ export class DomainProfileService {
       timeOfServiceInMinutes: service.timeOfServiceInMinutes,
       numberOfWinesTasted: service.numberOfWinesTasted,
       languagesOffered: service.languagesOffered,
+      serviceBannerUrl: service.serviceBannerUrl,
       isActive: service.isActive
     }));
   }
@@ -236,9 +251,15 @@ export class DomainProfileService {
    * @param userId - User ID
    * @param serviceIndex - Index of the service to update
    * @param updateData - Update data
+   * @param files - Uploaded files (serviceBanner)
    * @returns Updated domain profile
    */
-  async updateService(userId: string, serviceIndex: number, updateData: any): Promise<DomainProfile> {
+  async updateService(
+    userId: string, 
+    serviceIndex: number, 
+    updateData: any,
+    files?: { serviceBanner?: Express.Multer.File[] }
+  ): Promise<DomainProfile> {
     const userObjectId = new Types.ObjectId(userId);
     
     const domainProfile = await this.domainProfileModel.findOne({ userId: userObjectId });
@@ -252,6 +273,18 @@ export class DomainProfileService {
     }
 
     console.log('Update data before mapping:', JSON.stringify(updateData, null, 2));
+
+    // Handle service banner file upload
+    let serviceBannerUrl = updateData.serviceBannerUrl;
+    
+    if (files?.serviceBanner?.[0]) {
+      // Clean up old service banner file if exists
+      const existingService = domainProfile.services[serviceIndex];
+      if (existingService.serviceBannerUrl) {
+        await this.deleteFile(existingService.serviceBannerUrl);
+      }
+      serviceBannerUrl = `/uploads/domain-profiles/${files.serviceBanner[0].filename}`;
+    }
 
     // Map API fields to database schema fields
     const mappedUpdateData: any = {};
@@ -276,6 +309,9 @@ export class DomainProfileService {
     }
     if (updateData.languagesOffered !== undefined) {
       mappedUpdateData.languagesOffered = updateData.languagesOffered;
+    }
+    if (serviceBannerUrl !== undefined) {
+      mappedUpdateData.serviceBannerUrl = serviceBannerUrl;
     }
     if (updateData.isActive !== undefined) {
       mappedUpdateData.isActive = updateData.isActive;
@@ -316,6 +352,12 @@ export class DomainProfileService {
 
     if (serviceIndex >= domainProfile.services.length || serviceIndex < 0) {
       throw new NotFoundException('Service not found at the specified index');
+    }
+
+    // Clean up service banner file if exists before deleting the service
+    const serviceToDelete = domainProfile.services[serviceIndex];
+    if (serviceToDelete.serviceBannerUrl) {
+      await this.deleteFile(serviceToDelete.serviceBannerUrl);
     }
 
     // Remove the service at the specified index

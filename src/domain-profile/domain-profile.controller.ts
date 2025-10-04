@@ -29,6 +29,25 @@ import { CurrentUser } from 'src/decorators/current-user.decorator';
 export class DomainProfileController {
   constructor(private readonly domainProfileService: DomainProfileService) {}
 
+  /**
+   * Helper method to parse array data from FormData
+   */
+  private parseArrayFromFormData(data: any, key: string): string[] {
+    // Handle array sent as key[] format
+    if (data[`${key}[]`]) {
+      return Array.isArray(data[`${key}[]`]) ? data[`${key}[]`] : [data[`${key}[]`]];
+    }
+    // Handle direct array
+    if (Array.isArray(data[key])) {
+      return data[key];
+    }
+    // Handle single value
+    if (data[key]) {
+      return [data[key]];
+    }
+    return [];
+  }
+
   @Post('create-or-update')
   @UseGuards(UserGuard)
   @UseInterceptors(FileFieldsInterceptor([
@@ -160,34 +179,43 @@ export class DomainProfileController {
   }
 
   // Service Management Endpoints
-  @Post('services')
+  @Post('services/add')
   @UseGuards(UserGuard)
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'serviceBanner', maxCount: 1 }
+  ], domainProfileImageOptions))
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Add a new service to current user domain profile' })
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Add a new service to domain profile with optional banner upload' })
   @ApiBody({
-    description: 'Service data',
+    description: 'Service data with optional banner file',
     schema: {
       type: 'object',
-      required: ['serviceName', 'serviceDescription', 'numberOfPeople', 'pricePerPerson', 'timeOfServiceInMinutes', 'numberOfWinesTasted', 'languagesOffered'],
       properties: {
-        serviceName: { type: 'string', minLength: 2, maxLength: 100 },
-        serviceDescription: { type: 'string', minLength: 10, maxLength: 1000 },
-        numberOfPeople: { type: 'integer', minimum: 1, maximum: 100 },
-        pricePerPerson: { type: 'number', minimum: 0, maximum: 10000 },
-        timeOfServiceInMinutes: { type: 'integer', minimum: 15, maximum: 1440 },
-        numberOfWinesTasted: { type: 'integer', minimum: 0 },
+        serviceName: { type: 'string', minLength: 2, maxLength: 200 },
+        serviceDescription: { type: 'string', minLength: 10, maxLength: 2000 },
+        numberOfPeople: { type: 'number', minimum: 1 },
+        pricePerPerson: { type: 'number', minimum: 0 },
+        timeOfServiceInMinutes: { type: 'number', minimum: 1 },
+        numberOfWinesTasted: { type: 'number', minimum: 0 },
         languagesOffered: {
           type: 'array',
           items: { type: 'string' },
           minItems: 1,
           maxItems: 10
         },
-        isActive: { type: 'boolean', default: true }
+        isActive: { type: 'boolean', default: true },
+        serviceBanner: {
+          type: 'string',
+          format: 'binary',
+          description: 'Service banner image file'
+        }
       }
     }
   })
   async addService(
     @Body() serviceData: any,
+    @UploadedFiles() files: { serviceBanner?: Express.Multer.File[] },
     @CurrentUser() user: any
   ): Promise<{
     success: boolean;
@@ -197,9 +225,20 @@ export class DomainProfileController {
     try {
       const userId = user.sub;
 
-      const validatedService = ServiceSchema.parse(serviceData);
+      // Parse numeric fields from FormData strings
+      const parsedServiceData = {
+        ...serviceData,
+        numberOfPeople: parseInt(serviceData.numberOfPeople),
+        pricePerPerson: parseFloat(serviceData.pricePerPerson),
+        timeOfServiceInMinutes: parseInt(serviceData.timeOfServiceInMinutes),
+        numberOfWinesTasted: parseInt(serviceData.numberOfWinesTasted),
+        isActive: serviceData.isActive === 'true' || serviceData.isActive === true,
+        languagesOffered: this.parseArrayFromFormData(serviceData, 'languagesOffered')
+      };
 
-      const result = await this.domainProfileService.addService(userId, validatedService);
+      const validatedService = ServiceSchema.parse(parsedServiceData);
+
+      const result = await this.domainProfileService.addService(userId, validatedService, files);
 
       return {
         success: true,
@@ -250,10 +289,14 @@ export class DomainProfileController {
 
   @Put('services/:serviceIndex')
   @UseGuards(UserGuard)
+  @UseInterceptors(FileFieldsInterceptor([
+    { name: 'serviceBanner', maxCount: 1 }
+  ], domainProfileImageOptions))
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update a service by index' })
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Update a service by index with optional banner upload' })
   @ApiBody({
-    description: 'Updated service data',
+    description: 'Updated service data with optional banner file',
     schema: {
       type: 'object',
       properties: {
@@ -269,13 +312,19 @@ export class DomainProfileController {
           minItems: 1,
           maxItems: 10
         },
-        isActive: { type: 'boolean' }
+        isActive: { type: 'boolean' },
+        serviceBanner: {
+          type: 'string',
+          format: 'binary',
+          description: 'Service banner image file'
+        }
       }
     }
   })
   async updateService(
     @Param('serviceIndex') serviceIndex: string,
     @Body() serviceData: any,
+    @UploadedFiles() files: { serviceBanner?: Express.Multer.File[] },
     @CurrentUser() user: any
   ): Promise<{
     success: boolean;
@@ -290,11 +339,29 @@ export class DomainProfileController {
         throw new HttpException('Invalid service index', HttpStatus.BAD_REQUEST);
       }
 
+      // Parse numeric fields from FormData strings
+      const parsedServiceData = {
+        ...serviceData,
+        numberOfPeople: serviceData.numberOfPeople ? parseInt(serviceData.numberOfPeople) : undefined,
+        pricePerPerson: serviceData.pricePerPerson ? parseFloat(serviceData.pricePerPerson) : undefined,
+        timeOfServiceInMinutes: serviceData.timeOfServiceInMinutes ? parseInt(serviceData.timeOfServiceInMinutes) : undefined,
+        numberOfWinesTasted: serviceData.numberOfWinesTasted ? parseInt(serviceData.numberOfWinesTasted) : undefined,
+        isActive: serviceData.isActive !== undefined ? (serviceData.isActive === 'true' || serviceData.isActive === true) : undefined,
+        languagesOffered: serviceData.languagesOffered || serviceData['languagesOffered[]'] 
+          ? this.parseArrayFromFormData(serviceData, 'languagesOffered') 
+          : undefined
+      };
+
+      // Remove undefined values
+      Object.keys(parsedServiceData).forEach(key => 
+        parsedServiceData[key] === undefined && delete parsedServiceData[key]
+      );
+
       // Validate service data using the imported UpdateServiceSchema
-      const validatedService = UpdateServiceSchema.parse(serviceData);
+      const validatedService = UpdateServiceSchema.parse(parsedServiceData);
 
       console.log('Validated update service data:', JSON.stringify(validatedService, null, 2));
-      const result = await this.domainProfileService.updateService(userId, index, validatedService);
+      const result = await this.domainProfileService.updateService(userId, index, validatedService, files);
 
       return {
         success: true,
