@@ -30,7 +30,7 @@ export class EventsService {
 
       const events = await this.eventModel
         .find({ userId: userObjectId })
-        .populate('bookingId', 'bookingDate bookingTime userContactFirstname userContactLastname bookingStatus') // Populate booking details if linked
+        .populate('bookingId') // Populate booking details if linked
         .sort({ eventDate: 1, eventTime: 1 }) // Sort by date and time ascending
         .lean()
         .exec();
