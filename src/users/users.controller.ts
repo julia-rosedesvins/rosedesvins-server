@@ -406,4 +406,34 @@ export class UsersController {
       throw error;
     }
   }
+
+  @Post('admin/change-password')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Change admin password' })
+  @ApiBearerAuth('admin-token')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        currentPassword: { type: 'string', example: 'CurrentPassword123!' },
+        newPassword: { type: 'string', example: 'NewPassword123!' }
+      },
+      required: ['currentPassword', 'newPassword']
+    }
+  })
+  async changeAdminPassword(
+    @Body(new ZodValidationPipe(ChangePasswordSchema)) changePasswordDto: ChangePasswordDto,
+    @CurrentAdmin() admin: any
+  ) {
+    try {
+      const result = await this.usersService.changeAdminPassword(changePasswordDto, admin.sub);
+      
+      return {
+        success: true,
+        message: result.message,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
 }

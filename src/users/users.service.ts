@@ -603,4 +603,49 @@ export class UsersService {
       message: 'Password changed successfully'
     };
   }
+
+  async changeAdminPassword(changePasswordDto: ChangePasswordDto, adminId: string): Promise<{ message: string }> {
+    const { currentPassword, newPassword } = changePasswordDto;
+
+    // Find the admin
+    const admin = await this.userModel.findOne({
+      _id: adminId,
+      role: UserRole.ADMIN,
+      accountStatus: { $in: [AccountStatus.ACTIVE, AccountStatus.APPROVED] }
+    });
+
+    if (!admin) {
+      throw new UnauthorizedException('Admin not found or access denied');
+    }
+
+    // Verify current password
+    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, admin.password);
+
+    if (!isCurrentPasswordValid) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    // Check if new password is different from current password
+    const isSamePassword = await bcrypt.compare(newPassword, admin.password);
+    if (isSamePassword) {
+      throw new BadRequestException('New password must be different from current password');
+    }
+
+    // Hash the new password
+    const saltRounds = 12;
+    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update admin password and related fields
+    admin.password = hashedNewPassword;
+    admin.mustChangePassword = false;
+    admin.lastPasswordChange = new Date();
+    
+    await admin.save();
+
+    this.logger.log(`Admin ${admin.email} successfully changed password`);
+
+    return {
+      message: 'Admin password changed successfully'
+    };
+  }
 }
