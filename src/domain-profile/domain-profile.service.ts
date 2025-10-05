@@ -86,7 +86,7 @@ export class DomainProfileService {
       domainDescription: domainProfileDto.domainDescription,
       domainType: domainProfileDto.domainType,
       domainTag: domainProfileDto.domainTag,
-      domainColor: domainProfileDto.domainColor,
+      colorCode: domainProfileDto.domainColor,
       domainProfilePictureUrl,
       domainLogoUrl,
       // Only include services if they are explicitly provided
@@ -107,7 +107,7 @@ export class DomainProfileService {
         updateData.domainTag = domainProfileDto.domainTag;
       }
       if (domainProfileDto.domainColor !== undefined) {
-        updateData.domainColor = domainProfileDto.domainColor;
+        updateData.colorCode = domainProfileDto.domainColor;
       }
       if (domainProfilePictureUrl !== undefined) {
         updateData.domainProfilePictureUrl = domainProfilePictureUrl;
