@@ -2,7 +2,9 @@ import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { DashboardAnalyticsService } from './dashboard-analytics.service';
 import { UserGuard } from '../guards/user.guard';
+import { AdminGuard } from '../guards/admin.guard';
 import { CurrentUser } from '../decorators/current-user.decorator';
+import { CurrentAdmin } from '../decorators/current-admin.decorator';
 
 @ApiTags('Dashboard Analytics')
 @Controller('dashboard-analytics')
@@ -38,6 +40,35 @@ export class DashboardAnalyticsController {
       return {
         success: true,
         message: 'Dashboard analytics retrieved successfully',
+        data: analytics,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Get('admin')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Get admin dashboard analytics' })
+  @ApiBearerAuth('admin-token')
+  async getAdminAnalytics(@CurrentAdmin() admin: any): Promise<{
+    success: boolean;
+    message: string;
+    data: {
+      totalActiveUsers: number;
+      totalPendingUsers: number;
+      totalRejectedUsers: number;
+      totalActiveSubscriptions: number;
+      totalExpiredSubscriptions: number;
+      totalOpenSupportTickets: number;
+    };
+  }> {
+    try {
+      const analytics = await this.dashboardAnalyticsService.getAdminAnalytics();
+      
+      return {
+        success: true,
+        message: 'Admin dashboard analytics retrieved successfully',
         data: analytics,
       };
     } catch (error) {

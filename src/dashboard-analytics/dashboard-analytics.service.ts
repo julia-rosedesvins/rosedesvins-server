@@ -4,6 +4,9 @@ import { Model, Types } from 'mongoose';
 import { UserBooking } from '../schemas/user-bookings.schema';
 import { Event } from '../schemas/events.schema';
 import { DomainProfile } from '../schemas/domain-profile.schema';
+import { User, AccountStatus } from '../schemas/user.schema';
+import { Subscription } from '../schemas/subscriptions.schema';
+import { SupportContact } from '../schemas/support-contact.schema';
 
 interface DashboardAnalytics {
   reservationsThisMonth: number;
@@ -31,12 +34,24 @@ interface NextReservation {
   phoneNo: string;
 }
 
+interface AdminAnalytics {
+  totalActiveUsers: number;
+  totalPendingUsers: number;
+  totalRejectedUsers: number;
+  totalActiveSubscriptions: number;
+  totalExpiredSubscriptions: number;
+  totalOpenSupportTickets: number;
+}
+
 @Injectable()
 export class DashboardAnalyticsService {
   constructor(
     @InjectModel(UserBooking.name) private userBookingModel: Model<UserBooking>,
     @InjectModel(Event.name) private eventModel: Model<Event>,
     @InjectModel(DomainProfile.name) private domainProfileModel: Model<DomainProfile>,
+    @InjectModel(User.name) private userModel: Model<User>,
+    @InjectModel(Subscription.name) private subscriptionModel: Model<Subscription>,
+    @InjectModel(SupportContact.name) private supportContactModel: Model<SupportContact>,
   ) {}
 
   async getUserDashboardAnalytics(userId: string): Promise<DashboardAnalytics> {
@@ -190,5 +205,50 @@ export class DashboardAnalyticsService {
     }
 
     return nextReservations;
+  }
+
+  async getAdminAnalytics(): Promise<AdminAnalytics> {
+    // 1. Total Active Users (users with accountStatus = 'active')
+    const totalActiveUsers = await this.userModel.countDocuments({
+      accountStatus: AccountStatus.ACTIVE,
+    });
+
+    // 2. Total Pending Users (users with accountStatus = 'pending_approval')
+    const totalPendingUsers = await this.userModel.countDocuments({
+      accountStatus: AccountStatus.PENDING_APPROVAL,
+    });
+
+    // 3. Total Rejected Users (users with accountStatus = 'rejected')
+    const totalRejectedUsers = await this.userModel.countDocuments({
+      accountStatus: AccountStatus.REJECTED,
+    });
+
+    // 4. Total Active Subscriptions (subscriptions that are active and within date range)
+    const currentDate = new Date();
+    const totalActiveSubscriptions = await this.subscriptionModel.countDocuments({
+      isActive: true,
+      startDate: { $lte: currentDate },
+      endDate: { $gte: currentDate },
+      cancelledById: null,
+    });
+
+    // 5. Total Expired Subscriptions (subscriptions where endDate has passed)
+    const totalExpiredSubscriptions = await this.subscriptionModel.countDocuments({
+      endDate: { $lt: currentDate },
+    });
+
+    // 6. Total Open Support Tickets (tickets with status pending or in-progress)
+    const totalOpenSupportTickets = await this.supportContactModel.countDocuments({
+      status: { $in: ['pending', 'in-progress'] },
+    });
+
+    return {
+      totalActiveUsers,
+      totalPendingUsers,
+      totalRejectedUsers,
+      totalActiveSubscriptions,
+      totalExpiredSubscriptions,
+      totalOpenSupportTickets,
+    };
   }
 }
