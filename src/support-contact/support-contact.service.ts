@@ -63,4 +63,62 @@ export class SupportContactService {
       },
     };
   }
+
+  async getAllSupportTickets(query: PaginationQueryDto): Promise<{
+    tickets: SupportContact[];
+    pagination: {
+      currentPage: number;
+      totalPages: number;
+      totalTickets: number;
+      hasNextPage: boolean;
+      hasPrevPage: boolean;
+    };
+  }> {
+    const { page = 1, limit = 10 } = query;
+    const skip = (page - 1) * limit;
+
+    // Get total count for pagination
+    const totalTickets = await this.supportContactModel.countDocuments();
+
+    // Get paginated tickets with user information
+    const tickets = await this.supportContactModel
+      .find()
+      .populate('userId', 'firstName lastName email domainName')
+      .sort({ createdAt: -1 }) // Most recent first
+      .skip(skip)
+      .limit(limit)
+      .exec();
+
+    const totalPages = Math.ceil(totalTickets / limit);
+
+    return {
+      tickets,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalTickets,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    };
+  }
+
+  async updateTicketStatus(ticketId: string, status: 'pending' | 'in-progress' | 'resolved' | 'closed'): Promise<SupportContact> {
+    const ticketObjectId = new Types.ObjectId(ticketId);
+    
+    const updatedTicket = await this.supportContactModel
+      .findByIdAndUpdate(
+        ticketObjectId,
+        { status, updatedAt: new Date() },
+        { new: true }
+      )
+      .populate('userId', 'firstName lastName email domainName')
+      .exec();
+
+    if (!updatedTicket) {
+      throw new Error('Support ticket not found');
+    }
+
+    return updatedTicket;
+  }
 }

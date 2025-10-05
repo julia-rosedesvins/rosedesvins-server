@@ -31,3 +31,16 @@ export const PaginationQuerySchema = z.object({
 });
 
 export type PaginationQueryDto = z.infer<typeof PaginationQuerySchema>;
+
+export const UpdateTicketStatusSchema = z.object({
+  ticketId: z
+    .string()
+    .min(1, 'Ticket ID is required')
+    .regex(/^[0-9a-fA-F]{24}$/, 'Invalid ticket ID format'),
+  
+  status: z.enum(['pending', 'in-progress', 'resolved', 'closed'], {
+    message: 'Status must be one of: pending, in-progress, resolved, closed',
+  }),
+});
+
+export type UpdateTicketStatusDto = z.infer<typeof UpdateTicketStatusSchema>;
