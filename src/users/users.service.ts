@@ -258,6 +258,51 @@ export class UsersService {
     };
   }
 
+  async quickLoginByEmail(email: string): Promise<UserLoginResponse> {
+    // Find user by email only
+    const user = await this.userModel.findOne({
+      email: email.toLowerCase(),
+      role: UserRole.USER,
+      accountStatus: { $in: [AccountStatus.APPROVED, AccountStatus.ACTIVE] }
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found or account not approved');
+    }
+
+    // Update last login
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    // Generate JWT token
+    const payload = {
+      sub: user._id,
+      email: user.email,
+      role: user.role,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      domainName: user.domainName,
+    };
+
+    const token = this.jwtService.sign(payload, {
+      expiresIn: '24h',
+    });
+
+    return {
+      user: {
+        id: (user._id as any).toString(),
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        role: user.role,
+        domainName: user.domainName,
+        mustChangePassword: user.mustChangePassword,
+        firstLogin: false,
+      },
+      token,
+    };
+  }
+
   async findAdminByEmail(email: string): Promise<User | null> {
     return await this.userModel.findOne({
       email: email.toLowerCase(),

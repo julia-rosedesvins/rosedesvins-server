@@ -436,4 +436,42 @@ export class UsersController {
       throw error;
     }
   }
+
+  @Post('quick-login')
+  @ApiOperation({ summary: 'Quick login with email only (public endpoint)' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        email: { type: 'string', example: 'user@example.com' }
+      },
+      required: ['email']
+    }
+  })
+  async quickLogin(
+    @Body() body: { email: string },
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    try {
+      const loginResult = await this.usersService.quickLoginByEmail(body.email);
+
+      // Set JWT token in httpOnly cookie
+      response.cookie('user_token', loginResult.token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      });
+
+      return {
+        success: true,
+        message: 'Quick login successful',
+        data: {
+          user: loginResult.user,
+        },
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
 }
