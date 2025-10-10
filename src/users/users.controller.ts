@@ -87,9 +87,11 @@ export class UsersController {
       // Set JWT token in httpOnly cookie
       response.cookie('admin_token', loginResult.token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
-        sameSite: 'strict',
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        domain: process.env.NODE_ENV === 'production' ? process.env.COOKIE_DOMAIN : undefined,
+        path: '/',
       });
 
       return {
@@ -127,9 +129,11 @@ export class UsersController {
       // Set JWT token in httpOnly cookie
       response.cookie('user_token', loginResult.token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
-        sameSite: 'strict',
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        domain: process.env.NODE_ENV === 'production' ? process.env.COOKIE_DOMAIN : undefined,
+        path: '/',
       });
 
       return {
@@ -171,7 +175,13 @@ export class UsersController {
     @CurrentAdmin() currentAdmin: any
   ) {
     // Clear the admin token cookie
-    response.clearCookie('admin_token');
+    response.clearCookie('admin_token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
+      domain: process.env.NODE_ENV === 'production' ? process.env.COOKIE_DOMAIN : undefined,
+      path: '/',
+    });
     
     return {
       success: true,
@@ -365,7 +375,9 @@ export class UsersController {
       response.clearCookie('user_token', {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
+        domain: process.env.NODE_ENV === 'production' ? process.env.COOKIE_DOMAIN : undefined,
+        path: '/',
       });
 
       return {
@@ -459,8 +471,10 @@ export class UsersController {
       response.cookie('user_token', loginResult.token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        domain: process.env.NODE_ENV === 'production' ? process.env.COOKIE_DOMAIN : undefined,
+        path: '/',
       });
 
       return {
