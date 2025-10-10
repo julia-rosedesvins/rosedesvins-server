@@ -33,6 +33,17 @@ export class EmailConfig {
       smtpConfig.tls = {
         rejectUnauthorized: false,
       };
+    } else if (host.includes('mailgun') || host.includes('smtp.eu.mailgun.org') || host.includes('smtp.mailgun.org')) {
+      // Mailgun specific settings
+      smtpConfig.secure = false; // Use STARTTLS on port 587
+      smtpConfig.requireTLS = true;
+      smtpConfig.tls = {
+        rejectUnauthorized: true, // Mailgun has valid certificates
+      };
+      // Add connection timeout for better reliability
+      smtpConfig.connectionTimeout = 10000;
+      smtpConfig.greetingTimeout = 5000;
+      smtpConfig.socketTimeout = 10000;
     }
 
     this.transporter = nodemailer.createTransport(smtpConfig);
