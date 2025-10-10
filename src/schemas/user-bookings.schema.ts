@@ -128,7 +128,7 @@ export class UserBooking extends Document {
   @Prop({ 
     required: true, 
     trim: true,
-    minlength: 10,
+    minlength: 9,
     maxlength: 20 
   })
   phoneNo: string; // Phone number with country code as string (e.g., "+33123456789")

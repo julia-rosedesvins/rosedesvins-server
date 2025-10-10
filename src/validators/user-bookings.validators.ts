@@ -124,7 +124,7 @@ export const CreateBookingSchema = z.object({
   
   phoneNo: z
     .string()
-    .min(10, 'Phone number must be at least 10 characters')
+    .min(9, 'Phone number must be at least 9 characters')
     .max(20, 'Phone number must not exceed 20 characters')
     .trim(),
   
