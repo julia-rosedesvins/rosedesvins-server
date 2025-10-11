@@ -17,7 +17,7 @@ export interface CreateOrUpdateDomainProfileServiceDto {
   services?: Array<{
     serviceName: string;
     serviceDescription: string;
-    numberOfPeople: number;
+    numberOfPeople: string;
     pricePerPerson: number;
     timeOfServiceInMinutes: number;
     numberOfWinesTasted: number;

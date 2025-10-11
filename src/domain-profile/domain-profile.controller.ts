@@ -194,7 +194,7 @@ export class DomainProfileController {
       properties: {
         serviceName: { type: 'string', minLength: 2, maxLength: 200 },
         serviceDescription: { type: 'string', minLength: 10, maxLength: 2000 },
-        numberOfPeople: { type: 'number', minimum: 1 },
+        numberOfPeople: { type: 'string', pattern: '^[0-9]+(\\-[0-9]+)?$', description: 'Number of people (e.g., "1", "2-8", "10")' },
         pricePerPerson: { type: 'number', minimum: 0 },
         timeOfServiceInMinutes: { type: 'number', minimum: 1 },
         numberOfWinesTasted: { type: 'number', minimum: 0 },
@@ -228,7 +228,7 @@ export class DomainProfileController {
       // Parse numeric fields from FormData strings
       const parsedServiceData = {
         ...serviceData,
-        numberOfPeople: parseInt(serviceData.numberOfPeople),
+        numberOfPeople: serviceData.numberOfPeople,
         pricePerPerson: parseFloat(serviceData.pricePerPerson),
         timeOfServiceInMinutes: parseInt(serviceData.timeOfServiceInMinutes),
         numberOfWinesTasted: parseInt(serviceData.numberOfWinesTasted),
@@ -302,7 +302,7 @@ export class DomainProfileController {
       properties: {
         serviceName: { type: 'string', minLength: 2, maxLength: 100 },
         serviceDescription: { type: 'string', minLength: 10, maxLength: 1000 },
-        numberOfPeople: { type: 'integer', minimum: 1, maximum: 100 },
+        numberOfPeople: { type: 'string', pattern: '^[0-9]+(\\-[0-9]+)?$', description: 'Number of people (e.g., "1", "2-8", "10")' },
         pricePerPerson: { type: 'number', minimum: 0, maximum: 10000 },
         timeOfServiceInMinutes: { type: 'integer', minimum: 15, maximum: 1440 },
         numberOfWinesTasted: { type: 'integer', minimum: 0 },
@@ -342,7 +342,7 @@ export class DomainProfileController {
       // Parse numeric fields from FormData strings
       const parsedServiceData = {
         ...serviceData,
-        numberOfPeople: serviceData.numberOfPeople ? parseInt(serviceData.numberOfPeople) : undefined,
+        numberOfPeople: serviceData.numberOfPeople || undefined,
         pricePerPerson: serviceData.pricePerPerson ? parseFloat(serviceData.pricePerPerson) : undefined,
         timeOfServiceInMinutes: serviceData.timeOfServiceInMinutes ? parseInt(serviceData.timeOfServiceInMinutes) : undefined,
         numberOfWinesTasted: serviceData.numberOfWinesTasted ? parseInt(serviceData.numberOfWinesTasted) : undefined,

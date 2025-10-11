@@ -10,8 +10,8 @@ export class Service {
   @Prop({ required: true, trim: true })
   description: string;
 
-  @Prop({ required: true, min: 1 })
-  numberOfPeople: number;
+  @Prop({ required: true, trim: true })
+  numberOfPeople: string;
 
   @Prop({ required: true, min: 0 })
   pricePerPerson: number;

@@ -14,10 +14,9 @@ const ServiceSchema = z.object({
     .trim(),
   
   numberOfPeople: z
-    .number()
-    .int('Number of people must be an integer')
-    .min(1, 'Number of people must be at least 1')
-    .max(100, 'Number of people must not exceed 100'),
+    .string()
+    .regex(/^[0-9]+(\-[0-9]+)?$/, 'Number of people must be a number or range (e.g., "1", "2-8", "10")')
+    .min(1, 'Number of people is required'),
   
   pricePerPerson: z
     .number()
