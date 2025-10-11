@@ -64,7 +64,7 @@ export const UserLoginSchema = z.object({
 export const ChangePasswordSchema = z.object({
   currentPassword: z
     .string()
-    .min(1, 'Current password is required'),
+    .optional(),
   
   newPassword: z
     .string()
