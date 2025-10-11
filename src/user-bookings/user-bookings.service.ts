@@ -11,7 +11,7 @@ import { DomainProfile } from '../schemas/domain-profile.schema';
 import { Subscription } from '../schemas/subscriptions.schema';
 import { Event } from '../schemas/events.schema';
 import { Connector } from '../schemas/connector.schema';
-import { CreateBookingDto } from '../validators/user-bookings.validators';
+import { CreateBookingDto, UpdateBookingDto } from '../validators/user-bookings.validators';
 import { EncryptionService } from '../common/encryption.service';
 
 const dav = require('dav');
@@ -324,6 +324,259 @@ export class UserBookingsService {
         return this.getOrangeCalendar(username, password, retryCount + 1);
       }
       
+      throw error;
+    }
+  }
+
+  /**
+   * Update a booking in user-bookings, events, and linked calendars
+   * @param bookingId - The ID of the booking to update
+   * @param updateData - The fields to update
+   */
+  async updateBooking(bookingId: string, updateData: UpdateBookingDto): Promise<{ success: boolean; message: string; booking: UserBooking }> {
+    try {
+      console.log('📝 Starting booking update process for ID:', bookingId);
+
+      // Validate booking ID format
+      if (!Types.ObjectId.isValid(bookingId)) {
+        throw new BadRequestException('Invalid booking ID format');
+      }
+
+      const bookingObjectId = new Types.ObjectId(bookingId);
+
+      // Find the existing booking
+      const existingBooking = await this.userBookingModel.findById(bookingObjectId).lean();
+      if (!existingBooking) {
+        throw new NotFoundException('Booking not found');
+      }
+
+      console.log('📋 Found booking to update:', {
+        id: existingBooking._id,
+        userId: existingBooking.userId,
+        currentDate: existingBooking.bookingDate,
+        currentTime: existingBooking.bookingTime
+      });
+
+      // Prepare update data (only include provided fields)
+      const updateFields: any = {};
+      
+      if (updateData.bookingDate) {
+        updateFields.bookingDate = updateData.bookingDate;
+      }
+      if (updateData.bookingTime) {
+        updateFields.bookingTime = updateData.bookingTime;
+      }
+      if (updateData.participantsAdults !== undefined) {
+        updateFields.participantsAdults = updateData.participantsAdults;
+      }
+      if (updateData.participantsEnfants !== undefined) {
+        updateFields.participantsEnfants = updateData.participantsEnfants;
+      }
+      if (updateData.selectedLanguage) {
+        updateFields.selectedLanguage = updateData.selectedLanguage;
+      }
+      if (updateData.userContactFirstname) {
+        updateFields.userContactFirstname = updateData.userContactFirstname;
+      }
+      if (updateData.userContactLastname) {
+        updateFields.userContactLastname = updateData.userContactLastname;
+      }
+      if (updateData.phoneNo) {
+        updateFields.phoneNo = updateData.phoneNo;
+      }
+      if (updateData.customerEmail) {
+        updateFields.customerEmail = updateData.customerEmail;
+      }
+      if (updateData.additionalNotes) {
+        updateFields.additionalNotes = updateData.additionalNotes;
+      }
+
+      // Check if date or time changed (calendar update needed)
+      const isDateTimeChanged = updateData.bookingDate || updateData.bookingTime;
+      const isCustomerInfoChanged = updateData.userContactFirstname || updateData.userContactLastname;
+      
+      // Update the booking in database
+      const updatedBooking = await this.userBookingModel.findByIdAndUpdate(
+        bookingObjectId,
+        updateFields,
+        { new: true, runValidators: true }
+      );
+
+      if (!updatedBooking) {
+        throw new InternalServerErrorException('Failed to update booking');
+      }
+
+      // Update corresponding event in events table
+      const eventUpdateFields: any = {};
+      
+      if (updateData.bookingDate) {
+        eventUpdateFields.eventDate = updateData.bookingDate;
+      }
+      if (updateData.bookingTime) {
+        eventUpdateFields.eventTime = updateData.bookingTime;
+      }
+      if (isCustomerInfoChanged) {
+        eventUpdateFields.eventName = `Réservation: ${updateData.userContactFirstname || existingBooking.userContactFirstname} ${updateData.userContactLastname || existingBooking.userContactLastname}`;
+      }
+      if (updateData.additionalNotes) {
+        eventUpdateFields.eventDescription = updateData.additionalNotes;
+      }
+      if (updateData.customerEmail) {
+        eventUpdateFields.customerEmail = updateData.customerEmail;
+      }
+
+      // Update events table
+      if (Object.keys(eventUpdateFields).length > 0) {
+        const eventUpdateResult = await this.eventModel.updateMany(
+          {
+            $or: [
+              { bookingId: bookingObjectId },
+              { 
+                userId: existingBooking.userId,
+                eventDate: existingBooking.bookingDate,
+                eventTime: existingBooking.bookingTime
+              }
+            ]
+          },
+          eventUpdateFields
+        );
+
+        console.log('📅 Updated events:', eventUpdateResult.modifiedCount);
+      }
+
+      // Update calendar if date/time/customer info changed
+      let calendarUpdateSuccess = true;
+      if (isDateTimeChanged || isCustomerInfoChanged) {
+        try {
+          await this.updateInCalendar(existingBooking, updatedBooking);
+          console.log('✅ Successfully updated booking in calendar');
+        } catch (calendarError) {
+          console.error('❌ Failed to update booking in calendar:', calendarError.message);
+          calendarUpdateSuccess = false;
+          // Don't throw - calendar update failure shouldn't prevent database update
+        }
+      }
+
+      console.log('✅ Successfully updated booking:', bookingId);
+
+      return {
+        success: true,
+        message: calendarUpdateSuccess 
+          ? 'Booking updated successfully in database and calendar'
+          : 'Booking updated successfully in database (calendar update failed)',
+        booking: updatedBooking
+      };
+
+    } catch (error) {
+      console.error('❌ Error updating booking:', error);
+      
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      
+      throw new InternalServerErrorException('Failed to update booking');
+    }
+  }
+
+  /**
+   * Update booking event in linked calendars
+   * @param oldBooking - The original booking data
+   * @param newBooking - The updated booking data
+   */
+  private async updateInCalendar(oldBooking: any, newBooking: any): Promise<void> {
+    try {
+      console.log('📅 Updating calendar for booking:', newBooking._id);
+
+      // Find active calendar connectors for the user
+      const connectors = await this.connectorModel.find({
+        userId: newBooking.userId
+      }).lean();
+
+      if (connectors.length === 0) {
+        console.log('ℹ️ No active calendar connectors found for user:', newBooking.userId);
+        return;
+      }
+
+      // Check for active Orange connector
+      const orangeConnector = connectors.find(conn => 
+        conn.connector_name === 'orange' && 
+        conn.connector_creds?.orange?.isActive && 
+        conn.connector_creds?.orange?.isValid
+      );
+
+      if (orangeConnector?.connector_creds?.orange) {
+        console.log('🍊 Found Orange calendar connector for update');
+        await this.updateInOrangeCalendar(oldBooking, newBooking, orangeConnector.connector_creds.orange);
+      } else {
+        console.log('ℹ️ No active Orange calendar connector found for update');
+      }
+
+      // TODO: Add support for Microsoft and OVH calendar providers
+
+    } catch (error) {
+      console.error('❌ Calendar update error:', error);
+      // Non-blocking: Calendar update failure shouldn't prevent booking update
+    }
+  }
+
+  /**
+   * Update booking event in Orange Mail calendar using CalDAV
+   * This deletes the old event and creates a new one with updated information
+   * @param oldBooking - The original booking data
+   * @param newBooking - The updated booking data
+   * @param orangeCreds - The Orange calendar credentials
+   */
+  private async updateInOrangeCalendar(oldBooking: any, newBooking: any, orangeCreds: any): Promise<void> {
+    try {
+      console.log('🍊 Updating Orange calendar for booking:', newBooking._id);
+
+      // Validate credentials
+      if (!orangeCreds.isActive || !orangeCreds.isValid) {
+        console.log('ℹ️ Orange connector is inactive or invalid for user:', newBooking.userId);
+        return;
+      }
+
+      if (!orangeCreds.username || !orangeCreds.password) {
+        console.log('❌ Missing Orange credentials for user:', newBooking.userId);
+        return;
+      }
+
+      // Strategy: Delete old event and create new one
+      // This is more reliable than trying to update in place
+
+      // Step 1: Delete the old event
+      console.log('🗑️ Deleting old calendar event...');
+      await this.deleteFromOrangeCalendar(oldBooking, orangeCreds);
+
+      // Step 2: Create new event with updated data
+      console.log('➕ Creating updated calendar event...');
+      
+      // Create a temporary booking DTO for the new event
+      const updatedBookingDto = {
+        userId: newBooking.userId.toString(),
+        serviceId: newBooking.serviceId.toString(),
+        bookingDate: newBooking.bookingDate,
+        bookingTime: newBooking.bookingTime,
+        participantsAdults: newBooking.participantsAdults,
+        participantsEnfants: newBooking.participantsEnfants,
+        selectedLanguage: newBooking.selectedLanguage,
+        userContactFirstname: newBooking.userContactFirstname,
+        userContactLastname: newBooking.userContactLastname,
+        phoneNo: newBooking.phoneNo,
+        customerEmail: newBooking.customerEmail,
+        additionalNotes: newBooking.additionalNotes,
+        paymentMethod: newBooking.paymentMethod
+      };
+
+      await this.addToOrangeCalendar(newBooking, updatedBookingDto, orangeCreds);
+
+      console.log('✅ Successfully updated event in Orange calendar');
+
+    } catch (error) {
+      console.error('❌ Orange calendar update error:', error);
+      if (error.cause?.code === 'ENOTFOUND') {
+        throw new Error('Calendar server is unreachable. Please check network connectivity.');
+      }
       throw error;
     }
   }
