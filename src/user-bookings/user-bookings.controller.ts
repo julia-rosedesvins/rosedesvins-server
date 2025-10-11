@@ -1,5 +1,5 @@
-import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBody } from '@nestjs/swagger';
+import { Controller, Post, Body, HttpCode, HttpStatus, Delete, Param } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBody, ApiParam } from '@nestjs/swagger';
 import { UserBookingsService } from './user-bookings.service';
 import { CreateBookingDto, CreateBookingSchema } from '../validators/user-bookings.validators';
 import { ZodValidationPipe } from '../pipes/zod-validation.pipe';
@@ -123,5 +123,18 @@ export class UserBookingsController {
     @Body(new ZodValidationPipe(CreateBookingSchema)) createBookingDto: CreateBookingDto
   ) {
     return this.userBookingsService.createBooking(createBookingDto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a booking' })
+  @ApiParam({
+    name: 'id',
+    description: 'Booking ID to delete',
+    type: 'string',
+    example: '60d0fe4f5311236168a109ca'
+  })
+  async deleteBooking(@Param('id') bookingId: string) {
+    return this.userBookingsService.deleteBooking(bookingId);
   }
 }

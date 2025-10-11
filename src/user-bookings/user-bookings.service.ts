@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ConflictException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
@@ -73,7 +73,7 @@ export class UserBookingsService {
         const eventData = {
           userId: userObjectId, // The wine business owner who receives the booking
           bookingId: savedBooking._id, // Reference to the created booking
-          eventName: `Booking: ${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
+          eventName: `Réservation: ${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
           eventDate: parsedDate, // Use the same parsed date
           eventTime: createBookingDto.bookingTime,
           eventDescription: createBookingDto.additionalNotes || `Wine tasting booking for ${createBookingDto.participantsAdults + createBookingDto.participantsEnfants} people`,
@@ -324,6 +324,319 @@ export class UserBookingsService {
         return this.getOrangeCalendar(username, password, retryCount + 1);
       }
       
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a booking from user-bookings, events, and linked calendars
+   * @param bookingId - The ID of the booking to delete
+   */
+  async deleteBooking(bookingId: string): Promise<{ success: boolean; message: string }> {
+    try {
+      console.log('🗑️ Starting booking deletion process for ID:', bookingId);
+
+      // Validate booking ID format
+      if (!Types.ObjectId.isValid(bookingId)) {
+        throw new BadRequestException('Invalid booking ID format');
+      }
+
+      const bookingObjectId = new Types.ObjectId(bookingId);
+
+      // Find the booking to get details before deletion
+      const booking = await this.userBookingModel.findById(bookingObjectId).lean();
+      if (!booking) {
+        throw new NotFoundException('Booking not found');
+      }
+
+      console.log('📋 Found booking to delete:', {
+        id: booking._id,
+        userId: booking.userId,
+        serviceId: booking.serviceId,
+        date: booking.bookingDate,
+        time: booking.bookingTime
+      });
+
+      // Delete from calendar if linked
+      await this.deleteFromCalendar(booking);
+
+      // Delete from events table
+      const eventDeleteResult = await this.eventModel.deleteMany({
+        $or: [
+          { bookingId: bookingObjectId },
+          { 
+            userId: booking.userId,
+            eventDate: booking.bookingDate,
+            eventTime: booking.bookingTime
+          }
+        ]
+      });
+
+      console.log('📅 Deleted events:', eventDeleteResult.deletedCount);
+
+      // Delete from user-bookings table
+      const bookingDeleteResult = await this.userBookingModel.findByIdAndDelete(bookingObjectId);
+
+      if (!bookingDeleteResult) {
+        throw new InternalServerErrorException('Failed to delete booking from database');
+      }
+
+      console.log('✅ Successfully deleted booking:', bookingId);
+
+      return {
+        success: true,
+        message: 'Booking deleted successfully from database and calendar'
+      };
+
+    } catch (error) {
+      console.error('❌ Error deleting booking:', error);
+      
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      
+      throw new InternalServerErrorException('Failed to delete booking');
+    }
+  }
+
+  /**
+   * Delete booking event from linked calendars
+   * @param booking - The booking to delete from calendar
+   */
+  private async deleteFromCalendar(booking: any): Promise<void> {
+    try {
+      console.log('📅 Attempting to delete from calendar for booking:', booking._id);
+
+      // Find active calendar connectors for the user
+      const connectors = await this.connectorModel.find({
+        userId: booking.userId
+      }).lean();
+
+      if (connectors.length === 0) {
+        console.log('ℹ️ No active calendar connectors found for user:', booking.userId);
+        return;
+      }
+
+      // Check for active Orange connector (matching the existing structure)
+      const orangeConnector = connectors.find(conn => 
+        conn.connector_name === 'orange' && 
+        conn.connector_creds?.orange?.isActive && 
+        conn.connector_creds?.orange?.isValid
+      );
+
+      if (orangeConnector?.connector_creds?.orange) {
+        console.log('🍊 Found Orange calendar connector for deletion');
+        await this.deleteFromOrangeCalendar(booking, orangeConnector.connector_creds.orange);
+      } else {
+        console.log('ℹ️ No active Orange calendar connector found for deletion');
+      }
+
+      // TODO: Add support for Microsoft and OVH calendar providers
+
+    } catch (error) {
+      console.error('❌ Calendar deletion error:', error);
+      // Non-blocking: Calendar deletion failure shouldn't prevent booking deletion
+    }
+  }
+
+  /**
+   * Delete booking event from Orange Mail calendar using CalDAV
+   * @param booking - The booking to delete
+   * @param orangeCreds - The Orange calendar credentials
+   */
+  private async deleteFromOrangeCalendar(booking: any, orangeCreds: any): Promise<void> {
+    try {
+      console.log('🍊 Deleting from Orange calendar for booking:', booking._id);
+
+      // Validate credentials
+      if (!orangeCreds.isActive || !orangeCreds.isValid) {
+        console.log('ℹ️ Orange connector is inactive or invalid for user:', booking.userId);
+        return;
+      }
+
+      if (!orangeCreds.username || !orangeCreds.password) {
+        console.log('❌ Missing Orange credentials for user:', booking.userId);
+        return;
+      }
+
+      // Decrypt the password for CalDAV authentication
+      const decryptedPassword = EncryptionService.decrypt(orangeCreds.password);
+
+      // Get calendar
+      const calendar = await this.getOrangeCalendar(orangeCreds.username, decryptedPassword);
+      if (!calendar) {
+        console.log('❌ Could not access Orange calendar for user:', booking.userId);
+        return;
+      }
+
+      // Try to delete using PROPFIND + DELETE approach (more compatible with CalDAV)
+      try {
+        const authHeader = `Basic ${Buffer.from(`${orangeCreds.username}:${decryptedPassword}`).toString('base64')}`;
+        
+        // First, try to find events using PROPFIND
+        const propfindBody = `<?xml version="1.0" encoding="UTF-8"?>
+          <D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+            <D:prop>
+              <D:getetag/>
+              <C:calendar-data/>
+            </D:prop>
+          </D:propfind>`;
+
+        const propfindResponse = await fetch(calendar.url, {
+          method: 'PROPFIND',
+          headers: {
+            'Content-Type': 'application/xml',
+            'Authorization': authHeader,
+            'Depth': '1'
+          },
+          body: propfindBody
+        });
+
+        if (propfindResponse.ok) {
+          const responseText = await propfindResponse.text();
+          // Use the same title format as when creating the event (Réservation: not Booking:)
+          const expectedEventTitle = `Réservation: ${booking.userContactFirstname} ${booking.userContactLastname}`;
+          
+          console.log('📋 Looking for event with title:', expectedEventTitle);
+          console.log('📄 PROPFIND response length:', responseText.length);
+          
+          // Search for our event in the response (case-insensitive and flexible)
+          const customerName = `${booking.userContactFirstname} ${booking.userContactLastname}`;
+          const eventFound = responseText.toLowerCase().includes(expectedEventTitle.toLowerCase()) || 
+                            responseText.toLowerCase().includes(customerName.toLowerCase());
+          
+          console.log('🔍 Event search results:', { 
+            expectedTitle: expectedEventTitle, 
+            customerName: customerName, 
+            found: eventFound 
+          });
+          
+          if (eventFound) {
+            console.log('🎯 Found matching event in calendar');
+            
+            // Extract all href URLs - try multiple patterns as XML namespace can vary
+            let hrefMatches = responseText.match(/<D:href>([^<]+)<\/D:href>/g);
+            if (!hrefMatches) {
+              // Try without namespace prefix
+              hrefMatches = responseText.match(/<href>([^<]+)<\/href>/gi);
+            }
+            if (!hrefMatches) {
+              // Try with different namespace
+              hrefMatches = responseText.match(/<[a-z]*:?href[^>]*>([^<]+)<\/[a-z]*:?href>/gi);
+            }
+            
+            let eventDeleted = false;
+            
+            console.log('🔎 Total href matches found:', hrefMatches?.length || 0);
+            
+            // If no hrefs found, let's see what the XML structure actually looks like
+            if (!hrefMatches || hrefMatches.length === 0) {
+              console.log('🔍 No href matches found, checking XML structure...');
+              console.log('📝 First 1000 chars of response:', responseText.substring(0, 1000));
+              console.log('📝 Last 1000 chars of response:', responseText.substring(responseText.length - 1000));
+            }
+            
+            if (hrefMatches) {
+              for (const hrefMatch of hrefMatches) {
+                // Extract URL content from various href tag formats
+                let url = hrefMatch;
+                
+                // Remove all possible href tag variations
+                url = url.replace(/<[^>]*href[^>]*>/gi, '').replace(/<\/[^>]*href[^>]*>/gi, '');
+                url = url.replace(/<\/?[a-z]*:?href[^>]*>/gi, '');
+                
+                // Skip calendar collection URLs - we need specific event files
+                if (url.endsWith('/') || (!url.includes('.ics') && !url.match(/[a-f0-9-]{36}\.ics$/i))) {
+                  console.log('⏭️ Skipping calendar collection URL:', url);
+                  continue;
+                }
+                
+                console.log('🔍 Checking event file:', url);
+                
+                // Look for the calendar-data section that corresponds to this href
+                const hrefIndex = responseText.indexOf(hrefMatch);
+                const nextHrefIndex = responseText.indexOf('<d:href>', hrefIndex + 1);
+                const eventDataSection = responseText.substring(hrefIndex, nextHrefIndex !== -1 ? nextHrefIndex : responseText.length);
+                
+                // Also check for calendar-data tags that might contain the event
+                const calendarDataMatch = eventDataSection.match(/<[cd]:calendar-data[^>]*>(.*?)<\/[cd]:calendar-data>/gis);
+                let eventContainsTitle = false;
+                
+                if (calendarDataMatch) {
+                  // Check inside the calendar data for our event title
+                  for (const calendarData of calendarDataMatch) {
+                    if (calendarData.toLowerCase().includes(expectedEventTitle.toLowerCase()) || 
+                        calendarData.toLowerCase().includes(`summary:${expectedEventTitle.toLowerCase()}`) ||
+                        calendarData.toLowerCase().includes(customerName.toLowerCase())) {
+                      eventContainsTitle = true;
+                      console.log('🎯 Found matching event content in calendar data');
+                      break;
+                    }
+                  }
+                } else {
+                  // Fallback: check the entire event section
+                  eventContainsTitle = eventDataSection.toLowerCase().includes(expectedEventTitle.toLowerCase()) ||
+                                      eventDataSection.toLowerCase().includes(customerName.toLowerCase());
+                }
+                
+                console.log('🔍 Event match check:', { url, eventContainsTitle, hasCalendarData: !!calendarDataMatch });
+                
+                if (eventContainsTitle) {
+                  console.log('🎯 Found matching event in:', url);
+                  
+                  // Get the full event URL
+                  let eventUrl = url;
+                  if (url.startsWith('/')) {
+                    const baseUrl = new URL(calendar.url);
+                    eventUrl = `${baseUrl.protocol}//${baseUrl.host}${url}`;
+                  } else if (!url.startsWith('http')) {
+                    eventUrl = calendar.url.replace(/\/$/, '') + '/' + url.split('/').pop();
+                  }
+                  
+                  console.log('🗑️ Deleting event at:', eventUrl);
+                  
+                  // Try to delete the event
+                  const deleteResponse = await fetch(eventUrl, {
+                    method: 'DELETE',
+                    headers: {
+                      'Authorization': authHeader
+                    }
+                  });
+
+                  console.log('🗑️ Delete response status:', deleteResponse.status);
+                  
+                  if (deleteResponse.ok || deleteResponse.status === 404) {
+                    console.log('✅ Successfully deleted event from Orange calendar');
+                    eventDeleted = true;
+                    break; // Exit loop once we successfully delete the correct event
+                  } else {
+                    const errorText = await deleteResponse.text();
+                    console.log('⚠️ Could not delete event:', deleteResponse.status, errorText);
+                  }
+                } else {
+                  console.log('⏭️ Event does not match, skipping:', url);
+                }
+              }
+            }
+            
+            if (!eventDeleted) {
+              console.log('❌ Could not delete any matching events from calendar');
+            }
+          } else {
+            console.log('ℹ️ Event not found in Orange calendar (may have been already deleted)');
+          }
+        } else {
+          console.log('⚠️ Could not search calendar events:', propfindResponse.status);
+          const errorText = await propfindResponse.text();
+          console.log('❌ PROPFIND error response:', errorText.substring(0, 500));
+        }
+        
+      } catch (searchError) {
+        console.log('ℹ️ Calendar event search failed, event may remain in calendar:', searchError.message);
+      }
+
+    } catch (error) {
+      console.error('❌ Orange calendar deletion error:', error);
       throw error;
     }
   }
