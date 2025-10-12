@@ -1,0 +1,64 @@
+<div style="color: #4a4a4a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+  <h2 style="color: #3A7B59; font-weight: 600; margin-bottom: 24px;">
+    Bonjour {{customerName}},
+  </h2>
+  
+  <p style="margin-bottom: 16px; line-height: 1.6;">
+    Votre réservation a été modifiée avec succès. Voici les nouveaux détails :
+  </p>
+
+  <div style="background-color: #fff8e1; border-left: 4px solid #E67E22; padding: 20px; margin: 24px 0; border-radius: 4px;">
+    <h3 style="color: #E67E22; margin: 0 0 16px 0; font-size: 18px;">Détails mis à jour</h3>
+    
+    <p style="margin: 8px 0; color: #4a4a4a;">
+      <strong>Expérience:</strong> {{eventTitle}}
+    </p>
+    
+    <p style="margin: 8px 0; color: #4a4a4a;">
+      <strong>Date:</strong> {{eventDate}}
+    </p>
+    
+    <p style="margin: 8px 0; color: #4a4a4a;">
+      <strong>Heure:</strong> {{eventTime}} ({{eventTimezone}})
+    </p>
+    
+    <p style="margin: 8px 0; color: #4a4a4a;">
+      <strong>Durée:</strong> {{eventDuration}}
+    </p>
+    
+
+    
+    <p style="margin: 8px 0; color: #4a4a4a;">
+      <strong>Participants:</strong> {{participantsText}}
+    </p>
+    
+    <p style="margin: 8px 0; color: #4a4a4a;">
+      <strong>Langue:</strong> {{selectedLanguage}}
+    </p>
+    
+    {{#if additionalNotes}}
+    <p style="margin: 16px 0 0 0; color: #4a4a4a;">
+      <strong>Notes particulières:</strong><br>
+      {{additionalNotes}}
+    </p>
+    {{/if}}
+  </div>
+
+  <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 16px; margin: 24px 0; border-radius: 4px;">
+    <p style="margin: 0; color: #856404; font-weight: 500;">
+      📝 Votre réservation a été modifiée. Merci de noter ces nouveaux horaires.
+    </p>
+  </div>
+
+  <p style="margin: 24px 0 16px 0; line-height: 1.6;">
+    Nous nous réjouissons de vous accueillir avec ces nouveaux arrangements.
+  </p>
+
+  <p style="margin-bottom: 16px; line-height: 1.6;">
+    Si vous avez des questions concernant ces modifications, n'hésitez pas à nous contacter.
+  </p>
+
+  <p style="color: #3A7B59; font-weight: 600; margin: 24px 0 0 0;">
+    À bientôt chez Rose des Vins ! 🍇
+  </p>
+</div>

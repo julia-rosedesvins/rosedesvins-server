@@ -552,6 +552,7 @@ export class UsersService {
       // Generate random password
       const randomPassword = this.generateRandomPassword();
       const saltRounds = 12;
+  
       const hashedPassword = await bcrypt.hash(randomPassword, saltRounds);
 
       // Update user status to approved
@@ -562,6 +563,29 @@ export class UsersService {
       user.mustChangePassword = true;
 
       const savedUser = await user.save();
+
+      // Create default subscription for 1 month
+      try {
+        const currentDate = new Date();
+        const endDate = new Date(currentDate);
+        endDate.setMonth(currentDate.getMonth() + 1); // Add 1 month
+
+        const subscription = new this.subscriptionModel({
+          userId: savedUser._id,
+          adminId: new Types.ObjectId(adminId),
+          startDate: currentDate,
+          endDate: endDate,
+          isActive: true,
+          notes: '',
+        });
+
+        await subscription.save();
+        this.logger.log(`Created default 1-month subscription for user ${savedUser.email}`);
+      } catch (subscriptionError) {
+        this.logger.error('Failed to create default subscription:', subscriptionError);
+        // Don't fail the approval process if subscription creation fails
+        // The user is still approved, but without a subscription
+      }
 
       // Send welcome email with account details
       try {
@@ -618,17 +642,23 @@ export class UsersService {
       throw new UnauthorizedException('User not found or access denied');
     }
 
-    // Verify current password
-    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    // If mustChangePassword is false, verify current password
+    if (!user.mustChangePassword) {
+      if (!currentPassword) {
+        throw new BadRequestException('Current password is required');
+      }
 
-    if (!isCurrentPasswordValid) {
-      throw new UnauthorizedException('Current password is incorrect');
-    }
+      const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
 
-    // Check if new password is different from current password
-    const isSamePassword = await bcrypt.compare(newPassword, user.password);
-    if (isSamePassword) {
-      throw new BadRequestException('New password must be different from current password');
+      if (!isCurrentPasswordValid) {
+        throw new UnauthorizedException('Current password is incorrect');
+      }
+
+      // Check if new password is different from current password
+      const isSamePassword = await bcrypt.compare(newPassword, user.password);
+      if (isSamePassword) {
+        throw new BadRequestException('New password must be different from current password');
+      }
     }
 
     // Hash the new password
@@ -661,6 +691,10 @@ export class UsersService {
 
     if (!admin) {
       throw new UnauthorizedException('Admin not found or access denied');
+    }
+
+    if (!currentPassword) {
+      throw new BadRequestException('Current password is required');
     }
 
     // Verify current password

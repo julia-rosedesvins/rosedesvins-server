@@ -1,7 +1,7 @@
-import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBody } from '@nestjs/swagger';
+import { Controller, Post, Body, HttpCode, HttpStatus, Delete, Param, Put } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBody, ApiParam } from '@nestjs/swagger';
 import { UserBookingsService } from './user-bookings.service';
-import { CreateBookingDto, CreateBookingSchema } from '../validators/user-bookings.validators';
+import { CreateBookingDto, CreateBookingSchema, UpdateBookingDto, UpdateBookingSchema } from '../validators/user-bookings.validators';
 import { ZodValidationPipe } from '../pipes/zod-validation.pipe';
 
 @ApiTags('Bookings')
@@ -123,5 +123,94 @@ export class UserBookingsController {
     @Body(new ZodValidationPipe(CreateBookingSchema)) createBookingDto: CreateBookingDto
   ) {
     return this.userBookingsService.createBooking(createBookingDto);
+  }
+
+  @Put(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update a booking' })
+  @ApiParam({
+    name: 'id',
+    description: 'Booking ID to update',
+    type: 'string',
+    example: '60d0fe4f5311236168a109ca'
+  })
+  @ApiBody({
+    description: 'Booking update data',
+    schema: {
+      type: 'object',
+      properties: {
+        bookingDate: { 
+          type: 'string', 
+          format: 'date',
+          example: '2025-10-15',
+          description: 'New date of the booking'
+        },
+        bookingTime: { 
+          type: 'string', 
+          example: '14:30',
+          description: 'New time of the booking in HH:MM format'
+        },
+        participantsAdults: { 
+          type: 'number', 
+          example: 2,
+          description: 'Number of adult participants'
+        },
+        participantsEnfants: { 
+          type: 'number', 
+          example: 1,
+          description: 'Number of child participants'
+        },
+        selectedLanguage: { 
+          type: 'string', 
+          example: 'French',
+          description: 'Preferred language for the service'
+        },
+        userContactFirstname: { 
+          type: 'string', 
+          example: 'John',
+          description: 'Customer first name'
+        },
+        userContactLastname: { 
+          type: 'string', 
+          example: 'Doe',
+          description: 'Customer last name'
+        },
+        phoneNo: { 
+          type: 'string', 
+          example: '+33123456789',
+          description: 'Customer phone number'
+        },
+        customerEmail: { 
+          type: 'string', 
+          format: 'email',
+          example: 'john.doe@example.com',
+          description: 'Customer email address'
+        },
+        additionalNotes: { 
+          type: 'string', 
+          example: 'Allergic to nuts',
+          description: 'Additional notes or special requests'
+        }
+      }
+    }
+  })
+  async updateBooking(
+    @Param('id') bookingId: string,
+    @Body(new ZodValidationPipe(UpdateBookingSchema)) updateData: UpdateBookingDto
+  ) {
+    return this.userBookingsService.updateBooking(bookingId, updateData);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a booking' })
+  @ApiParam({
+    name: 'id',
+    description: 'Booking ID to delete',
+    type: 'string',
+    example: '60d0fe4f5311236168a109ca'
+  })
+  async deleteBooking(@Param('id') bookingId: string) {
+    return this.userBookingsService.deleteBooking(bookingId);
   }
 }
