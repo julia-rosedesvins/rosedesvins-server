@@ -162,4 +162,55 @@ export class ConnectorController {
       throw error;
     }
   }
+
+  @Get('microsoft/oauth-url')
+  @UseGuards(UserGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get Microsoft OAuth URL for calendar permissions' })
+  @ApiResponse({
+    status: 200,
+    description: 'Microsoft OAuth URL generated successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        data: {
+          type: 'object',
+          properties: {
+            authUrl: { type: 'string' },
+            state: { type: 'string' }
+          }
+        }
+      }
+    }
+  })
+  async getMicrosoftOAuthUrl(
+    @CurrentUser() user: any
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: {
+      authUrl: string;
+      state: string;
+    };
+  }> {
+    try {
+      const userId = user.sub;
+      const result = await this.connectorService.generateMicrosoftOAuthUrl(userId);
+
+      return {
+        success: true,
+        message: 'Microsoft OAuth URL generated successfully',
+        data: result
+      };
+    } catch (error) {
+      console.error('Error generating Microsoft OAuth URL:', error);
+      throw new HttpException({
+        success: false,
+        message: 'Failed to generate Microsoft OAuth URL',
+        error: error.message
+      }, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
 }

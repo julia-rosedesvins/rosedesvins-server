@@ -296,4 +296,60 @@ export class ConnectorService {
       throw error;
     }
   }
+
+  /**
+   * Generate Microsoft OAuth URL for calendar permissions
+   * @param userId - User ID requesting the OAuth URL
+   * @returns Promise<{authUrl: string, state: string}> - OAuth URL and state for verification
+   */
+  async generateMicrosoftOAuthUrl(userId: string): Promise<{
+    authUrl: string;
+    state: string;
+  }> {
+    try {
+      console.log('🔗 Generating Microsoft OAuth URL for user:', userId);
+
+      // Microsoft OAuth 2.0 parameters
+      const clientId = process.env.MICROSOFT_CLIENT_ID || '09887ad9-bf96-48b1-978f-941e19cfcfbf';
+      const tenantId = process.env.MICROSOFT_TENANT_ID || '009f53c5-6b44-4bc8-8cce-19cfad319c6e';
+      const redirectUri = process.env.MICROSOFT_REDIRECT_URI || 'http://localhost:3000/auth/microsoft/callback';
+      
+      // Generate a unique state parameter for security (prevents CSRF attacks)
+      const state = `${userId}_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+      
+      // Required scopes for calendar operations
+      const scopes = [
+        'https://graph.microsoft.com/Calendars.ReadWrite',
+        'https://graph.microsoft.com/User.Read'
+      ].join(' ');
+
+      // Microsoft OAuth 2.0 authorization endpoint
+      const baseUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize`;
+      
+      const params = new URLSearchParams({
+        client_id: clientId,
+        response_type: 'code',
+        redirect_uri: redirectUri,
+        response_mode: 'query',
+        scope: scopes,
+        state: state,
+        prompt: 'consent', // Force consent to ensure we get refresh token
+        access_type: 'offline' // Request offline access for refresh tokens
+      });
+
+      const authUrl = `${baseUrl}?${params.toString()}`;
+
+      console.log('✅ Microsoft OAuth URL generated successfully');
+      console.log('🔗 Auth URL:', authUrl);
+      console.log('🔐 State:', state);
+
+      return {
+        authUrl,
+        state
+      };
+    } catch (error) {
+      console.error('❌ Error generating Microsoft OAuth URL:', error);
+      throw new BadRequestException('Failed to generate Microsoft OAuth URL');
+    }
+  }
 }
