@@ -564,6 +564,29 @@ export class UsersService {
 
       const savedUser = await user.save();
 
+      // Create default subscription for 1 month
+      try {
+        const currentDate = new Date();
+        const endDate = new Date(currentDate);
+        endDate.setMonth(currentDate.getMonth() + 1); // Add 1 month
+
+        const subscription = new this.subscriptionModel({
+          userId: savedUser._id,
+          adminId: new Types.ObjectId(adminId),
+          startDate: currentDate,
+          endDate: endDate,
+          isActive: true,
+          notes: '',
+        });
+
+        await subscription.save();
+        this.logger.log(`Created default 1-month subscription for user ${savedUser.email}`);
+      } catch (subscriptionError) {
+        this.logger.error('Failed to create default subscription:', subscriptionError);
+        // Don't fail the approval process if subscription creation fails
+        // The user is still approved, but without a subscription
+      }
+
       // Send welcome email with account details
       try {
         await this.emailService.sendWelcomeEmail({
