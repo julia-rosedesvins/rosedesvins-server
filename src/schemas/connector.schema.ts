@@ -28,10 +28,47 @@ export class OvhCredentials {
 
 export const OvhCredentialsSchema = SchemaFactory.createForClass(OvhCredentials);
 
-// Microsoft connector credentials sub-schema (empty for now)
+// Microsoft connector credentials sub-schema
 @Schema({ _id: false })
 export class MicrosoftCredentials {
-  // Currently empty - to be implemented later
+  @Prop({ required: true })
+  accessToken: string;
+
+  @Prop({ required: true })
+  refreshToken: string;
+
+  @Prop({ required: true })
+  tokenType: string;
+
+  @Prop({ required: true })
+  expiresIn: number;
+
+  @Prop({ required: true })
+  scope: string;
+
+  @Prop({ required: true })
+  expiresAt: Date;
+
+  @Prop({ trim: true })
+  userPrincipalName?: string;
+
+  @Prop({ trim: true })
+  displayName?: string;
+
+  @Prop({ trim: true })
+  mail?: string;
+
+  @Prop({ trim: true })
+  microsoftUserId?: string;
+
+  @Prop({ default: true })
+  isActive: boolean;
+
+  @Prop({ default: true })
+  isValid: boolean;
+
+  @Prop({ default: Date.now })
+  connectedAt: Date;
 }
 
 export const MicrosoftCredentialsSchema = SchemaFactory.createForClass(MicrosoftCredentials);
@@ -90,3 +127,6 @@ ConnectorSchema.index({ userId: 1, connector_name: 1 }, { unique: true });
 ConnectorSchema.index({ createdAt: -1 });
 ConnectorSchema.index({ 'connector_creds.orange.isActive': 1 });
 ConnectorSchema.index({ 'connector_creds.orange.isValid': 1 });
+ConnectorSchema.index({ 'connector_creds.microsoft.isActive': 1 });
+ConnectorSchema.index({ 'connector_creds.microsoft.isValid': 1 });
+ConnectorSchema.index({ 'connector_creds.microsoft.expiresAt': 1 });

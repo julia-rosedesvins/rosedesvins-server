@@ -10,6 +10,7 @@ import {
   HttpException,
 } from '@nestjs/common';
 import { ApiTags, ApiResponse, ApiOperation, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
 import { UserGuard } from '../guards/user.guard';
 import { ConnectorService } from './connector.service';
 import { ZodValidationPipe } from '../pipes/zod-validation.pipe';
@@ -19,7 +20,10 @@ import { CurrentUser } from '../decorators/current-user.decorator';
 @ApiTags('Calendar Connectors')
 @Controller('connectors')
 export class ConnectorController {
-  constructor(private readonly connectorService: ConnectorService) {}
+  constructor(
+    private readonly connectorService: ConnectorService,
+    private readonly configService: ConfigService
+  ) {}
 
   @Post('orange/connect')
   @UseGuards(UserGuard)
@@ -307,7 +311,7 @@ export class ConnectorController {
   })
   @ApiResponse({
     status: 200,
-    description: 'OAuth callback handled successfully - tokens exchanged and logged',
+    description: 'OAuth callback handled successfully - tokens saved to database',
     schema: {
       type: 'object',
       properties: {
@@ -318,7 +322,9 @@ export class ConnectorController {
           properties: {
             provider: { type: 'string', example: 'microsoft' },
             userId: { type: 'string', example: 'user123' },
-            connected: { type: 'boolean', example: true }
+            connected: { type: 'boolean', example: true },
+            timestamp: { type: 'string', example: '2025-10-12T11:30:00.000Z' },
+            redirectUrl: { type: 'string', example: 'http://localhost:3000/settings' }
           }
         }
       }
@@ -383,7 +389,11 @@ export class ConnectorController {
       // Automatically exchange the code for tokens
       await this.connectorService.exchangeMicrosoftToken(userId, code);
 
-      // Return success response
+      // Get client URL for redirect
+      const clientUrl = this.configService.get<string>('CLIENT_URL') || 'http://localhost:3000';
+      const redirectUrl = `${clientUrl}/settings`;
+
+      // Return success response with redirect instruction
       return {
         success: true,
         message: 'Microsoft Calendar connected successfully',
@@ -391,7 +401,8 @@ export class ConnectorController {
           provider: 'microsoft',
           userId: userId,
           connected: true,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          redirectUrl: redirectUrl
         }
       };
 

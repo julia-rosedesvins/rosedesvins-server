@@ -86,14 +86,13 @@ export class ConnectorService {
       // Encrypt password using AES (reversible for CalDAV operations)
       const encryptedPassword = EncryptionService.encrypt(connectorData.password);
 
-      // Check if connector already exists for this user and Orange
+      // Check if connector already exists for this user (regardless of connector_name)
       const existingConnector = await this.connectorModel.findOne({ 
-        userId: userObjectId,
-        connector_name: 'orange'
+        userId: userObjectId
       });
 
       if (existingConnector) {
-        // Update existing Orange connector
+        // Update existing connector with Orange credentials
         existingConnector.connector_creds = {
           ...existingConnector.connector_creds,
           orange: {
@@ -103,6 +102,11 @@ export class ConnectorService {
             isValid: true
           }
         };
+
+        // Update connector_name to 'orange' if it was different
+        if (existingConnector.connector_name !== 'orange') {
+          existingConnector.connector_name = 'orange';
+        }
 
         await existingConnector.save();
 
@@ -117,7 +121,7 @@ export class ConnectorService {
 
         return updatedConnector;
       } else {
-        // Create new connector
+        // Create new connector document for this user
         const newConnector = new this.connectorModel({
           userId: userObjectId,
           connector_name: 'orange',
@@ -165,8 +169,7 @@ export class ConnectorService {
     
     const connector = await this.connectorModel
       .findOne({ 
-        userId: userObjectId,
-        connector_name: 'orange'
+        userId: userObjectId
       })
       .populate('userId', 'firstName lastName email domainName')
       .exec();
@@ -183,12 +186,11 @@ export class ConnectorService {
     const userObjectId = new Types.ObjectId(userId);
     
     const connector = await this.connectorModel.findOne({ 
-      userId: userObjectId,
-      connector_name: 'orange'
+      userId: userObjectId
     });
 
     if (!connector) {
-      throw new NotFoundException('Orange connector not found for this user');
+      throw new NotFoundException('Connector not found for this user');
     }
 
     // Clear the orange credentials by setting to null
@@ -419,11 +421,12 @@ export class ConnectorService {
       console.log('  - Token Type:', tokenData.token_type);
       console.log('  - Expires In:', tokenData.expires_in, 'seconds');
       console.log('  - Scope:', tokenData.scope);
-      
-      // Full token data for debugging
-      console.log('🔍 Full Token Data:', JSON.stringify(tokenData, null, 2));
 
-      // Test the access token by making a simple Graph API call
+      // Calculate token expiration date
+      const expiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
+      
+      // Get user profile from Microsoft Graph
+      let userProfile: any = {};
       if (tokenData.access_token) {
         console.log('🧪 Testing access token with Graph API...');
         
@@ -434,7 +437,7 @@ export class ConnectorService {
         });
 
         if (graphResponse.ok) {
-          const userProfile = await graphResponse.json();
+          userProfile = await graphResponse.json();
           console.log('✅ Graph API test successful!');
           console.log('👤 User Profile:', {
             id: userProfile.id,
@@ -447,9 +450,258 @@ export class ConnectorService {
         }
       }
 
+      // Convert userId to ObjectId
+      const userObjectId = new Types.ObjectId(userId);
+
+      // Save Microsoft credentials to database
+      // Find any existing connector for this user (regardless of connector_name)
+      const existingConnector = await this.connectorModel.findOne({ 
+        userId: userObjectId
+      });
+
+      if (existingConnector) {
+        // Update existing connector with Microsoft credentials
+        existingConnector.connector_creds = {
+          ...existingConnector.connector_creds,
+          microsoft: {
+            accessToken: tokenData.access_token,
+            refreshToken: tokenData.refresh_token,
+            tokenType: tokenData.token_type || 'Bearer',
+            expiresIn: tokenData.expires_in,
+            scope: tokenData.scope || '',
+            expiresAt: expiresAt,
+            userPrincipalName: userProfile.userPrincipalName || '',
+            displayName: userProfile.displayName || '',
+            mail: userProfile.mail || '',
+            microsoftUserId: userProfile.id || '',
+            isActive: true,
+            isValid: true,
+            connectedAt: new Date()
+          }
+        };
+
+        // Update connector_name to 'microsoft' if it was different
+        if (existingConnector.connector_name !== 'microsoft') {
+          existingConnector.connector_name = 'microsoft';
+        }
+
+        await existingConnector.save();
+        console.log('✅ Updated existing connector with Microsoft credentials');
+      } else {
+        // Create new connector document for this user
+        const newConnector = new this.connectorModel({
+          userId: userObjectId,
+          connector_name: 'microsoft',
+          connector_creds: {
+            orange: null,
+            ovh: null,
+            microsoft: {
+              accessToken: tokenData.access_token,
+              refreshToken: tokenData.refresh_token,
+              tokenType: tokenData.token_type || 'Bearer',
+              expiresIn: tokenData.expires_in,
+              scope: tokenData.scope || '',
+              expiresAt: expiresAt,
+              userPrincipalName: userProfile.userPrincipalName || '',
+              displayName: userProfile.displayName || '',
+              mail: userProfile.mail || '',
+              microsoftUserId: userProfile.id || '',
+              isActive: true,
+              isValid: true,
+              connectedAt: new Date()
+            }
+          }
+        });
+
+        await newConnector.save();
+        console.log('✅ Created new connector document with Microsoft credentials');
+      }
+
+      console.log('💾 Microsoft credentials saved successfully to database');
+
     } catch (error) {
       console.error('❌ Error exchanging Microsoft token:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Get user's Microsoft calendar connection status
+   * @param userId - User ID
+   * @returns Microsoft connector if exists
+   */
+  async getMicrosoftConnector(userId: string): Promise<Connector | null> {
+    const userObjectId = new Types.ObjectId(userId);
+    
+    const connector = await this.connectorModel
+      .findOne({ 
+        userId: userObjectId
+      })
+      .populate('userId', 'firstName lastName email domainName')
+      .exec();
+
+    return connector;
+  }
+
+  /**
+   * Disconnect Microsoft calendar
+   * @param userId - User ID
+   * @returns Success confirmation
+   */
+  async disconnectMicrosoftCalendar(userId: string): Promise<void> {
+    const userObjectId = new Types.ObjectId(userId);
+    
+    const connector = await this.connectorModel.findOne({ 
+      userId: userObjectId
+    });
+
+    if (!connector) {
+      throw new NotFoundException('Connector not found for this user');
+    }
+
+    // Clear the microsoft credentials by setting to null
+    if (connector.connector_creds) {
+      connector.connector_creds.microsoft = null;
+      await connector.save();
+    }
+  }
+
+  /**
+   * Get all connectors for a user
+   * @param userId - User ID
+   * @returns User's connector document with all provider credentials
+   */
+  async getUserConnectors(userId: string): Promise<Connector | null> {
+    const userObjectId = new Types.ObjectId(userId);
+    
+    const connector = await this.connectorModel
+      .findOne({ 
+        userId: userObjectId
+      })
+      .populate('userId', 'firstName lastName email domainName')
+      .exec();
+
+    return connector;
+  }
+
+  /**
+   * Get Microsoft access token for Graph API operations
+   * @param userId - User ID
+   * @returns Promise<string | null> - Access token if valid and not expired
+   */
+  async getMicrosoftAccessToken(userId: string): Promise<string | null> {
+    try {
+      const connector = await this.getMicrosoftConnector(userId);
+      
+      if (!connector?.connector_creds?.microsoft?.accessToken) {
+        return null;
+      }
+
+      const microsoft = connector.connector_creds.microsoft;
+      
+      // Check if token is still valid and not expired
+      if (!microsoft.isValid || !microsoft.isActive) {
+        return null;
+      }
+
+      // Check if token is expired (with 5 minute buffer)
+      const now = new Date();
+      const expiresAt = new Date(microsoft.expiresAt);
+      const bufferTime = 5 * 60 * 1000; // 5 minutes
+      
+      if (now.getTime() > (expiresAt.getTime() - bufferTime)) {
+        console.log('🔄 Microsoft token expired, attempting refresh...');
+        const refreshed = await this.refreshMicrosoftToken(userId);
+        
+        if (!refreshed) {
+          return null;
+        }
+        
+        // Get the refreshed connector
+        const refreshedConnector = await this.getMicrosoftConnector(userId);
+        return refreshedConnector?.connector_creds?.microsoft?.accessToken || null;
+      }
+
+      return microsoft.accessToken;
+    } catch (error) {
+      console.error('❌ Error getting Microsoft access token:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Refresh Microsoft access token using refresh token
+   * @param userId - User ID
+   * @returns Promise<boolean> - Success status
+   */
+  async refreshMicrosoftToken(userId: string): Promise<boolean> {
+    try {
+      const connector = await this.getMicrosoftConnector(userId);
+      
+      if (!connector?.connector_creds?.microsoft?.refreshToken) {
+        throw new NotFoundException('Microsoft connector not found or missing refresh token');
+      }
+
+      const clientId = this.configService.get<string>('MICROSOFT_CLIENT_ID');
+      const clientSecret = this.configService.get<string>('MICROSOFT_CLIENT_SECRET');
+      const tenantId = this.configService.get<string>('MICROSOFT_TENANT_ID');
+
+      if (!clientId || !clientSecret || !tenantId) {
+        throw new BadRequestException('Microsoft OAuth credentials are not configured');
+      }
+
+      // Use refresh token directly (no decryption needed for Microsoft tokens)
+      const refreshToken = connector.connector_creds.microsoft.refreshToken;
+
+      // Exchange refresh token for new access token
+      const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+      
+      const params = new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+        scope: connector.connector_creds.microsoft.scope
+      });
+
+      const response = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: params
+      });
+
+      const tokenData = await response.json();
+
+      if (!response.ok) {
+        console.error('❌ Token refresh failed:', tokenData);
+        // Mark connector as invalid
+        connector.connector_creds.microsoft.isValid = false;
+        await connector.save();
+        return false;
+      }
+
+      // Update tokens in database (no encryption for Microsoft tokens)
+      const newExpiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
+      const newAccessToken = tokenData.access_token;
+      const newRefreshToken = tokenData.refresh_token 
+        ? tokenData.refresh_token
+        : connector.connector_creds.microsoft.refreshToken; // Keep old refresh token if new one not provided
+
+      connector.connector_creds.microsoft.accessToken = newAccessToken;
+      connector.connector_creds.microsoft.refreshToken = newRefreshToken;
+      connector.connector_creds.microsoft.expiresIn = tokenData.expires_in;
+      connector.connector_creds.microsoft.expiresAt = newExpiresAt;
+      connector.connector_creds.microsoft.isValid = true;
+
+      await connector.save();
+
+      console.log('✅ Microsoft token refreshed successfully');
+      return true;
+    } catch (error) {
+      console.error('❌ Error refreshing Microsoft token:', error);
+      return false;
     }
   }
 }
