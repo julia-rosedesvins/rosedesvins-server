@@ -13,6 +13,7 @@ import { EmailService } from '../email/email.service';
 import { EmailConfig } from '../email/email.config';
 import { TemplateService } from '../email/template.service';
 import { EncryptionService } from '../common/encryption.service';
+import { ConnectorService } from '../connector/connector.service';
 
 @Module({
   imports: [
@@ -32,7 +33,8 @@ import { EncryptionService } from '../common/encryption.service';
     EmailService, 
     EmailConfig, 
     TemplateService, 
-    EncryptionService
+    EncryptionService,
+    ConnectorService
   ],
 })
 export class UserBookingsModule {}

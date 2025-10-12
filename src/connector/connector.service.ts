@@ -323,7 +323,11 @@ export class ConnectorService {
       const state = `${userId}_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
       
       // Required scopes for calendar operations
+      // Using openid profile email for unapproved apps
       const scopes = [
+        'openid',
+        'profile', 
+        'email',
         'https://graph.microsoft.com/Calendars.ReadWrite',
         'https://graph.microsoft.com/User.Read',
         'offline_access'
@@ -625,16 +629,40 @@ export class ConnectorService {
    */
   async getMicrosoftAccessToken(userId: string): Promise<string | null> {
     try {
+      console.log('🔍 Getting Microsoft access token for user:', userId);
       const connector = await this.getMicrosoftConnector(userId);
       
-      if (!connector?.connector_creds?.microsoft?.accessToken) {
+      if (!connector) {
+        console.log('❌ No connector found for user:', userId);
+        return null;
+      }
+
+      if (!connector.connector_creds?.microsoft) {
+        console.log('❌ No Microsoft credentials found in connector');
+        return null;
+      }
+
+      if (!connector.connector_creds.microsoft.accessToken) {
+        console.log('❌ No access token found in Microsoft credentials');
         return null;
       }
 
       const microsoft = connector.connector_creds.microsoft;
       
+      console.log('🔍 Microsoft token info:', {
+        hasAccessToken: !!microsoft.accessToken,
+        hasRefreshToken: !!microsoft.refreshToken,
+        scope: microsoft.scope,
+        isValid: microsoft.isValid,
+        isActive: microsoft.isActive,
+        expiresAt: microsoft.expiresAt,
+        now: new Date(),
+        timeUntilExpiry: new Date(microsoft.expiresAt).getTime() - Date.now()
+      });
+      
       // Check if token is still valid and not expired
       if (!microsoft.isValid || !microsoft.isActive) {
+        console.log('❌ Microsoft token is not valid or not active');
         return null;
       }
 
@@ -648,12 +676,28 @@ export class ConnectorService {
         const refreshed = await this.refreshMicrosoftToken(userId);
         
         if (!refreshed) {
+          console.log('❌ Failed to refresh Microsoft token');
           return null;
         }
         
         // Get the refreshed connector
         const refreshedConnector = await this.getMicrosoftConnector(userId);
-        return refreshedConnector?.connector_creds?.microsoft?.accessToken || null;
+        const newToken = refreshedConnector?.connector_creds?.microsoft?.accessToken || null;
+        console.log('✅ Token refreshed successfully:', !!newToken);
+        return newToken;
+      }
+
+      console.log('✅ Using existing valid Microsoft token');
+
+      // Decode and check token scopes for debugging
+      try {
+        const tokenParts = microsoft.accessToken.split('.');
+        if (tokenParts.length === 3) {
+          const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
+          console.log('🔍 Token payload scopes:', payload.scp || payload.scopes || 'No scopes found');
+        }
+      } catch (error) {
+        console.log('🔍 Could not decode token payload:', error.message);
       }
 
       return microsoft.accessToken;

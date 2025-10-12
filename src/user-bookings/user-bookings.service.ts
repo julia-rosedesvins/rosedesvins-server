@@ -15,6 +15,7 @@ import { CreateBookingDto, UpdateBookingDto } from '../validators/user-bookings.
 import { EncryptionService } from '../common/encryption.service';
 import { EmailService } from '../email/email.service';
 import { TemplateService } from '../email/template.service';
+import { ConnectorService } from '../connector/connector.service';
 
 const dav = require('dav');
 
@@ -55,6 +56,7 @@ export class UserBookingsService {
     private encryptionService: EncryptionService,
     private emailService: EmailService,
     private templateService: TemplateService,
+    private connectorService: ConnectorService,
   ) {}
 
   /**
@@ -355,21 +357,39 @@ export class UserBookingsService {
         return;
       }
 
-      // Check for active Orange connector
-      const orangeConnector = connectors.find(conn => 
-        conn.connector_name === 'orange' && 
-        conn.connector_creds?.orange?.isActive && 
-        conn.connector_creds?.orange?.isValid
+      // Check for active connectors based on connector_name
+      const activeConnector = connectors.find(conn => 
+        conn.connector_name !== 'none'
       );
 
-      if (orangeConnector?.connector_creds?.orange) {
-        console.log('🍊 Using Orange calendar for user:', booking.userId);
-        await this.addToOrangeCalendar(booking, bookingDto, orangeConnector.connector_creds.orange);
+      if (!activeConnector) {
+        console.log('ℹ️ No active calendar connectors found for user:', booking.userId);
         return;
       }
 
-      // TODO: Add support for Microsoft and OVH calendar providers
-      console.log('ℹ️ No active calendar connectors found for user:', booking.userId);
+      // Route to appropriate calendar based on connector_name
+      switch (activeConnector.connector_name) {
+        case 'orange':
+          if (activeConnector.connector_creds?.orange?.isActive && activeConnector.connector_creds?.orange?.isValid) {
+            console.log('🍊 Using Orange calendar for user:', booking.userId);
+            await this.addToOrangeCalendar(booking, bookingDto, activeConnector.connector_creds.orange);
+          }
+          break;
+
+        case 'microsoft':
+          if (activeConnector.connector_creds?.microsoft?.isActive && activeConnector.connector_creds?.microsoft?.isValid) {
+            console.log('🟦 Using Microsoft calendar for user:', booking.userId);
+            await this.addToMicrosoftCalendar(booking, bookingDto, activeConnector.connector_creds.microsoft);
+          }
+          break;
+
+        case 'ovh':
+          console.log('ℹ️ OVH calendar integration not yet implemented');
+          break;
+
+        default:
+          console.log('ℹ️ No supported calendar provider found for user:', booking.userId);
+      }
       
     } catch (error) {
       console.error('❌ Calendar integration error:', error);
@@ -488,6 +508,259 @@ export class UserBookingsService {
       console.warn('Could not fetch service duration, using default:', error);
     }
     return 60; // Default 1 hour
+  }
+
+  /**
+   * Add booking event to Microsoft Calendar using Graph API
+   * Creates a wine tasting reservation event with booking details
+   */
+  private async addToMicrosoftCalendar(booking: UserBooking, bookingDto: CreateBookingDto, microsoftCreds: any): Promise<void> {
+    try {
+      console.log('🟦 Starting Microsoft calendar integration for booking:', booking._id);
+
+      // Validate credentials
+      if (!microsoftCreds.isActive || !microsoftCreds.isValid) {
+        console.log('ℹ️ Microsoft connector is inactive or invalid for user:', booking.userId);
+        return;
+      }
+
+      console.log('📧 Using Microsoft credentials for user:', microsoftCreds.mail || microsoftCreds.userPrincipalName);
+
+      // Get a valid access token (automatically refreshes if needed)
+      console.log('🔑 Attempting to get Microsoft access token for user:', booking.userId.toString());
+      const accessToken = await this.connectorService.getMicrosoftAccessToken(booking.userId.toString());
+      
+      console.log('🔑 Access token result:', {
+        hasToken: !!accessToken,
+        tokenLength: accessToken?.length || 0,
+        tokenStart: accessToken?.substring(0, 20) + '...' || 'null'
+      });
+      
+      if (!accessToken) {
+        throw new Error('Failed to get valid Microsoft access token');
+      }
+
+      // Test the token first by calling /me endpoint
+      console.log('🧪 Testing access token with /me endpoint...');
+      const testResponse = await this.callMicrosoftGraphWithRetry('https://graph.microsoft.com/v1.0/me', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+
+      console.log('🧪 Test response:', {
+        status: testResponse.status,
+        statusText: testResponse.statusText
+      });
+
+      if (!testResponse.ok) {
+        const testError = await testResponse.text();
+        console.error('❌ Token test failed:', testError);
+        throw new Error(`Access token is invalid: ${testResponse.status} - ${testError}`);
+      }
+
+      const userProfile = await testResponse.json();
+      console.log('✅ Token test successful. User:', {
+        id: userProfile.id,
+        displayName: userProfile.displayName,
+        mail: userProfile.mail
+      });
+
+      // Test calendar permissions specifically
+      console.log('🧪 Testing calendar permissions...');
+      const calendarTestResponse = await this.callMicrosoftGraphWithRetry('https://graph.microsoft.com/v1.0/me/calendars', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log('📅 Calendar test response:', { 
+        status: calendarTestResponse.status, 
+        statusText: calendarTestResponse.statusText ,
+        data: calendarTestResponse
+      });
+
+      if (calendarTestResponse.ok) {
+        const calendarData = await calendarTestResponse.json();
+        console.log('✅ Calendar permissions work. Calendars found:', calendarData.value?.length || 0);
+      } else {
+        const errorText = await calendarTestResponse.text();
+        console.log('❌ Calendar permissions failed:', errorText);
+        
+        if (calendarTestResponse.status === 401) {
+          console.log('🚫 MICROSOFT AZURE APP NOT APPROVED!');
+          console.log('💡 Solutions:');
+          console.log('   1. Get Azure app approved by Microsoft (recommended for production)');
+          console.log('   2. Use personal Microsoft account for testing');
+          console.log('   3. Request admin consent in Azure portal');
+          console.log('   4. Verify app permissions in Azure Active Directory');
+        } else {
+          // If calendar permissions fail, we still want to see the exact error
+          console.log('🔍 This suggests the token lacks Calendars.ReadWrite permissions');
+          console.log('💡 Solution: User needs to disconnect and reconnect Microsoft Calendar with proper permissions');
+        }
+      }
+
+      // Construct event start date from booking data
+      const startDate = bookingDto.bookingDate instanceof Date
+        ? new Date(`${bookingDto.bookingDate.toISOString().split('T')[0]}T${bookingDto.bookingTime}:00`)
+        : new Date(`${bookingDto.bookingDate}T${bookingDto.bookingTime}:00`);
+      
+      if (isNaN(startDate.getTime())) {
+        throw new Error(`Invalid date constructed from booking data`);
+      }
+      
+      // Determine event duration from service details
+      const eventDuration = await this.getServiceDuration(booking.userId, bookingDto.serviceId);
+      const endDate = new Date(startDate.getTime() + (eventDuration * 60 * 1000));
+
+      // Create Microsoft Graph API event
+      const eventTitle = `Réservation: ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
+      
+      const eventBody = {
+        subject: eventTitle,
+        start: {
+          dateTime: startDate.toISOString(),
+          timeZone: 'Europe/Paris'
+        },
+        end: {
+          dateTime: endDate.toISOString(),
+          timeZone: 'Europe/Paris'
+        },
+        body: {
+          contentType: 'html',
+          content: this.generateEventDescription(bookingDto)
+        },
+        attendees: [
+          {
+            emailAddress: {
+              address: bookingDto.customerEmail,
+              name: `${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`
+            },
+            type: 'required'
+          }
+        ],
+        location: {
+          displayName: 'Rose des Vins - Dégustation'
+        },
+        showAs: 'busy',
+        isReminderOn: true,
+        reminderMinutesBeforeStart: 30
+      };
+
+      // Create event via Microsoft Graph API with retry logic
+      console.log('📤 Making Microsoft Graph API request to create event');
+      console.log('📋 Event body:', JSON.stringify(eventBody, null, 2));
+      
+      const response = await this.callMicrosoftGraphWithRetry('https://graph.microsoft.com/v1.0/me/events', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(eventBody)
+      });
+
+      console.log('📥 Microsoft Graph API response:', {
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries())
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        console.error('❌ Microsoft Graph API error response:', errorData);
+        
+        // Special handling for 401 errors with unapproved apps
+        if (response.status === 401) {
+          console.error('🚫 MICROSOFT AZURE APP NOT APPROVED!');
+          console.error('💡 Solutions:');
+          console.error('   1. Get Azure app approved by Microsoft (recommended for production)');
+          console.error('   2. Use personal Microsoft account for testing');
+          console.error('   3. Request admin consent in Azure portal');
+          console.error('   4. Verify app permissions in Azure Active Directory');
+        }
+        
+        throw new Error(`Microsoft Graph API error: ${response.status} - ${errorData}`);
+      }
+
+      const createdEvent = await response.json();
+      
+      // Store the Microsoft event ID in the booking for future operations
+      await this.userBookingModel.updateOne(
+        { _id: booking._id },
+        { $set: { microsoftEventId: createdEvent.id } }
+      );
+
+      console.log('✅ Microsoft calendar event created successfully:', createdEvent.id);
+      
+    } catch (error) {
+      console.error('❌ Microsoft calendar integration failed:', error);
+      
+      // Provide specific error messages based on error type
+      if (error.name === 'TimeoutError' || error.code === 'ETIMEDOUT') {
+        console.error('⏰ Network timeout when calling Microsoft Graph API');
+        console.error('💡 This might be a temporary network issue or Microsoft Graph API slowness');
+      } else if (error.cause?.code === 'ETIMEDOUT') {
+        console.error('⏰ Connection timeout to Microsoft Graph API');
+        console.error('💡 Check your internet connection or try again later');
+      }
+      
+      throw error; // Re-throw to be caught by the main addToCalendar method
+    }
+  }
+
+  /**
+   * Helper method to call Microsoft Graph API with retry logic
+   */
+  private async callMicrosoftGraphWithRetry(url: string, options: any, maxRetries: number = 3): Promise<Response> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🔄 Microsoft Graph API attempt ${attempt}/${maxRetries}`);
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+        
+        const response = await fetch(url, {
+          ...options,
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        return response;
+        
+      } catch (error) {
+        console.error(`❌ Attempt ${attempt} failed:`, error.message);
+        
+        if (attempt === maxRetries) {
+          throw error; // Re-throw on final attempt
+        }
+        
+        // Exponential backoff: wait 2^attempt seconds
+        const waitTime = Math.pow(2, attempt) * 1000;
+        console.log(`⏳ Waiting ${waitTime}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+    
+    throw new Error('All retry attempts failed');
+  }
+
+  /**
+   * Generate HTML description for calendar event
+   */
+  private generateEventDescription(bookingDto: CreateBookingDto): string {
+    return `
+      <h3>Réservation de Dégustation de Vins</h3>
+      <p><strong>Client:</strong> ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}</p>
+      <p><strong>Email:</strong> ${bookingDto.customerEmail}</p>
+      <p><strong>Téléphone:</strong> ${bookingDto.phoneNo}</p>
+      <p><strong>Participants:</strong> ${bookingDto.participantsAdults} adulte(s)${bookingDto.participantsEnfants > 0 ? ` + ${bookingDto.participantsEnfants} enfant(s)` : ''}</p>
+      <p><strong>Langue:</strong> ${bookingDto.selectedLanguage}</p>
+      ${bookingDto.additionalNotes ? `<p><strong>Notes:</strong> ${bookingDto.additionalNotes}</p>` : ''}
+    `;
   }
 
   /**
@@ -761,21 +1034,39 @@ export class UserBookingsService {
         return;
       }
 
-      // Check for active Orange connector
-      const orangeConnector = connectors.find(conn => 
-        conn.connector_name === 'orange' && 
-        conn.connector_creds?.orange?.isActive && 
-        conn.connector_creds?.orange?.isValid
+      // Find the active connector based on connector_name
+      const activeConnector = connectors.find(conn => 
+        conn.connector_name !== 'none'
       );
 
-      if (orangeConnector?.connector_creds?.orange) {
-        console.log('🍊 Found Orange calendar connector for update');
-        await this.updateInOrangeCalendar(oldBooking, newBooking, orangeConnector.connector_creds.orange);
-      } else {
-        console.log('ℹ️ No active Orange calendar connector found for update');
+      if (!activeConnector) {
+        console.log('ℹ️ No active calendar connector found for update');
+        return;
       }
 
-      // TODO: Add support for Microsoft and OVH calendar providers
+      // Route to appropriate calendar based on connector_name
+      switch (activeConnector.connector_name) {
+        case 'orange':
+          if (activeConnector.connector_creds?.orange?.isActive && activeConnector.connector_creds?.orange?.isValid) {
+            console.log('🍊 Updating Orange calendar event');
+            await this.updateInOrangeCalendar(oldBooking, newBooking, activeConnector.connector_creds.orange);
+          }
+          break;
+
+        case 'microsoft':
+          if (activeConnector.connector_creds?.microsoft?.isActive && activeConnector.connector_creds?.microsoft?.isValid) {
+            console.log('🟦 Updating Microsoft calendar event');
+            await this.updateInMicrosoftCalendar(oldBooking, newBooking, activeConnector.connector_creds.microsoft);
+          }
+          break;
+
+        case 'ovh':
+          console.log('ℹ️ OVH calendar update not yet implemented');
+          break;
+
+        default:
+          console.log('ℹ️ No supported calendar provider found for update');
+      }
 
     } catch (error) {
       console.error('❌ Calendar update error:', error);
@@ -841,6 +1132,115 @@ export class UserBookingsService {
       if (error.cause?.code === 'ENOTFOUND') {
         throw new Error('Calendar server is unreachable. Please check network connectivity.');
       }
+      throw error;
+    }
+  }
+
+  /**
+   * Update booking event in Microsoft Calendar using Graph API
+   */
+  private async updateInMicrosoftCalendar(oldBooking: any, newBooking: any, microsoftCreds: any): Promise<void> {
+    try {
+      console.log('🟦 Updating Microsoft calendar event for booking:', newBooking._id);
+
+      // Check if we have a Microsoft event ID to update
+      if (!newBooking.microsoftEventId) {
+        console.log('ℹ️ No Microsoft event ID found, creating new event instead');
+        // Convert newBooking to CreateBookingDto format for creating new event
+        const bookingDto = {
+          userId: newBooking.userId.toString(),
+          serviceId: newBooking.serviceId.toString(),
+          bookingDate: newBooking.bookingDate,
+          bookingTime: newBooking.bookingTime,
+          participantsAdults: newBooking.participantsAdults,
+          participantsEnfants: newBooking.participantsEnfants,
+          selectedLanguage: newBooking.selectedLanguage,
+          userContactFirstname: newBooking.userContactFirstname,
+          userContactLastname: newBooking.userContactLastname,
+          customerEmail: newBooking.customerEmail,
+          phoneNo: newBooking.phoneNo,
+          additionalNotes: newBooking.additionalNotes,
+          paymentMethod: newBooking.paymentMethod
+        };
+        await this.addToMicrosoftCalendar(newBooking, bookingDto, microsoftCreds);
+        return;
+      }
+
+      // Get a valid access token
+      const accessToken = await this.connectorService.getMicrosoftAccessToken(newBooking.userId.toString());
+      
+      if (!accessToken) {
+        throw new Error('Failed to get valid Microsoft access token');
+      }
+
+      // Construct updated event data
+      const startDate = newBooking.bookingDate instanceof Date
+        ? new Date(`${newBooking.bookingDate.toISOString().split('T')[0]}T${newBooking.bookingTime}:00`)
+        : new Date(`${newBooking.bookingDate}T${newBooking.bookingTime}:00`);
+      
+      const eventDuration = await this.getServiceDuration(newBooking.userId, newBooking.serviceId.toString());
+      const endDate = new Date(startDate.getTime() + (eventDuration * 60 * 1000));
+
+      const eventTitle = `Réservation: ${newBooking.userContactFirstname} ${newBooking.userContactLastname}`;
+      
+      const updateBody = {
+        subject: eventTitle,
+        start: {
+          dateTime: startDate.toISOString(),
+          timeZone: 'Europe/Paris'
+        },
+        end: {
+          dateTime: endDate.toISOString(),
+          timeZone: 'Europe/Paris'
+        },
+        body: {
+          contentType: 'html',
+          content: this.generateEventDescription({
+            userId: newBooking.userId.toString(),
+            serviceId: newBooking.serviceId.toString(),
+            bookingDate: newBooking.bookingDate,
+            bookingTime: newBooking.bookingTime,
+            participantsAdults: newBooking.participantsAdults,
+            participantsEnfants: newBooking.participantsEnfants,
+            selectedLanguage: newBooking.selectedLanguage,
+            userContactFirstname: newBooking.userContactFirstname,
+            userContactLastname: newBooking.userContactLastname,
+            customerEmail: newBooking.customerEmail,
+            phoneNo: newBooking.phoneNo,
+            additionalNotes: newBooking.additionalNotes,
+            paymentMethod: newBooking.paymentMethod
+          } as CreateBookingDto)
+        },
+        attendees: [
+          {
+            emailAddress: {
+              address: newBooking.customerEmail,
+              name: `${newBooking.userContactFirstname} ${newBooking.userContactLastname}`
+            },
+            type: 'required'
+          }
+        ]
+      };
+
+      // Update event via Microsoft Graph API
+      const response = await fetch(`https://graph.microsoft.com/v1.0/me/events/${newBooking.microsoftEventId}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updateBody)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(`Microsoft Graph API update error: ${response.status} - ${errorData}`);
+      }
+
+      console.log('✅ Successfully updated event in Microsoft calendar');
+
+    } catch (error) {
+      console.error('❌ Microsoft calendar update error:', error);
       throw error;
     }
   }
@@ -977,21 +1377,39 @@ export class UserBookingsService {
         return;
       }
 
-      // Check for active Orange connector (matching the existing structure)
-      const orangeConnector = connectors.find(conn => 
-        conn.connector_name === 'orange' && 
-        conn.connector_creds?.orange?.isActive && 
-        conn.connector_creds?.orange?.isValid
+      // Find the active connector based on connector_name
+      const activeConnector = connectors.find(conn => 
+        conn.connector_name !== 'none'
       );
 
-      if (orangeConnector?.connector_creds?.orange) {
-        console.log('🍊 Found Orange calendar connector for deletion');
-        await this.deleteFromOrangeCalendar(booking, orangeConnector.connector_creds.orange);
-      } else {
-        console.log('ℹ️ No active Orange calendar connector found for deletion');
+      if (!activeConnector) {
+        console.log('ℹ️ No active calendar connector found for deletion');
+        return;
       }
 
-      // TODO: Add support for Microsoft and OVH calendar providers
+      // Route to appropriate calendar based on connector_name
+      switch (activeConnector.connector_name) {
+        case 'orange':
+          if (activeConnector.connector_creds?.orange?.isActive && activeConnector.connector_creds?.orange?.isValid) {
+            console.log('🍊 Deleting from Orange calendar');
+            await this.deleteFromOrangeCalendar(booking, activeConnector.connector_creds.orange);
+          }
+          break;
+
+        case 'microsoft':
+          if (activeConnector.connector_creds?.microsoft?.isActive && activeConnector.connector_creds?.microsoft?.isValid) {
+            console.log('🟦 Deleting from Microsoft calendar');
+            await this.deleteFromMicrosoftCalendar(booking, activeConnector.connector_creds.microsoft);
+          }
+          break;
+
+        case 'ovh':
+          console.log('ℹ️ OVH calendar deletion not yet implemented');
+          break;
+
+        default:
+          console.log('ℹ️ No supported calendar provider found for deletion');
+      }
 
     } catch (error) {
       console.error('❌ Calendar deletion error:', error);
@@ -1197,6 +1615,52 @@ export class UserBookingsService {
 
     } catch (error) {
       console.error('❌ Orange calendar deletion error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete booking event from Microsoft Calendar using Graph API
+   */
+  private async deleteFromMicrosoftCalendar(booking: any, microsoftCreds: any): Promise<void> {
+    try {
+      console.log('🟦 Deleting from Microsoft calendar for booking:', booking._id);
+
+      // Check if we have a Microsoft event ID to delete
+      if (!booking.microsoftEventId) {
+        console.log('ℹ️ No Microsoft event ID found for booking, nothing to delete');
+        return;
+      }
+
+      // Get a valid access token
+      const accessToken = await this.connectorService.getMicrosoftAccessToken(booking.userId.toString());
+      
+      if (!accessToken) {
+        throw new Error('Failed to get valid Microsoft access token');
+      }
+
+      // Delete event via Microsoft Graph API
+      const response = await fetch(`https://graph.microsoft.com/v1.0/me/events/${booking.microsoftEventId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+
+      if (response.status === 404) {
+        console.log('ℹ️ Microsoft event not found (may have been already deleted)');
+        return;
+      }
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(`Microsoft Graph API delete error: ${response.status} - ${errorData}`);
+      }
+
+      console.log('✅ Successfully deleted event from Microsoft calendar');
+
+    } catch (error) {
+      console.error('❌ Microsoft calendar deletion error:', error);
       throw error;
     }
   }
