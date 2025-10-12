@@ -92,21 +92,21 @@ export class ConnectorService {
       });
 
       if (existingConnector) {
-        // Update existing connector with Orange credentials
+        // Only one calendar can be connected at a time
+        // Clear all existing credentials and set only Orange
         existingConnector.connector_creds = {
-          ...existingConnector.connector_creds,
           orange: {
             username: connectorData.username,
             password: encryptedPassword,
             isActive: true,
             isValid: true
-          }
+          },
+          ovh: null,
+          microsoft: null
         };
 
-        // Update connector_name to 'orange' if it was different
-        if (existingConnector.connector_name !== 'orange') {
-          existingConnector.connector_name = 'orange';
-        }
+        // Update connector_name to 'orange'
+        existingConnector.connector_name = 'orange';
 
         await existingConnector.save();
 
@@ -193,9 +193,10 @@ export class ConnectorService {
       throw new NotFoundException('Connector not found for this user');
     }
 
-    // Clear the orange credentials by setting to null
+    // Clear the orange credentials and set connector_name to 'none'
     if (connector.connector_creds) {
       connector.connector_creds.orange = null;
+      connector.connector_name = 'none';
       await connector.save();
     }
   }
@@ -461,9 +462,11 @@ export class ConnectorService {
       });
 
       if (existingConnector) {
-        // Update existing connector with Microsoft credentials
+        // Only one calendar can be connected at a time
+        // Clear all existing credentials and set only Microsoft
         existingConnector.connector_creds = {
-          ...existingConnector.connector_creds,
+          orange: null,
+          ovh: null,
           microsoft: {
             accessToken: tokenData.access_token,
             refreshToken: tokenData.refresh_token,
@@ -481,10 +484,8 @@ export class ConnectorService {
           }
         };
 
-        // Update connector_name to 'microsoft' if it was different
-        if (existingConnector.connector_name !== 'microsoft') {
-          existingConnector.connector_name = 'microsoft';
-        }
+        // Update connector_name to 'microsoft'
+        existingConnector.connector_name = 'microsoft';
 
         await existingConnector.save();
         console.log('✅ Updated existing connector with Microsoft credentials');
@@ -560,9 +561,10 @@ export class ConnectorService {
       throw new NotFoundException('Connector not found for this user');
     }
 
-    // Clear the microsoft credentials by setting to null
+    // Clear the microsoft credentials and set connector_name to 'none'
     if (connector.connector_creds) {
       connector.connector_creds.microsoft = null;
+      connector.connector_name = 'none';
       await connector.save();
     }
   }
@@ -583,6 +585,37 @@ export class ConnectorService {
       .exec();
 
     return connector;
+  }
+
+  /**
+   * Get currently connected calendar provider for a user
+   * @param userId - User ID
+   * @returns Currently connected provider name or 'none'
+   */
+  async getConnectedProvider(userId: string): Promise<string> {
+    const userObjectId = new Types.ObjectId(userId);
+    
+    const connector = await this.connectorModel.findOne({ 
+      userId: userObjectId
+    });
+
+    if (!connector || connector.connector_name === 'none') {
+      return 'none';
+    }
+
+    // Double-check that the claimed provider actually has credentials
+    const creds = connector.connector_creds;
+    
+    if (connector.connector_name === 'orange' && creds?.orange?.isActive) {
+      return 'orange';
+    } else if (connector.connector_name === 'microsoft' && creds?.microsoft?.isActive) {
+      return 'microsoft';
+    } else if (connector.connector_name === 'ovh' && creds?.ovh) {
+      return 'ovh';
+    }
+    
+    // If connector_name doesn't match actual credentials, return 'none'
+    return 'none';
   }
 
   /**

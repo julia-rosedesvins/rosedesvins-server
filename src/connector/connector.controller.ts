@@ -171,6 +171,49 @@ export class ConnectorController {
     }
   }
 
+  @Get('connected-provider')
+  @UseGuards(UserGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get currently connected calendar provider' })
+  @ApiResponse({
+    status: 200,
+    description: 'Currently connected provider retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        data: {
+          type: 'object',
+          properties: {
+            provider: { type: 'string', enum: ['orange', 'microsoft', 'ovh', 'none'] }
+          }
+        }
+      }
+    }
+  })
+  async getConnectedProvider(
+    @CurrentUser() user: any
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: { provider: string };
+  }> {
+    try {
+      const userId = user.sub;
+      const provider = await this.connectorService.getConnectedProvider(userId);
+
+      return {
+        success: true,
+        message: `Currently connected provider: ${provider}`,
+        data: { provider }
+      };
+    } catch (error) {
+      console.error('Error getting connected provider:', error);
+      throw error;
+    }
+  }
+
   @Get('microsoft/status')
   @UseGuards(UserGuard)
   @ApiBearerAuth()

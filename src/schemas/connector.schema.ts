@@ -104,7 +104,7 @@ export class Connector extends Document {
 
   @Prop({ 
     required: true,
-    enum: ['orange', 'ovh', 'microsoft'],
+    enum: ['orange', 'ovh', 'microsoft', "none"],
     lowercase: true,
     trim: true
   })
