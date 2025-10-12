@@ -13,8 +13,28 @@ import { Event } from '../schemas/events.schema';
 import { Connector } from '../schemas/connector.schema';
 import { CreateBookingDto, UpdateBookingDto } from '../validators/user-bookings.validators';
 import { EncryptionService } from '../common/encryption.service';
+import { EmailService } from '../email/email.service';
+import { TemplateService } from '../email/template.service';
 
 const dav = require('dav');
+
+export interface BookingEmailData {
+  customerName: string;
+  customerEmail: string;
+  providerName: string;
+  providerEmail: string;
+  eventTitle: string;
+  eventDate: string;
+  eventTime: string;
+  eventTimezone: string;
+  eventDuration: string;
+  eventLocation?: string;
+  eventDescription?: string;
+  participantsAdults: number;
+  participantsChildren: number;
+  selectedLanguage: string;
+  additionalNotes?: string;
+}
 
 /**
  * Service for managing wine tasting bookings and calendar integrations
@@ -32,7 +52,148 @@ export class UserBookingsService {
     @InjectModel(Subscription.name) private subscriptionModel: Model<Subscription>,
     @InjectModel(Event.name) private eventModel: Model<Event>,
     @InjectModel(Connector.name) private connectorModel: Model<Connector>,
+    private encryptionService: EncryptionService,
+    private emailService: EmailService,
+    private templateService: TemplateService,
   ) {}
+
+  /**
+   * Send booking confirmation email to customer using booking-specific templates
+   */
+  private async sendCustomerBookingEmail(bookingData: BookingEmailData, type: 'created' | 'updated' | 'cancelled'): Promise<void> {
+    setImmediate(async () => {
+      try {
+        const subject = this.getEmailSubject(type, 'customer');
+        
+        // Format participants text
+        const participantsText = bookingData.participantsChildren > 0 
+          ? `${bookingData.participantsAdults + bookingData.participantsChildren} personnes (${bookingData.participantsAdults} adultes, ${bookingData.participantsChildren} enfants)`
+          : `${bookingData.participantsAdults} adulte${bookingData.participantsAdults > 1 ? 's' : ''}`;
+        
+        const templateData = {
+          customerName: bookingData.customerName,
+          eventTitle: bookingData.eventTitle,
+          eventDate: bookingData.eventDate,
+          eventTime: bookingData.eventTime,
+          eventTimezone: bookingData.eventTimezone,
+          eventDuration: bookingData.eventDuration,
+          participantsText,
+          selectedLanguage: bookingData.selectedLanguage,
+          additionalNotes: bookingData.additionalNotes,
+        };
+        
+        let emailHtml: string;
+        
+        // Use specific templates based on type
+        switch (type) {
+          case 'created':
+            emailHtml = this.templateService.generateBookingConfirmationEmail(templateData);
+            break;
+          case 'updated':
+            emailHtml = this.templateService.generateBookingUpdateEmail(templateData);
+            break;
+          case 'cancelled':
+            emailHtml = this.templateService.generateBookingCancellationEmail(templateData);
+            break;
+        }
+        
+        const emailJob = {
+          to: bookingData.customerEmail,
+          subject,
+          html: emailHtml,
+        };
+        
+        await this.emailService.sendEmail(emailJob);
+        console.log(`${type} email sent to customer: ${bookingData.customerEmail}`);
+      } catch (error) {
+        console.error(`Failed to send ${type} email to customer:`, error);
+      }
+    });
+  }
+
+  /**
+   * Send booking notification email to service provider using existing templates
+   */
+  private async sendProviderBookingEmail(bookingData: BookingEmailData, type: 'created'): Promise<void> {
+    setImmediate(async () => {
+      try {
+        const subject = this.getEmailSubject(type, 'provider');
+        
+        // Use the existing provider notification template
+        const emailHtml = this.templateService.generateProviderNotificationEmail({
+          providerName: bookingData.providerName,
+          providerEmail: bookingData.providerEmail,
+          customerName: bookingData.customerName,
+          eventTitle: bookingData.eventTitle,
+          eventDate: bookingData.eventDate,
+          eventTime: bookingData.eventTime,
+          eventTimezone: bookingData.eventTimezone,
+          eventDuration: bookingData.eventDuration,
+          eventDescription: this.formatEventDescription(bookingData, type),
+          hoursBeforeEvent: 0, // Immediate notification
+        });
+        
+        const emailJob = {
+          to: bookingData.providerEmail,
+          subject,
+          html: emailHtml,
+        };
+        
+        await this.emailService.sendEmail(emailJob);
+        console.log(`${type} email sent to provider: ${bookingData.providerEmail}`);
+      } catch (error) {
+        console.error(`Failed to send ${type} email to provider:`, error);
+      }
+    });
+  }
+
+  /**
+   * Generate email subject based on type and recipient
+   */
+  private getEmailSubject(type: 'created' | 'updated' | 'cancelled', recipient: 'customer' | 'provider'): string {
+    const subjects = {
+      created: {
+        customer: 'Confirmation de votre réservation - Rose des Vins 🍷',
+        provider: 'Nouvelle réservation reçue - Rose des Vins'
+      },
+      updated: {
+        customer: 'Modification de votre réservation - Rose des Vins 🍷',
+        provider: 'Réservation modifiée - Rose des Vins'
+      },
+      cancelled: {
+        customer: 'Annulation de votre réservation - Rose des Vins',
+        provider: 'Réservation annulée - Rose des Vins'
+      }
+    };
+    
+    return subjects[type][recipient];
+  }
+
+  /**
+   * Format event description based on booking data and type
+   */
+  private formatEventDescription(bookingData: BookingEmailData, type: 'created' | 'updated' | 'cancelled'): string {
+    const totalParticipants = bookingData.participantsAdults + bookingData.participantsChildren;
+    const participantsText = bookingData.participantsChildren > 0 
+      ? `${totalParticipants} personnes (${bookingData.participantsAdults} adultes, ${bookingData.participantsChildren} enfants)`
+      : `${bookingData.participantsAdults} adulte${bookingData.participantsAdults > 1 ? 's' : ''}`;
+
+    let description = `Participants: ${participantsText}\nLangue: ${bookingData.selectedLanguage}`;
+    
+    if (bookingData.additionalNotes) {
+      description += `\nNotes: ${bookingData.additionalNotes}`;
+    }
+
+    const statusText = {
+      created: 'Votre réservation a été confirmée avec succès.',
+      updated: 'Votre réservation a été modifiée.',
+      cancelled: 'Votre réservation a été annulée.'
+    };
+
+    description = `${statusText[type]}\n\n${description}`;
+    
+    return description;
+  }
 
   async createBooking(createBookingDto: CreateBookingDto): Promise<UserBooking> {
     try {
@@ -98,6 +259,66 @@ export class UserBookingsService {
         this.addToCalendar(savedBooking, createBookingDto).catch(error => {
           console.error('Failed to add booking to calendar:', error);
         });
+      });
+
+      // Send email notifications (non-blocking)
+      setImmediate(async () => {
+        try {
+          // Get user and domain profile for email data
+          const user = await this.userModel.findById(createBookingDto.userId);
+          
+          // Check if domain profile exists - convert userId to ObjectId for proper comparison
+          const userObjectIdForQuery = new Types.ObjectId(createBookingDto.userId);
+          const domainProfile = await this.domainProfileModel.findOne({ userId: userObjectIdForQuery });
+          
+          
+          // Find the service info from domain profile using _id
+          let service: any = null;
+          if (domainProfile?.services && domainProfile.services.length > 0) {
+            service = domainProfile.services.find(s => {
+              return (s as any)._id?.toString() === createBookingDto.serviceId;
+            });
+          } else {
+            console.log('Debug - No services found in domain profile, using fallback');
+          }
+          
+          // Create a fallback service name based on user's business or default
+          let eventTitle = 'Dégustation de vins'; // Default fallback
+          if (service?.name) {
+            eventTitle = service.name;
+          } else if (domainProfile?.domainDescription) {
+            eventTitle = `Dégustation - ${domainProfile.domainDescription}`;
+          } else if (user?.firstName && user?.lastName) {
+            eventTitle = `Dégustation - ${user.firstName} ${user.lastName}`;
+          }
+          
+          console.log('Debug - Final eventTitle:', eventTitle);
+          
+          const bookingEmailData: BookingEmailData = {
+            customerName: `${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
+            customerEmail: createBookingDto.customerEmail,
+            providerName: user ? `${user.firstName} ${user.lastName}` : 'Rose des Vins',
+            providerEmail: user ? user.email : 'admin@rosedesvins.com',
+            eventTitle: eventTitle,
+            eventDate: new Date(createBookingDto.bookingDate).toLocaleDateString('fr-FR'),
+            eventTime: createBookingDto.bookingTime,
+            eventTimezone: 'CET',
+            eventDuration: service?.timeOfServiceInMinutes ? `${service.timeOfServiceInMinutes} minutes` : '60 minutes',
+            participantsAdults: createBookingDto.participantsAdults,
+            participantsChildren: createBookingDto.participantsEnfants || 0,
+            selectedLanguage: createBookingDto.selectedLanguage,
+            additionalNotes: createBookingDto.additionalNotes,
+          };
+
+          // Send to customer (booking user)
+          await this.sendCustomerBookingEmail(bookingEmailData, 'created');
+          
+          // Send to service provider (user)
+          await this.sendProviderBookingEmail(bookingEmailData, 'created');
+        } catch (emailError) {
+          console.error('Failed to send booking emails:', emailError);
+          // Don't fail the booking creation if email fails
+        }
       });
 
       return savedBooking;
@@ -459,6 +680,49 @@ export class UserBookingsService {
 
       console.log('✅ Successfully updated booking:', bookingId);
 
+      // Send email notification to customer only (for updates)
+      setImmediate(async () => {
+        try {
+          const user = await this.userModel.findById(updatedBooking.userId);
+          const domainProfile = await this.domainProfileModel.findOne({ userId: updatedBooking.userId });
+          
+          console.log('Debug UPDATE - serviceId:', updatedBooking.serviceId?.toString());
+          console.log('Debug UPDATE - domainProfile services:', domainProfile?.services);
+          
+          // Find the service info from domain profile using _id
+          const service = domainProfile?.services?.find(s => {
+            console.log('Debug UPDATE - service s:', s);
+            console.log('Debug UPDATE - service s._id:', (s as any)._id);
+            console.log('Debug UPDATE - comparison:', (s as any)._id?.toString() === updatedBooking.serviceId?.toString());
+            return (s as any)._id?.toString() === updatedBooking.serviceId?.toString();
+          });
+          
+          console.log('Debug UPDATE - final service found:', service);
+          
+          const bookingEmailData: BookingEmailData = {
+            customerName: `${updatedBooking.userContactFirstname} ${updatedBooking.userContactLastname}`,
+            customerEmail: updatedBooking.customerEmail,
+            providerName: user ? `${user.firstName} ${user.lastName}` : 'Rose des Vins',
+            providerEmail: user ? user.email : 'admin@rosedesvins.com',
+            eventTitle: service?.name || 'Dégustation de vins',
+            eventDate: new Date(updatedBooking.bookingDate).toLocaleDateString('fr-FR'),
+            eventTime: updatedBooking.bookingTime,
+            eventTimezone: 'CET',
+            eventDuration: service?.timeOfServiceInMinutes ? `${service.timeOfServiceInMinutes} minutes` : '60 minutes',
+            participantsAdults: updatedBooking.participantsAdults,
+            participantsChildren: updatedBooking.participantsEnfants || 0,
+            selectedLanguage: updatedBooking.selectedLanguage,
+            additionalNotes: updatedBooking.additionalNotes,
+          };
+
+          // Send update notification to customer only
+          await this.sendCustomerBookingEmail(bookingEmailData, 'updated');
+        } catch (emailError) {
+          console.error('Failed to send update email:', emailError);
+          // Don't fail the update if email fails
+        }
+      });
+
       return {
         success: true,
         message: calendarUpdateSuccess 
@@ -635,6 +899,49 @@ export class UserBookingsService {
       }
 
       console.log('✅ Successfully deleted booking:', bookingId);
+
+      // Send cancellation email to customer only
+      setImmediate(async () => {
+        try {
+          const user = await this.userModel.findById(booking.userId);
+          const domainProfile = await this.domainProfileModel.findOne({ userId: booking.userId });
+          
+          console.log('Debug DELETE - serviceId:', booking.serviceId?.toString());
+          console.log('Debug DELETE - domainProfile services:', domainProfile?.services);
+          
+          // Find the service info from domain profile using _id
+          const service = domainProfile?.services?.find(s => {
+            console.log('Debug DELETE - service s:', s);
+            console.log('Debug DELETE - service s._id:', (s as any)._id);
+            console.log('Debug DELETE - comparison:', (s as any)._id?.toString() === booking.serviceId?.toString());
+            return (s as any)._id?.toString() === booking.serviceId?.toString();
+          });
+          
+          console.log('Debug DELETE - final service found:', service);
+          
+          const bookingEmailData: BookingEmailData = {
+            customerName: `${booking.userContactFirstname} ${booking.userContactLastname}`,
+            customerEmail: booking.customerEmail,
+            providerName: user ? `${user.firstName} ${user.lastName}` : 'Rose des Vins',
+            providerEmail: user ? user.email : 'admin@rosedesvins.com',
+            eventTitle: service?.name || 'Dégustation de vins',
+            eventDate: new Date(booking.bookingDate).toLocaleDateString('fr-FR'),
+            eventTime: booking.bookingTime,
+            eventTimezone: 'CET',
+            eventDuration: service?.timeOfServiceInMinutes ? `${service.timeOfServiceInMinutes} minutes` : '60 minutes',
+            participantsAdults: booking.participantsAdults,
+            participantsChildren: booking.participantsEnfants || 0,
+            selectedLanguage: booking.selectedLanguage,
+            additionalNotes: booking.additionalNotes,
+          };
+
+          // Send cancellation notification to customer only
+          await this.sendCustomerBookingEmail(bookingEmailData, 'cancelled');
+        } catch (emailError) {
+          console.error('Failed to send cancellation email:', emailError);
+          // Don't fail the deletion if email fails
+        }
+      });
 
       return {
         success: true,

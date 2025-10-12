@@ -56,6 +56,18 @@ export interface ProviderNotificationEmailData {
   hoursBeforeEvent: number;
 }
 
+export interface BookingEmailTemplateData {
+  customerName: string;
+  eventTitle: string;
+  eventDate: string;
+  eventTime: string;
+  eventTimezone: string;
+  eventDuration: string;
+  participantsText: string;
+  selectedLanguage: string;
+  additionalNotes?: string;
+}
+
 @Injectable()
 export class TemplateService {
   private templatesPath: string;
@@ -168,6 +180,42 @@ export class TemplateService {
       ...this.getBaseData(),
       title: 'Upcoming Wine Experience - Guest Reminder',
       subtitle: `Reservation in ${data.hoursBeforeEvent} hours`,
+      content: contentHtml,
+    });
+  }
+
+  generateBookingConfirmationEmail(data: BookingEmailTemplateData): string {
+    const bookingConfirmationTemplate = this.loadTemplate('booking-confirmation');
+    const contentHtml = bookingConfirmationTemplate(data);
+
+    return this.baseTemplate({
+      ...this.getBaseData(),
+      title: 'Confirmation de réservation - Rose des Vins',
+      subtitle: 'Votre dégustation est confirmée',
+      content: contentHtml,
+    });
+  }
+
+  generateBookingUpdateEmail(data: BookingEmailTemplateData): string {
+    const bookingUpdateTemplate = this.loadTemplate('booking-update');
+    const contentHtml = bookingUpdateTemplate(data);
+
+    return this.baseTemplate({
+      ...this.getBaseData(),
+      title: 'Modification de réservation - Rose des Vins',
+      subtitle: 'Votre réservation a été modifiée',
+      content: contentHtml,
+    });
+  }
+
+  generateBookingCancellationEmail(data: BookingEmailTemplateData): string {
+    const bookingCancellationTemplate = this.loadTemplate('booking-cancellation');
+    const contentHtml = bookingCancellationTemplate(data);
+
+    return this.baseTemplate({
+      ...this.getBaseData(),
+      title: 'Annulation de réservation - Rose des Vins',
+      subtitle: 'Votre réservation a été annulée',
       content: contentHtml,
     });
   }
