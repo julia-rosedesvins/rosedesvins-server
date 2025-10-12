@@ -337,7 +337,8 @@ export class ConnectorService {
         redirect_uri: redirectUri,
         response_mode: 'query',
         scope: scopes,
-        state: state
+        state: state,
+        prompt: 'consent'
       });
 
       const authUrl = `${baseUrl}?${params.toString()}`;

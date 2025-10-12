@@ -8,7 +8,10 @@ import {
   UseGuards,
   HttpStatus,
   HttpException,
+  Redirect,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiTags, ApiResponse, ApiOperation, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { UserGuard } from '../guards/user.guard';
@@ -164,6 +167,50 @@ export class ConnectorController {
       };
     } catch (error) {
       console.error('Error disconnecting Orange calendar:', error);
+      throw error;
+    }
+  }
+
+  @Get('microsoft/status')
+  @UseGuards(UserGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get Microsoft calendar connection status' })
+  @ApiResponse({
+    status: 200,
+    description: 'Microsoft calendar connection status retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        data: {
+          type: 'object',
+          nullable: true,
+          description: 'Connector data or null if not connected'
+        }
+      }
+    }
+  })
+  async getMicrosoftCalendarStatus(
+    @CurrentUser() user: any
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: any;
+  }> {
+    try {
+      const userId = user.sub;
+      const connector = await this.connectorService.getMicrosoftConnector(userId);
+
+      return {
+        success: true,
+        message: connector 
+          ? 'Microsoft calendar connection found'
+          : 'No Microsoft calendar connection found',
+        data: connector
+      };
+    } catch (error) {
+      console.error('Error getting Microsoft connector status:', error);
       throw error;
     }
   }
@@ -343,35 +390,29 @@ export class ConnectorController {
     }
   })
   async handleMicrosoftCallback(
+    @Res() res: Response,
     @Query('code') code?: string,
     @Query('state') state?: string,
     @Query('error') error?: string,
     @Query('error_description') errorDescription?: string
-  ): Promise<{
-    success: boolean;
-    message: string;
-    data?: any;
-    error?: string;
-  }> {
+  ): Promise<void> {
     try {
       // Handle OAuth error
       if (error) {
         console.error('❌ Microsoft OAuth Error:', error, errorDescription);
-        throw new HttpException({
-          success: false,
-          message: 'Microsoft OAuth failed',
-          error: errorDescription || error || 'Unknown error occurred'
-        }, HttpStatus.BAD_REQUEST);
+        const clientUrl = this.configService.get<string>('CLIENT_URL') || 'http://localhost:3000';
+        const errorRedirectUrl = `${clientUrl}/dashboard/settings?microsoft_error=${encodeURIComponent(errorDescription || error || 'OAuth failed')}`;
+        res.redirect(errorRedirectUrl);
+        return;
       }
 
       // Check for authorization code
       if (!code) {
         console.error('❌ No authorization code received');
-        throw new HttpException({
-          success: false,
-          message: 'Missing authorization code',
-          error: 'No authorization code was received from Microsoft'
-        }, HttpStatus.BAD_REQUEST);
+        const clientUrl = this.configService.get<string>('CLIENT_URL') || 'http://localhost:3000';
+        const errorRedirectUrl = `${clientUrl}/dashboard/settings?microsoft_error=${encodeURIComponent('No authorization code received')}`;
+        res.redirect(errorRedirectUrl);
+        return;
       }
 
       console.log('🔄 Microsoft OAuth callback received');
@@ -391,29 +432,54 @@ export class ConnectorController {
 
       // Get client URL for redirect
       const clientUrl = this.configService.get<string>('CLIENT_URL') || 'http://localhost:3000';
-      const redirectUrl = `${clientUrl}/settings`;
+      const redirectUrl = `${clientUrl}/dashboard/settings?microsoft_connected=true`;
 
-      // Return success response with redirect instruction
-      return {
-        success: true,
-        message: 'Microsoft Calendar connected successfully',
-        data: {
-          provider: 'microsoft',
-          userId: userId,
-          connected: true,
-          timestamp: new Date().toISOString(),
-          redirectUrl: redirectUrl
-        }
-      };
+      // Redirect immediately to the client with success parameter
+      console.log('🔄 Redirecting user to:', redirectUrl);
+      res.redirect(redirectUrl);
 
     } catch (error) {
       console.error('❌ Error in Microsoft OAuth callback:', error);
       
-      throw new HttpException({
-        success: false,
-        message: 'Failed to connect Microsoft Calendar',
-        error: error.message || 'Unknown error occurred'
-      }, HttpStatus.INTERNAL_SERVER_ERROR);
+      const clientUrl = this.configService.get<string>('CLIENT_URL') || 'http://localhost:3000';
+      const errorRedirectUrl = `${clientUrl}/dashboard/settings?microsoft_error=${encodeURIComponent(error.message || 'Failed to connect Microsoft Calendar')}`;
+      res.redirect(errorRedirectUrl);
+    }
+  }
+
+  @Delete('microsoft/disconnect')
+  @UseGuards(UserGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Disconnect Microsoft calendar' })
+  @ApiResponse({
+    status: 200,
+    description: 'Microsoft calendar disconnected successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' }
+      }
+    }
+  })
+  async disconnectMicrosoftCalendar(
+    @CurrentUser() user: any
+  ): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    try {
+      const userId = user.sub;
+
+      await this.connectorService.disconnectMicrosoftCalendar(userId);
+
+      return {
+        success: true,
+        message: 'Microsoft calendar disconnected successfully'
+      };
+    } catch (error) {
+      console.error('Error disconnecting Microsoft calendar:', error);
+      throw error;
     }
   }
 }
