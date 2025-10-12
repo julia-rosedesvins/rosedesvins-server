@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { ConfigService } from '@nestjs/config';
 import { Model, Types } from 'mongoose';
 import * as dav from 'dav';
 import { EncryptionService } from '../common/encryption.service';
@@ -16,6 +17,7 @@ export class ConnectorService {
   constructor(
     @InjectModel(Connector.name) private connectorModel: Model<Connector>,
     @InjectModel(User.name) private userModel: Model<User>,
+    private configService: ConfigService,
   ) {}
 
   /**
@@ -310,9 +312,9 @@ export class ConnectorService {
       console.log('🔗 Generating Microsoft OAuth URL for user:', userId);
 
       // Microsoft OAuth 2.0 parameters
-      const clientId = process.env.MICROSOFT_CLIENT_ID || '09887ad9-bf96-48b1-978f-941e19cfcfbf';
-      const tenantId = process.env.MICROSOFT_TENANT_ID || '009f53c5-6b44-4bc8-8cce-19cfad319c6e';
-      const redirectUri = process.env.MICROSOFT_REDIRECT_URI || 'http://localhost:3000/auth/microsoft/callback';
+      const clientId = this.configService.get<string>('MICROSOFT_CLIENT_ID') || '09887ad9-bf96-48b1-978f-941e19cfcfbf';
+      const tenantId = this.configService.get<string>('MICROSOFT_TENANT_ID') || '009f53c5-6b44-4bc8-8cce-19cfad319c6e';
+      const redirectUri = this.configService.get<string>('MICROSOFT_REDIRECT_URI') || 'http://localhost:3000/connectors/microsoft/callback';
       
       // Generate a unique state parameter for security (prevents CSRF attacks)
       const state = `${userId}_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
@@ -320,7 +322,8 @@ export class ConnectorService {
       // Required scopes for calendar operations
       const scopes = [
         'https://graph.microsoft.com/Calendars.ReadWrite',
-        'https://graph.microsoft.com/User.Read'
+        'https://graph.microsoft.com/User.Read',
+        'offline_access'
       ].join(' ');
 
       // Microsoft OAuth 2.0 authorization endpoint
@@ -332,9 +335,7 @@ export class ConnectorService {
         redirect_uri: redirectUri,
         response_mode: 'query',
         scope: scopes,
-        state: state,
-        prompt: 'consent', // Force consent to ensure we get refresh token
-        access_type: 'offline' // Request offline access for refresh tokens
+        state: state
       });
 
       const authUrl = `${baseUrl}?${params.toString()}`;
@@ -348,8 +349,107 @@ export class ConnectorService {
         state
       };
     } catch (error) {
-      console.error('❌ Error generating Microsoft OAuth URL:', error);
+      console.log('❌ Error generating Microsoft OAuth URL:', error);
       throw new BadRequestException('Failed to generate Microsoft OAuth URL');
+    }
+  }
+
+  /**
+   * Exchange Microsoft authorization code for access token
+   */
+  async exchangeMicrosoftToken(userId: string, authCode: string): Promise<void> {
+    try {
+      console.log('🔄 Exchanging Microsoft authorization code for tokens...');
+      console.log('👤 User ID:', userId);
+      console.log('🔐 Auth Code:', authCode);
+
+      const clientId = this.configService.get<string>('MICROSOFT_CLIENT_ID');
+      const clientSecret = this.configService.get<string>('MICROSOFT_CLIENT_SECRET');
+      const tenantId = this.configService.get<string>('MICROSOFT_TENANT_ID');
+      const redirectUri = this.configService.get<string>('MICROSOFT_REDIRECT_URI') || 'http://localhost:3000/connectors/microsoft/callback';
+
+      if (!clientId || !clientSecret || !tenantId) {
+        throw new BadRequestException('Microsoft OAuth credentials are not configured');
+      }
+
+      console.log('🔧 Configuration:');
+      console.log('  - Client ID:', clientId);
+      console.log('  - Tenant ID:', tenantId);
+      console.log('  - Redirect URI:', redirectUri);
+      console.log('  - Auth Code Length:', authCode.length);
+
+      // Exchange code for token
+      const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+      
+      const params = new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code: authCode,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code'
+      });
+
+      console.log('📤 Making token exchange request to:', tokenUrl);
+      console.log('📋 Request Parameters:', {
+        client_id: clientId,
+        code: authCode.substring(0, 20) + '...',
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code'
+      });
+
+      const response = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: params
+      });
+
+      const tokenData = await response.json();
+
+      if (!response.ok) {
+        console.error('❌ Token exchange failed:', tokenData);
+        throw new BadRequestException(`Token exchange failed: ${tokenData.error_description || tokenData.error}`);
+      }
+
+      console.log('✅ Token exchange successful!');
+      console.log('📋 Token Response:');
+      console.log('  - Access Token:', tokenData.access_token ? 'Present ✅' : 'Missing ❌');
+      console.log('  - Refresh Token:', tokenData.refresh_token ? 'Present ✅' : 'Missing ❌');
+      console.log('  - Token Type:', tokenData.token_type);
+      console.log('  - Expires In:', tokenData.expires_in, 'seconds');
+      console.log('  - Scope:', tokenData.scope);
+      
+      // Full token data for debugging
+      console.log('🔍 Full Token Data:', JSON.stringify(tokenData, null, 2));
+
+      // Test the access token by making a simple Graph API call
+      if (tokenData.access_token) {
+        console.log('🧪 Testing access token with Graph API...');
+        
+        const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
+          headers: {
+            'Authorization': `Bearer ${tokenData.access_token}`
+          }
+        });
+
+        if (graphResponse.ok) {
+          const userProfile = await graphResponse.json();
+          console.log('✅ Graph API test successful!');
+          console.log('👤 User Profile:', {
+            id: userProfile.id,
+            displayName: userProfile.displayName,
+            mail: userProfile.mail,
+            userPrincipalName: userProfile.userPrincipalName
+          });
+        } else {
+          console.error('❌ Graph API test failed:', await graphResponse.text());
+        }
+      }
+
+    } catch (error) {
+      console.error('❌ Error exchanging Microsoft token:', error);
+      throw error;
     }
   }
 }

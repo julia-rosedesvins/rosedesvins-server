@@ -4,6 +4,7 @@ import {
   Get,
   Delete,
   Body,
+  Query,
   UseGuards,
   HttpStatus,
   HttpException,
@@ -210,6 +211,197 @@ export class ConnectorController {
         success: false,
         message: 'Failed to generate Microsoft OAuth URL',
         error: error.message
+      }, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Post('microsoft/exchange-token')
+  @UseGuards(UserGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Exchange Microsoft OAuth authorization code for access tokens',
+    description: 'Exchange the authorization code received from Microsoft OAuth callback for access and refresh tokens. The tokens will be logged to console for debugging.'
+  })
+  @ApiBody({
+    description: 'Authorization code received from Microsoft OAuth callback',
+    schema: {
+      type: 'object',
+      required: ['code'],
+      properties: {
+        code: {
+          type: 'string',
+          description: 'The authorization code received from Microsoft OAuth callback',
+          example: 'M.C123_BAY.2.U.12345678-abcd-efgh-ijkl-123456789012'
+        }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Microsoft token exchanged successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Microsoft token exchanged successfully, check console for details' }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad Request - Invalid authorization code',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Failed to exchange Microsoft token' },
+        error: { type: 'string', example: 'Invalid authorization code' }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing authentication token'
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal Server Error',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Failed to exchange Microsoft token' },
+        error: { type: 'string', example: 'Internal server error message' }
+      }
+    }
+  })
+  async exchangeMicrosoftToken(
+    @Body('code') code: string,
+    @CurrentUser() user: any
+  ): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    try {
+      const userId = user.sub;
+      await this.connectorService.exchangeMicrosoftToken(userId, code);
+
+      return {
+        success: true,
+        message: 'Microsoft token exchanged successfully, check console for details'
+      };
+    } catch (error) {
+      console.error('Error exchanging Microsoft token:', error);
+      throw new HttpException({
+        success: false,
+        message: 'Failed to exchange Microsoft token',
+        error: error.message
+      }, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get('microsoft/callback')
+  @ApiOperation({
+    summary: 'Microsoft OAuth callback endpoint',
+    description: 'Handles the OAuth redirect from Microsoft and automatically exchanges the authorization code for tokens'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'OAuth callback handled successfully - tokens exchanged and logged',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Microsoft Calendar connected successfully' },
+        data: {
+          type: 'object',
+          properties: {
+            provider: { type: 'string', example: 'microsoft' },
+            userId: { type: 'string', example: 'user123' },
+            connected: { type: 'boolean', example: true }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'OAuth error or missing authorization code',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'OAuth callback failed' },
+        error: { type: 'string', example: 'Error details' }
+      }
+    }
+  })
+  async handleMicrosoftCallback(
+    @Query('code') code?: string,
+    @Query('state') state?: string,
+    @Query('error') error?: string,
+    @Query('error_description') errorDescription?: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data?: any;
+    error?: string;
+  }> {
+    try {
+      // Handle OAuth error
+      if (error) {
+        console.error('❌ Microsoft OAuth Error:', error, errorDescription);
+        throw new HttpException({
+          success: false,
+          message: 'Microsoft OAuth failed',
+          error: errorDescription || error || 'Unknown error occurred'
+        }, HttpStatus.BAD_REQUEST);
+      }
+
+      // Check for authorization code
+      if (!code) {
+        console.error('❌ No authorization code received');
+        throw new HttpException({
+          success: false,
+          message: 'Missing authorization code',
+          error: 'No authorization code was received from Microsoft'
+        }, HttpStatus.BAD_REQUEST);
+      }
+
+      console.log('🔄 Microsoft OAuth callback received');
+      console.log('📋 Callback Data:', { code: code.substring(0, 20) + '...', state, hasError: !!error });
+
+      // Extract userId from state (format: userId_timestamp_random)
+      let userId = 'unknown';
+      if (state) {
+        const stateParts = state.split('_');
+        if (stateParts.length >= 3) {
+          userId = stateParts[0];
+        }
+      }
+
+      // Automatically exchange the code for tokens
+      await this.connectorService.exchangeMicrosoftToken(userId, code);
+
+      // Return success response
+      return {
+        success: true,
+        message: 'Microsoft Calendar connected successfully',
+        data: {
+          provider: 'microsoft',
+          userId: userId,
+          connected: true,
+          timestamp: new Date().toISOString()
+        }
+      };
+
+    } catch (error) {
+      console.error('❌ Error in Microsoft OAuth callback:', error);
+      
+      throw new HttpException({
+        success: false,
+        message: 'Failed to connect Microsoft Calendar',
+        error: error.message || 'Unknown error occurred'
       }, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
