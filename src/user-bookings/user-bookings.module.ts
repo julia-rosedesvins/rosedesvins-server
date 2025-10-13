@@ -9,14 +9,14 @@ import { DomainProfile, DomainProfileSchema } from '../schemas/domain-profile.sc
 import { Subscription, SubscriptionSchema } from '../schemas/subscriptions.schema';
 import { Event, EventSchema } from '../schemas/events.schema';
 import { Connector, ConnectorSchema } from 'src/schemas/connector.schema';
-import { EmailService } from '../email/email.service';
-import { EmailConfig } from '../email/email.config';
-import { TemplateService } from '../email/template.service';
+import { EmailModule } from '../email/email.module';
 import { EncryptionService } from '../common/encryption.service';
+import { ConnectorService } from '../connector/connector.service';
 
 @Module({
   imports: [
     ConfigModule,
+    EmailModule, // Import the EmailModule instead of individual services
     MongooseModule.forFeature([
       { name: UserBooking.name, schema: UserBookingSchema },
       { name: User.name, schema: UserSchema },
@@ -29,10 +29,8 @@ import { EncryptionService } from '../common/encryption.service';
   controllers: [UserBookingsController],
   providers: [
     UserBookingsService, 
-    EmailService, 
-    EmailConfig, 
-    TemplateService, 
-    EncryptionService
+    EncryptionService,
+    ConnectorService
   ],
 })
 export class UserBookingsModule {}

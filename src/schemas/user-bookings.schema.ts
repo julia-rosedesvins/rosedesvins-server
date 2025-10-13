@@ -171,6 +171,14 @@ export class UserBooking extends Document {
   })
   bookingStatus: string;
 
+  // Calendar integration fields
+  @Prop({ 
+    type: String,
+    required: false,
+    trim: true
+  })
+  microsoftEventId?: string; // Microsoft Graph API event ID for calendar integration
+
   @Prop()
   createdAt?: Date;
 
