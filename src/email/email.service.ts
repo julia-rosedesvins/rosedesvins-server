@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { EmailConfig } from './email.config';
+import { MailgunService } from './mailgun.service';
 import { TemplateService } from './template.service';
 
 export interface EmailJob {
@@ -34,7 +34,7 @@ export class EmailService {
   private readonly logger = new Logger(EmailService.name);
 
   constructor(
-    private emailConfig: EmailConfig,
+    private mailgunService: MailgunService,
     private templateService: TemplateService,
   ) {}
 
@@ -43,7 +43,6 @@ export class EmailService {
       to: userData.email,
       subject: 'Welcome to Rose des Vins - Account Approved! 🎉',
       html: this.templateService.generateWelcomeEmail(userData),
-      from: `${this.emailConfig.getFromName()} <${this.emailConfig.getFromEmail()}>`,
     };
 
     await this.sendEmail(emailJob);
@@ -55,7 +54,6 @@ export class EmailService {
       to: userData.email,
       subject: 'Rose des Vins - Application Status Update',
       html: this.templateService.generateRejectionEmail(userData),
-      from: `${this.emailConfig.getFromName()} <${this.emailConfig.getFromEmail()}>`,
     };
 
     await this.sendEmail(emailJob);
@@ -69,7 +67,6 @@ export class EmailService {
       to: adminEmail,
       subject: `New Contact Form Submission - ${formData.fullName}`,
       html: this.templateService.generateContactFormEmail(formData),
-      from: `${this.emailConfig.getFromName()} <${this.emailConfig.getFromEmail()}>`,
     };
     
     await this.sendEmail(emailJob);
@@ -78,22 +75,23 @@ export class EmailService {
 
   async sendEmail(emailData: EmailJob): Promise<boolean> {
     try {
-      const transporter = this.emailConfig.getTransporter();
-      
-      const mailOptions = {
-        from: emailData.from || `${this.emailConfig.getFromName()} <${this.emailConfig.getFromEmail()}>`,
+      const mailgunOptions = {
         to: emailData.to,
         subject: emailData.subject,
         html: emailData.html,
+        from: emailData.from,
       };
 
-      const result = await transporter.sendMail(mailOptions);
+      const success = await this.mailgunService.sendEmail(mailgunOptions);
       
-      this.logger.log(`Email sent successfully to ${emailData.to}. MessageId: ${result.messageId}`);
-      return true;
+      if (success) {
+        this.logger.log(`Email sent successfully to ${emailData.to} via Mailgun HTTP API`);
+      }
+      
+      return success;
     } catch (error) {
       this.logger.error(`Failed to send email to ${emailData.to}:`, error.message);
-      throw error;
+      throw new Error(`Failed to send contact form notification email: ${error.message}`);
     }
   }
 }
