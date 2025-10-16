@@ -224,25 +224,13 @@ export class TemplateService {
 
   generateBookingUpdateEmail(data: BookingEmailTemplateData): string {
     const bookingUpdateTemplate = this.loadTemplate('booking-update');
-    const contentHtml = bookingUpdateTemplate(data);
 
-    return this.baseTemplate({
-      ...this.getBaseData(),
-      title: 'Modification de réservation - Rose des Vins',
-      subtitle: 'Votre réservation a été modifiée',
-      content: contentHtml,
-    });
+    return bookingUpdateTemplate(data);
   }
 
   generateBookingCancellationEmail(data: BookingEmailTemplateData): string {
     const bookingCancellationTemplate = this.loadTemplate('booking-cancellation');
-    const contentHtml = bookingCancellationTemplate(data);
-
-    return this.baseTemplate({
-      ...this.getBaseData(),
-      title: 'Annulation de réservation - Rose des Vins',
-      subtitle: 'Votre réservation a été annulée',
-      content: contentHtml,
-    });
+    
+    return bookingCancellationTemplate(data);
   }
 }
