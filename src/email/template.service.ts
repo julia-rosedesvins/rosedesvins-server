@@ -63,9 +63,18 @@ export interface BookingEmailTemplateData {
   eventTime: string;
   eventTimezone: string;
   eventDuration: string;
-  participantsText: string;
+  participantsAdults: number;
+  participantsChildren: number;
   selectedLanguage: string;
   additionalNotes?: string;
+  // Enhanced template fields
+  domainName: string;
+  domainAddress: string;
+  domainLogoUrl: string;
+  serviceName: string;
+  serviceDescription: string;
+  totalPrice: string;
+  paymentMethod: string;
 }
 
 @Injectable()
@@ -76,7 +85,30 @@ export class TemplateService {
   constructor(private configService: ConfigService) {
     // Use the source path directly for development and production
     this.templatesPath = path.join(process.cwd(), 'src', 'email', 'templates', 'hbs');
+    this.registerHandlebarsHelpers();
     this.loadBaseTemplate();
+  }
+
+  private registerHandlebarsHelpers() {
+    // Helper for greater than comparison
+    handlebars.registerHelper('gt', (a: number, b: number) => {
+      return a > b;
+    });
+
+    // Helper for equality comparison
+    handlebars.registerHelper('eq', (a: any, b: any) => {
+      return a === b;
+    });
+
+    // Helper for logical AND
+    handlebars.registerHelper('and', (a: any, b: any) => {
+      return a && b;
+    });
+
+    // Helper for logical OR
+    handlebars.registerHelper('or', (a: any, b: any) => {
+      return a || b;
+    });
   }
 
   private loadBaseTemplate(): void {
@@ -186,14 +218,8 @@ export class TemplateService {
 
   generateBookingConfirmationEmail(data: BookingEmailTemplateData): string {
     const bookingConfirmationTemplate = this.loadTemplate('booking-confirmation');
-    const contentHtml = bookingConfirmationTemplate(data);
-
-    return this.baseTemplate({
-      ...this.getBaseData(),
-      title: 'Confirmation de réservation - Rose des Vins',
-      subtitle: 'Votre dégustation est confirmée',
-      content: contentHtml,
-    });
+    // Return the template directly since it's already a complete HTML email
+    return bookingConfirmationTemplate(data);
   }
 
   generateBookingUpdateEmail(data: BookingEmailTemplateData): string {

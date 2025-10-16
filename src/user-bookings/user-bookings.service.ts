@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, ConflictException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { ConfigService } from '@nestjs/config';
 import { Model, Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { Buffer } from 'buffer';
@@ -35,6 +36,18 @@ export interface BookingEmailData {
   participantsChildren: number;
   selectedLanguage: string;
   additionalNotes?: string;
+  // Enhanced template fields
+  domainName: string;
+  domainAddress: string;
+  domainLogoUrl: string;
+  serviceName: string;
+  serviceDescription: string;
+  totalPrice: string;
+  paymentMethod: string;
+  frontendUrl: string;
+  appLogoUrl: string;
+  backendUrl: string;
+  serviceBannerUrl: string;
 }
 
 /**
@@ -57,6 +70,7 @@ export class UserBookingsService {
     private emailService: EmailService,
     private templateService: TemplateService,
     private connectorService: ConnectorService,
+    private configService: ConfigService,
   ) {}
 
   /**
@@ -67,11 +81,6 @@ export class UserBookingsService {
       try {
         const subject = this.getEmailSubject(type, 'customer');
         
-        // Format participants text
-        const participantsText = bookingData.participantsChildren > 0 
-          ? `${bookingData.participantsAdults + bookingData.participantsChildren} personnes (${bookingData.participantsAdults} adultes, ${bookingData.participantsChildren} enfants)`
-          : `${bookingData.participantsAdults} adulte${bookingData.participantsAdults > 1 ? 's' : ''}`;
-        
         const templateData = {
           customerName: bookingData.customerName,
           eventTitle: bookingData.eventTitle,
@@ -79,9 +88,17 @@ export class UserBookingsService {
           eventTime: bookingData.eventTime,
           eventTimezone: bookingData.eventTimezone,
           eventDuration: bookingData.eventDuration,
-          participantsText,
+          participantsAdults: bookingData.participantsAdults,
+          participantsChildren: bookingData.participantsChildren,
           selectedLanguage: bookingData.selectedLanguage,
           additionalNotes: bookingData.additionalNotes,
+          domainName: bookingData.domainName,
+          domainAddress: bookingData.domainAddress,
+          domainLogoUrl: bookingData.domainLogoUrl,
+          serviceName: bookingData.serviceName,
+          serviceDescription: bookingData.serviceDescription,
+          totalPrice: bookingData.totalPrice,
+          paymentMethod: bookingData.paymentMethod || 'Paiement sur place (cartes, chèques, liquide)',
         };
         
         let emailHtml: string;
@@ -310,6 +327,20 @@ export class UserBookingsService {
             participantsChildren: createBookingDto.participantsEnfants || 0,
             selectedLanguage: createBookingDto.selectedLanguage,
             additionalNotes: createBookingDto.additionalNotes,
+            // Enhanced template data
+            domainName: user?.domainName || 'Domaine La Bastide Blanche',
+            domainAddress: user?.address && user?.codePostal && user?.city 
+              ? `${user.address} - ${user.codePostal} - ${user.city}`
+              : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+            domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
+            serviceName: service?.name || 'Visite de cave et dégustation de vins',
+            serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
+            totalPrice: service?.pricePerPerson ? `${service.pricePerPerson} €` : '20 €',
+            paymentMethod: 'Paiement sur place (cartes, chèques, liquide)',
+            frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
+            appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
+            backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
+            serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
           };
 
           // Send to customer (booking user)
@@ -986,6 +1017,20 @@ export class UserBookingsService {
             participantsChildren: updatedBooking.participantsEnfants || 0,
             selectedLanguage: updatedBooking.selectedLanguage,
             additionalNotes: updatedBooking.additionalNotes,
+            // Enhanced template data
+            domainName: user?.domainName || 'Domaine La Bastide Blanche',
+            domainAddress: user?.address && user?.codePostal && user?.city 
+              ? `${user.address} - ${user.codePostal} - ${user.city}`
+              : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+            domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
+            serviceName: service?.name || 'Visite de cave et dégustation de vins',
+            serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
+            totalPrice: service?.pricePerPerson ? `${service.pricePerPerson} €` : '20 €',
+            paymentMethod: 'Paiement sur place (cartes, chèques, liquide)',
+            frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
+            appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
+            backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
+            serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
           };
 
           // Send update notification to customer only
@@ -1333,6 +1378,20 @@ export class UserBookingsService {
             participantsChildren: booking.participantsEnfants || 0,
             selectedLanguage: booking.selectedLanguage,
             additionalNotes: booking.additionalNotes,
+            // Enhanced template data
+            domainName: user?.domainName || 'Domaine La Bastide Blanche',
+            domainAddress: user?.address && user?.codePostal && user?.city 
+              ? `${user.address} - ${user.codePostal} - ${user.city}`
+              : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+            domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
+            serviceName: service?.name || 'Visite de cave et dégustation de vins',
+            serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
+            totalPrice: service?.pricePerPerson ? `${service.pricePerPerson} €` : '20 €',
+            paymentMethod: 'Paiement sur place (cartes, chèques, liquide)',
+            frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
+            appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
+            backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
+            serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
           };
 
           // Send cancellation notification to customer only
