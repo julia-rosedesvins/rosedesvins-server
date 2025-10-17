@@ -75,6 +75,10 @@ export interface BookingEmailTemplateData {
   serviceDescription: string;
   totalPrice: string;
   paymentMethod: string;
+  frontendUrl: string;
+  appLogoUrl: string;
+  backendUrl: string;
+  serviceBannerUrl: string;
 }
 
 @Injectable()
@@ -218,7 +222,6 @@ export class TemplateService {
 
   generateBookingConfirmationEmail(data: BookingEmailTemplateData): string {
     const bookingConfirmationTemplate = this.loadTemplate('booking-confirmation');
-    // Return the template directly since it's already a complete HTML email
     return bookingConfirmationTemplate(data);
   }
 
