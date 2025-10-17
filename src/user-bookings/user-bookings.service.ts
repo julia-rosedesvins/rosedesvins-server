@@ -74,6 +74,32 @@ export class UserBookingsService {
   ) {}
 
   /**
+   * Helper method to safely join URL parts without double slashes
+   */
+  private joinUrl(baseUrl: string, path: string): string {
+    if (!baseUrl || !path) return baseUrl || path || '';
+    
+    // Remove trailing slash from base URL and leading slash from path
+    const cleanBase = baseUrl.replace(/\/+$/, '');
+    const cleanPath = path.replace(/^\/+/, '');
+    
+    return `${cleanBase}/${cleanPath}`;
+  }
+
+  /**
+   * Helper method to construct full image URLs for email templates
+   */
+  private constructImageUrls(domainProfile: any, service: any) {
+    const backendUrl = this.configService.get('BACKEND_URL') || 'http://localhost:3000';
+    
+    return {
+      domainLogoUrl: this.joinUrl(backendUrl, domainProfile?.domainLogoUrl || '/assets/logo.png'),
+      serviceBannerUrl: this.joinUrl(backendUrl, service?.serviceBannerUrl || '/uploads/default-service-banner.jpg'),
+      appLogoUrl: this.joinUrl(backendUrl, this.configService.get('APP_LOGO') || '/assets/logo.png'),
+    };
+  }
+
+  /**
    * Send booking confirmation email to customer using booking-specific templates
    */
   private async sendCustomerBookingEmail(bookingData: BookingEmailData, type: 'created' | 'updated' | 'cancelled'): Promise<void> {
@@ -346,6 +372,10 @@ export class UserBookingsService {
             backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
             serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
           };
+
+          // Fix URLs to avoid double slashes
+          bookingEmailData.domainLogoUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', domainProfile?.domainLogoUrl || '/assets/logo.png');
+          bookingEmailData.serviceBannerUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', service?.serviceBannerUrl || '/uploads/default-service-banner.jpg');
 
           // Send to customer (booking user)
           await this.sendCustomerBookingEmail(bookingEmailData, 'created');
@@ -1037,6 +1067,10 @@ export class UserBookingsService {
             serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
           };
 
+          // Fix URLs to avoid double slashes
+          bookingEmailData.domainLogoUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', domainProfile?.domainLogoUrl || '/assets/logo.png');
+          bookingEmailData.serviceBannerUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', service?.serviceBannerUrl || '/uploads/default-service-banner.jpg');
+
           // Send update notification to customer only
           await this.sendCustomerBookingEmail(bookingEmailData, 'updated');
         } catch (emailError) {
@@ -1397,6 +1431,10 @@ export class UserBookingsService {
             backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
             serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
           };
+
+          // Fix URLs to avoid double slashes
+          bookingEmailData.domainLogoUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', domainProfile?.domainLogoUrl || '/assets/logo.png');
+          bookingEmailData.serviceBannerUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', service?.serviceBannerUrl || '/uploads/default-service-banner.jpg');
 
           // Send cancellation notification to customer only
           await this.sendCustomerBookingEmail(bookingEmailData, 'cancelled');

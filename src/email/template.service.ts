@@ -222,6 +222,7 @@ export class TemplateService {
 
   generateBookingConfirmationEmail(data: BookingEmailTemplateData): string {
     const bookingConfirmationTemplate = this.loadTemplate('booking-confirmation');
+    console.log('Generating booking confirmation email with data:', data);
     return bookingConfirmationTemplate(data);
   }
 
