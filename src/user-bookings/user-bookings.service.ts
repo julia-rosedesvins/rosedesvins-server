@@ -99,6 +99,10 @@ export class UserBookingsService {
           serviceDescription: bookingData.serviceDescription,
           totalPrice: bookingData.totalPrice,
           paymentMethod: bookingData.paymentMethod || 'Paiement sur place (cartes, chèques, liquide)',
+          frontendUrl: bookingData.frontendUrl,
+          backendUrl: bookingData.backendUrl,
+          appLogoUrl: bookingData.appLogoUrl,
+          serviceBannerUrl: bookingData.serviceBannerUrl,
         };
         
         let emailHtml: string;

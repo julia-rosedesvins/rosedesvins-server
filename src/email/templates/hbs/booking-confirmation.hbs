@@ -406,7 +406,7 @@
         <!-- Header with Logo -->
         <div class="header">
             <div class="logo-container">
-                <img src="https://api.rosedesvins.co/{{domainLogoUrl}}" alt="{{domainName}} Logo" class="logo-image">
+                <img src="{{backendUrl}}{{domainLogoUrl}}" alt="{{domainName}} Logo" class="logo-image">
             </div>
         </div>
 
@@ -423,7 +423,7 @@
                     <table class="reservation-table">
                         <tr>
                             <td class="image-column">
-                                <img src="https://api.rosedesvins.co/{{serviceBannerUrl}}" alt="{{serviceName}}" class="wine-cellar-image">
+                                <img src="{{backendUrl}}{{serviceBannerUrl}}" alt="{{serviceName}}" class="wine-cellar-image">
                             </td>
                             
                             <td class="details-column">
@@ -514,7 +514,7 @@
                 </div>
                 {{/if}}
                 
-                <a href="https://rosedesvins.co/dashboard/reservations" class="cancel-button">Annuler votre réservation</a>
+                <a href="{{frontendUrl}}/dashboard/reservations" class="cancel-button">Annuler votre réservation</a>
                 <div style="clear: both;"></div>
             </div>
             
@@ -545,7 +545,7 @@
                         </div>
                     </td>
                     <td class="footer-right-cell">
-                        <a href="https://rosedesvins.co/#contact" class="footer-contact" style="color: white; text-decoration: none;">Contact</a>
+                        <a href="{{frontendUrl}}/#contact" class="footer-contact" style="color: white; text-decoration: none;">Contact</a>
                     </td>
                 </tr>
             </table>
