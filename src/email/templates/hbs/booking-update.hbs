@@ -302,9 +302,9 @@
             height: 40px;
             background-color: white;
             border-radius: 50%;
-            display: inline-block;
-            text-align: center;
-            line-height: 40px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             padding: 5px;
             box-sizing: border-box;
         }
@@ -312,7 +312,9 @@
         .footer-logo-icon img {
             max-width: 30px;
             max-height: 30px;
-            vertical-align: middle;
+            width: auto;
+            height: auto;
+            display: block;
         }
 
         .footer-logo-text-cell {
