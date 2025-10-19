@@ -71,18 +71,18 @@ export class UserBookingsService {
     private templateService: TemplateService,
     private connectorService: ConnectorService,
     private configService: ConfigService,
-  ) {}
+  ) { }
 
   /**
    * Helper method to safely join URL parts without double slashes
    */
   private joinUrl(baseUrl: string, path: string): string {
     if (!baseUrl || !path) return baseUrl || path || '';
-    
+
     // Remove trailing slash from base URL and leading slash from path
     const cleanBase = baseUrl.replace(/\/+$/, '');
     const cleanPath = path.replace(/^\/+/, '');
-    
+
     return `${cleanBase}/${cleanPath}`;
   }
 
@@ -91,7 +91,7 @@ export class UserBookingsService {
    */
   private constructImageUrls(domainProfile: any, service: any) {
     const backendUrl = this.configService.get('BACKEND_URL') || 'http://localhost:3000';
-    
+
     return {
       domainLogoUrl: this.joinUrl(backendUrl, domainProfile?.domainLogoUrl || '/assets/logo.png'),
       serviceBannerUrl: this.joinUrl(backendUrl, service?.serviceBannerUrl || '/uploads/default-service-banner.jpg'),
@@ -106,7 +106,7 @@ export class UserBookingsService {
     setImmediate(async () => {
       try {
         const subject = this.getEmailSubject(type, 'customer');
-        
+
         const templateData = {
           customerName: bookingData.customerName,
           eventTitle: bookingData.eventTitle,
@@ -130,9 +130,9 @@ export class UserBookingsService {
           appLogoUrl: bookingData.appLogoUrl,
           serviceBannerUrl: bookingData.serviceBannerUrl,
         };
-        
+
         let emailHtml: string;
-        
+
         // Use specific templates based on type
         switch (type) {
           case 'created':
@@ -145,13 +145,13 @@ export class UserBookingsService {
             emailHtml = this.templateService.generateBookingCancellationEmail(templateData);
             break;
         }
-        
+
         const emailJob = {
           to: bookingData.customerEmail,
           subject,
           html: emailHtml,
         };
-        
+
         await this.emailService.sendEmail(emailJob);
         console.log(`${type} email sent to customer: ${bookingData.customerEmail}`);
       } catch (error) {
@@ -167,7 +167,7 @@ export class UserBookingsService {
     setImmediate(async () => {
       try {
         const subject = this.getEmailSubject(type, 'provider');
-        
+
         // Use the existing provider notification template
         const emailHtml = this.templateService.generateProviderNotificationEmail({
           providerName: bookingData.providerName,
@@ -181,13 +181,13 @@ export class UserBookingsService {
           eventDescription: this.formatEventDescription(bookingData, type),
           hoursBeforeEvent: 0, // Immediate notification
         });
-        
+
         const emailJob = {
           to: bookingData.providerEmail,
           subject,
           html: emailHtml,
         };
-        
+
         await this.emailService.sendEmail(emailJob);
         console.log(`${type} email sent to provider: ${bookingData.providerEmail}`);
       } catch (error) {
@@ -214,7 +214,7 @@ export class UserBookingsService {
         provider: 'Réservation annulée - Rose des Vins'
       }
     };
-    
+
     return subjects[type][recipient];
   }
 
@@ -223,12 +223,12 @@ export class UserBookingsService {
    */
   private formatEventDescription(bookingData: BookingEmailData, type: 'created' | 'updated' | 'cancelled'): string {
     const totalParticipants = bookingData.participantsAdults + bookingData.participantsChildren;
-    const participantsText = bookingData.participantsChildren > 0 
+    const participantsText = bookingData.participantsChildren > 0
       ? `${totalParticipants} personnes (${bookingData.participantsAdults} adultes, ${bookingData.participantsChildren} enfants)`
       : `${bookingData.participantsAdults} adulte${bookingData.participantsAdults > 1 ? 's' : ''}`;
 
     let description = `Participants: ${participantsText}\nLangue: ${bookingData.selectedLanguage}`;
-    
+
     if (bookingData.additionalNotes) {
       description += `\nNotes: ${bookingData.additionalNotes}`;
     }
@@ -240,7 +240,7 @@ export class UserBookingsService {
     };
 
     description = `${statusText[type]}\n\n${description}`;
-    
+
     return description;
   }
 
@@ -252,7 +252,7 @@ export class UserBookingsService {
 
       // Create booking data with proper field mapping
       const parsedDate = createBookingDto.bookingDate;
-      
+
       const bookingData = {
         userId: userObjectId,
         serviceId: serviceObjectId,
@@ -295,7 +295,7 @@ export class UserBookingsService {
 
         const newEvent = new this.eventModel(eventData);
         await newEvent.save();
-        
+
         console.log('Successfully created event for booking:', savedBooking._id);
       } catch (eventError) {
         console.error('Failed to create event for booking:', eventError);
@@ -315,12 +315,12 @@ export class UserBookingsService {
         try {
           // Get user and domain profile for email data
           const user = await this.userModel.findById(createBookingDto.userId);
-          
+
           // Check if domain profile exists - convert userId to ObjectId for proper comparison
           const userObjectIdForQuery = new Types.ObjectId(createBookingDto.userId);
           const domainProfile = await this.domainProfileModel.findOne({ userId: userObjectIdForQuery });
-          
-          
+
+
           // Find the service info from domain profile using _id
           let service: any = null;
           if (domainProfile?.services && domainProfile.services.length > 0) {
@@ -330,7 +330,7 @@ export class UserBookingsService {
           } else {
             console.log('Debug - No services found in domain profile, using fallback');
           }
-          
+
           // Create a fallback service name based on user's business or default
           let eventTitle = 'Dégustation de vins'; // Default fallback
           if (service?.name) {
@@ -340,9 +340,9 @@ export class UserBookingsService {
           } else if (user?.firstName && user?.lastName) {
             eventTitle = `Dégustation - ${user.firstName} ${user.lastName}`;
           }
-          
+
           console.log('Debug - Final eventTitle:', eventTitle);
-          
+
           const bookingEmailData: BookingEmailData = {
             customerName: `${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
             customerEmail: createBookingDto.customerEmail,
@@ -359,7 +359,7 @@ export class UserBookingsService {
             additionalNotes: createBookingDto.additionalNotes,
             // Enhanced template data
             domainName: user?.domainName || 'Domaine La Bastide Blanche',
-            domainAddress: user?.address && user?.codePostal && user?.city 
+            domainAddress: user?.address && user?.codePostal && user?.city
               ? `${user.address} - ${user.codePostal} - ${user.city}`
               : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
             domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
@@ -379,7 +379,7 @@ export class UserBookingsService {
 
           // Send to customer (booking user)
           await this.sendCustomerBookingEmail(bookingEmailData, 'created');
-          
+
           // Send to service provider (user)
           await this.sendProviderBookingEmail(bookingEmailData, 'created');
         } catch (emailError) {
@@ -394,11 +394,11 @@ export class UserBookingsService {
         // Duplicate key error (unique constraint violation)
         throw new ConflictException('A booking already exists for this time slot');
       }
-      
+
       if (error instanceof BadRequestException || error instanceof ConflictException) {
         throw error;
       }
-      
+
       throw new InternalServerErrorException('Failed to create booking');
     }
   }
@@ -412,7 +412,7 @@ export class UserBookingsService {
 
       // Check which calendar connectors are available and active for this user
       const connectors = await this.connectorModel
-        .find({ 
+        .find({
           userId: booking.userId
         })
         .exec();
@@ -423,7 +423,7 @@ export class UserBookingsService {
       }
 
       // Check for active connectors based on connector_name
-      const activeConnector = connectors.find(conn => 
+      const activeConnector = connectors.find(conn =>
         conn.connector_name !== 'none'
       );
 
@@ -455,7 +455,7 @@ export class UserBookingsService {
         default:
           console.log('ℹ️ No supported calendar provider found for user:', booking.userId);
       }
-      
+
     } catch (error) {
       console.error('❌ Calendar integration error:', error);
       // Non-blocking: Calendar integration failure shouldn't prevent booking creation
@@ -486,14 +486,21 @@ export class UserBookingsService {
       console.log('📅 Calendar URL:', calendar.url);
 
       // Construct event start date from booking data
-      const startDate = bookingDto.bookingDate instanceof Date
+      // const startDate = bookingDto.bookingDate instanceof Date
+      //   ? new Date(`${bookingDto.bookingDate.toISOString().split('T')[0]}T${bookingDto.bookingTime}:00`)
+      //   : new Date(`${bookingDto.bookingDate}T${bookingDto.bookingTime}:00`);
+
+      const originalStartDate = bookingDto.bookingDate instanceof Date
         ? new Date(`${bookingDto.bookingDate.toISOString().split('T')[0]}T${bookingDto.bookingTime}:00`)
         : new Date(`${bookingDto.bookingDate}T${bookingDto.bookingTime}:00`);
-      
+
+      // ✅ QUICK FIX: Subtract 2 hours to compensate for Orange calendar timezone issue
+      const startDate = new Date(originalStartDate.getTime() - (2 * 60 * 60 * 1000)); // Subtract 2 hours
+
       if (isNaN(startDate.getTime())) {
         throw new Error(`Invalid date constructed from booking data`);
       }
-      
+
       // Determine event duration from service details
       const eventDuration = await this.getServiceDuration(booking.userId, bookingDto.serviceId);
 
@@ -502,7 +509,7 @@ export class UserBookingsService {
       // Create iCal event for the booking
       const eventTitle = `Réservation: ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
       const eventUid = uuidv4();
-      
+
       const icalCalendar = ical({ name: 'ROSEDESVINS APP' });
       const event = icalCalendar.createEvent({
         start: startDate,
@@ -515,7 +522,7 @@ export class UserBookingsService {
         created: new Date(),
         lastModified: new Date()
       });
-      
+
       event.uid(eventUid);
 
       const eventIcal = icalCalendar.toString();
@@ -524,7 +531,7 @@ export class UserBookingsService {
       // Upload event to Orange calendar via CalDAV
       const eventUrl = calendar.url + encodeURIComponent(filename);
       const authHeader = `Basic ${Buffer.from(`${orangeCreds.username}:${decryptedPassword}`).toString('base64')}`;
-      
+
       const response = await fetch(eventUrl, {
         method: 'PUT',
         headers: {
@@ -594,13 +601,13 @@ export class UserBookingsService {
       // Get a valid access token (automatically refreshes if needed)
       console.log('🔑 Attempting to get Microsoft access token for user:', booking.userId.toString());
       const accessToken = await this.connectorService.getMicrosoftAccessToken(booking.userId.toString());
-      
+
       console.log('🔑 Access token result:', {
         hasToken: !!accessToken,
         tokenLength: accessToken?.length || 0,
         tokenStart: accessToken?.substring(0, 20) + '...' || 'null'
       });
-      
+
       if (!accessToken) {
         throw new Error('Failed to get valid Microsoft access token');
       }
@@ -641,9 +648,9 @@ export class UserBookingsService {
         }
       });
 
-      console.log('📅 Calendar test response:', { 
-        status: calendarTestResponse.status, 
-        statusText: calendarTestResponse.statusText ,
+      console.log('📅 Calendar test response:', {
+        status: calendarTestResponse.status,
+        statusText: calendarTestResponse.statusText,
         data: calendarTestResponse
       });
 
@@ -653,7 +660,7 @@ export class UserBookingsService {
       } else {
         const errorText = await calendarTestResponse.text();
         console.log('❌ Calendar permissions failed:', errorText);
-        
+
         if (calendarTestResponse.status === 401) {
           console.log('🚫 MICROSOFT AZURE APP NOT APPROVED!');
           console.log('💡 Solutions:');
@@ -672,18 +679,18 @@ export class UserBookingsService {
       const startDate = bookingDto.bookingDate instanceof Date
         ? new Date(`${bookingDto.bookingDate.toISOString().split('T')[0]}T${bookingDto.bookingTime}:00`)
         : new Date(`${bookingDto.bookingDate}T${bookingDto.bookingTime}:00`);
-      
+
       if (isNaN(startDate.getTime())) {
         throw new Error(`Invalid date constructed from booking data`);
       }
-      
+
       // Determine event duration from service details
       const eventDuration = await this.getServiceDuration(booking.userId, bookingDto.serviceId);
       const endDate = new Date(startDate.getTime() + (eventDuration * 60 * 1000));
 
       // Create Microsoft Graph API event
       const eventTitle = `Réservation: ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
-      
+
       const eventBody = {
         subject: eventTitle,
         start: {
@@ -718,7 +725,7 @@ export class UserBookingsService {
       // Create event via Microsoft Graph API with retry logic
       console.log('📤 Making Microsoft Graph API request to create event');
       console.log('📋 Event body:', JSON.stringify(eventBody, null, 2));
-      
+
       const response = await this.callMicrosoftGraphWithRetry('https://graph.microsoft.com/v1.0/me/events', {
         method: 'POST',
         headers: {
@@ -737,7 +744,7 @@ export class UserBookingsService {
       if (!response.ok) {
         const errorData = await response.text();
         console.error('❌ Microsoft Graph API error response:', errorData);
-        
+
         // Special handling for 401 errors with unapproved apps
         if (response.status === 401) {
           console.error('🚫 MICROSOFT AZURE APP NOT APPROVED!');
@@ -747,12 +754,12 @@ export class UserBookingsService {
           console.error('   3. Request admin consent in Azure portal');
           console.error('   4. Verify app permissions in Azure Active Directory');
         }
-        
+
         throw new Error(`Microsoft Graph API error: ${response.status} - ${errorData}`);
       }
 
       const createdEvent = await response.json();
-      
+
       // Store the Microsoft event ID in the booking for future operations
       await this.userBookingModel.updateOne(
         { _id: booking._id },
@@ -760,10 +767,10 @@ export class UserBookingsService {
       );
 
       console.log('✅ Microsoft calendar event created successfully:', createdEvent.id);
-      
+
     } catch (error) {
       console.error('❌ Microsoft calendar integration failed:', error);
-      
+
       // Provide specific error messages based on error type
       if (error.name === 'TimeoutError' || error.code === 'ETIMEDOUT') {
         console.error('⏰ Network timeout when calling Microsoft Graph API');
@@ -772,7 +779,7 @@ export class UserBookingsService {
         console.error('⏰ Connection timeout to Microsoft Graph API');
         console.error('💡 Check your internet connection or try again later');
       }
-      
+
       throw error; // Re-throw to be caught by the main addToCalendar method
     }
   }
@@ -784,32 +791,32 @@ export class UserBookingsService {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         console.log(`🔄 Microsoft Graph API attempt ${attempt}/${maxRetries}`);
-        
+
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-        
+
         const response = await fetch(url, {
           ...options,
           signal: controller.signal
         });
-        
+
         clearTimeout(timeoutId);
         return response;
-        
+
       } catch (error) {
         console.error(`❌ Attempt ${attempt} failed:`, error.message);
-        
+
         if (attempt === maxRetries) {
           throw error; // Re-throw on final attempt
         }
-        
+
         // Exponential backoff: wait 2^attempt seconds
         const waitTime = Math.pow(2, attempt) * 1000;
         console.log(`⏳ Waiting ${waitTime}ms before retry...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
     }
-    
+
     throw new Error('All retry attempts failed');
   }
 
@@ -834,7 +841,7 @@ export class UserBookingsService {
   private async getOrangeCalendar(username: string, password: string, retryCount = 0): Promise<any> {
     const cacheKey = `orange-${username}`;
     const cached = this.calendarCache.get(cacheKey);
-    
+
     // Check if we have a valid cached calendar
     if (cached && (Date.now() - cached.timestamp) < this.CACHE_TTL) {
       console.log('📅 Using cached calendar');
@@ -843,7 +850,7 @@ export class UserBookingsService {
 
     try {
       console.log('🔍 Discovering calendars...');
-      
+
       // Create CalDAV client
       const xhr = new dav.transport.Basic(
         new dav.Credentials({
@@ -863,7 +870,7 @@ export class UserBookingsService {
       }
 
       const calendar = account.calendars[0];
-      
+
       // Cache the discovered calendar
       this.calendarCache.set(cacheKey, {
         calendar,
@@ -875,14 +882,14 @@ export class UserBookingsService {
 
     } catch (error) {
       console.error('Error discovering calendar:', error);
-      
+
       // Retry logic for network issues
       if (retryCount < 2 && (error.message.includes('Bad status') || error.message.includes('network'))) {
         console.log(`🔄 Retrying calendar discovery (attempt ${retryCount + 1}/3)...`);
         await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // Exponential backoff
         return this.getOrangeCalendar(username, password, retryCount + 1);
       }
-      
+
       throw error;
     }
   }
@@ -918,7 +925,7 @@ export class UserBookingsService {
 
       // Prepare update data (only include provided fields)
       const updateFields: any = {};
-      
+
       if (updateData.bookingDate) {
         updateFields.bookingDate = updateData.bookingDate;
       }
@@ -953,7 +960,7 @@ export class UserBookingsService {
       // Check if date or time changed (calendar update needed)
       const isDateTimeChanged = updateData.bookingDate || updateData.bookingTime;
       const isCustomerInfoChanged = updateData.userContactFirstname || updateData.userContactLastname;
-      
+
       // Update the booking in database
       const updatedBooking = await this.userBookingModel.findByIdAndUpdate(
         bookingObjectId,
@@ -967,7 +974,7 @@ export class UserBookingsService {
 
       // Update corresponding event in events table
       const eventUpdateFields: any = {};
-      
+
       if (updateData.bookingDate) {
         eventUpdateFields.eventDate = updateData.bookingDate;
       }
@@ -990,7 +997,7 @@ export class UserBookingsService {
           {
             $or: [
               { bookingId: bookingObjectId },
-              { 
+              {
                 userId: existingBooking.userId,
                 eventDate: existingBooking.bookingDate,
                 eventTime: existingBooking.bookingTime
@@ -1023,10 +1030,10 @@ export class UserBookingsService {
         try {
           const user = await this.userModel.findById(updatedBooking.userId);
           const domainProfile = await this.domainProfileModel.findOne({ userId: updatedBooking.userId });
-          
+
           console.log('Debug UPDATE - serviceId:', updatedBooking.serviceId?.toString());
           console.log('Debug UPDATE - domainProfile services:', domainProfile?.services);
-          
+
           // Find the service info from domain profile using _id
           const service = domainProfile?.services?.find(s => {
             console.log('Debug UPDATE - service s:', s);
@@ -1034,9 +1041,9 @@ export class UserBookingsService {
             console.log('Debug UPDATE - comparison:', (s as any)._id?.toString() === updatedBooking.serviceId?.toString());
             return (s as any)._id?.toString() === updatedBooking.serviceId?.toString();
           });
-          
+
           console.log('Debug UPDATE - final service found:', service);
-          
+
           const bookingEmailData: BookingEmailData = {
             customerName: `${updatedBooking.userContactFirstname} ${updatedBooking.userContactLastname}`,
             customerEmail: updatedBooking.customerEmail,
@@ -1053,7 +1060,7 @@ export class UserBookingsService {
             additionalNotes: updatedBooking.additionalNotes,
             // Enhanced template data
             domainName: user?.domainName || 'Domaine La Bastide Blanche',
-            domainAddress: user?.address && user?.codePostal && user?.city 
+            domainAddress: user?.address && user?.codePostal && user?.city
               ? `${user.address} - ${user.codePostal} - ${user.city}`
               : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
             domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
@@ -1081,7 +1088,7 @@ export class UserBookingsService {
 
       return {
         success: true,
-        message: calendarUpdateSuccess 
+        message: calendarUpdateSuccess
           ? 'Booking updated successfully in database and calendar'
           : 'Booking updated successfully in database (calendar update failed)',
         booking: updatedBooking
@@ -1089,11 +1096,11 @@ export class UserBookingsService {
 
     } catch (error) {
       console.error('❌ Error updating booking:', error);
-      
+
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
-      
+
       throw new InternalServerErrorException('Failed to update booking');
     }
   }
@@ -1118,7 +1125,7 @@ export class UserBookingsService {
       }
 
       // Find the active connector based on connector_name
-      const activeConnector = connectors.find(conn => 
+      const activeConnector = connectors.find(conn =>
         conn.connector_name !== 'none'
       );
 
@@ -1188,7 +1195,7 @@ export class UserBookingsService {
 
       // Step 2: Create new event with updated data
       console.log('➕ Creating updated calendar event...');
-      
+
       // Create a temporary booking DTO for the new event
       const updatedBookingDto = {
         userId: newBooking.userId.toString(),
@@ -1251,7 +1258,7 @@ export class UserBookingsService {
 
       // Get a valid access token
       const accessToken = await this.connectorService.getMicrosoftAccessToken(newBooking.userId.toString());
-      
+
       if (!accessToken) {
         throw new Error('Failed to get valid Microsoft access token');
       }
@@ -1260,12 +1267,12 @@ export class UserBookingsService {
       const startDate = newBooking.bookingDate instanceof Date
         ? new Date(`${newBooking.bookingDate.toISOString().split('T')[0]}T${newBooking.bookingTime}:00`)
         : new Date(`${newBooking.bookingDate}T${newBooking.bookingTime}:00`);
-      
+
       const eventDuration = await this.getServiceDuration(newBooking.userId, newBooking.serviceId.toString());
       const endDate = new Date(startDate.getTime() + (eventDuration * 60 * 1000));
 
       const eventTitle = `Réservation: ${newBooking.userContactFirstname} ${newBooking.userContactLastname}`;
-      
+
       const updateBody = {
         subject: eventTitle,
         start: {
@@ -1364,7 +1371,7 @@ export class UserBookingsService {
       const eventDeleteResult = await this.eventModel.deleteMany({
         $or: [
           { bookingId: bookingObjectId },
-          { 
+          {
             userId: booking.userId,
             eventDate: booking.bookingDate,
             eventTime: booking.bookingTime
@@ -1388,10 +1395,10 @@ export class UserBookingsService {
         try {
           const user = await this.userModel.findById(booking.userId);
           const domainProfile = await this.domainProfileModel.findOne({ userId: booking.userId });
-          
+
           console.log('Debug DELETE - serviceId:', booking.serviceId?.toString());
           console.log('Debug DELETE - domainProfile services:', domainProfile?.services);
-          
+
           // Find the service info from domain profile using _id
           const service = domainProfile?.services?.find(s => {
             console.log('Debug DELETE - service s:', s);
@@ -1399,9 +1406,9 @@ export class UserBookingsService {
             console.log('Debug DELETE - comparison:', (s as any)._id?.toString() === booking.serviceId?.toString());
             return (s as any)._id?.toString() === booking.serviceId?.toString();
           });
-          
+
           console.log('Debug DELETE - final service found:', service);
-          
+
           const bookingEmailData: BookingEmailData = {
             customerName: `${booking.userContactFirstname} ${booking.userContactLastname}`,
             customerEmail: booking.customerEmail,
@@ -1418,7 +1425,7 @@ export class UserBookingsService {
             additionalNotes: booking.additionalNotes,
             // Enhanced template data
             domainName: user?.domainName || 'Domaine La Bastide Blanche',
-            domainAddress: user?.address && user?.codePostal && user?.city 
+            domainAddress: user?.address && user?.codePostal && user?.city
               ? `${user.address} - ${user.codePostal} - ${user.city}`
               : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
             domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
@@ -1451,11 +1458,11 @@ export class UserBookingsService {
 
     } catch (error) {
       console.error('❌ Error deleting booking:', error);
-      
+
       if (error instanceof BadRequestException) {
         throw error;
       }
-      
+
       throw new InternalServerErrorException('Failed to delete booking');
     }
   }
@@ -1479,7 +1486,7 @@ export class UserBookingsService {
       }
 
       // Find the active connector based on connector_name
-      const activeConnector = connectors.find(conn => 
+      const activeConnector = connectors.find(conn =>
         conn.connector_name !== 'none'
       );
 
@@ -1551,7 +1558,7 @@ export class UserBookingsService {
       // Try to delete using PROPFIND + DELETE approach (more compatible with CalDAV)
       try {
         const authHeader = `Basic ${Buffer.from(`${orangeCreds.username}:${decryptedPassword}`).toString('base64')}`;
-        
+
         // First, try to find events using PROPFIND
         const propfindBody = `<?xml version="1.0" encoding="UTF-8"?>
           <D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
@@ -1575,24 +1582,24 @@ export class UserBookingsService {
           const responseText = await propfindResponse.text();
           // Use the same title format as when creating the event (Réservation: not Booking:)
           const expectedEventTitle = `Réservation: ${booking.userContactFirstname} ${booking.userContactLastname}`;
-          
+
           console.log('📋 Looking for event with title:', expectedEventTitle);
           console.log('📄 PROPFIND response length:', responseText.length);
-          
+
           // Search for our event in the response (case-insensitive and flexible)
           const customerName = `${booking.userContactFirstname} ${booking.userContactLastname}`;
-          const eventFound = responseText.toLowerCase().includes(expectedEventTitle.toLowerCase()) || 
-                            responseText.toLowerCase().includes(customerName.toLowerCase());
-          
-          console.log('🔍 Event search results:', { 
-            expectedTitle: expectedEventTitle, 
-            customerName: customerName, 
-            found: eventFound 
+          const eventFound = responseText.toLowerCase().includes(expectedEventTitle.toLowerCase()) ||
+            responseText.toLowerCase().includes(customerName.toLowerCase());
+
+          console.log('🔍 Event search results:', {
+            expectedTitle: expectedEventTitle,
+            customerName: customerName,
+            found: eventFound
           });
-          
+
           if (eventFound) {
             console.log('🎯 Found matching event in calendar');
-            
+
             // Extract all href URLs - try multiple patterns as XML namespace can vary
             let hrefMatches = responseText.match(/<D:href>([^<]+)<\/D:href>/g);
             if (!hrefMatches) {
@@ -1603,50 +1610,50 @@ export class UserBookingsService {
               // Try with different namespace
               hrefMatches = responseText.match(/<[a-z]*:?href[^>]*>([^<]+)<\/[a-z]*:?href>/gi);
             }
-            
+
             let eventDeleted = false;
-            
+
             console.log('🔎 Total href matches found:', hrefMatches?.length || 0);
-            
+
             // If no hrefs found, let's see what the XML structure actually looks like
             if (!hrefMatches || hrefMatches.length === 0) {
               console.log('🔍 No href matches found, checking XML structure...');
               console.log('📝 First 1000 chars of response:', responseText.substring(0, 1000));
               console.log('📝 Last 1000 chars of response:', responseText.substring(responseText.length - 1000));
             }
-            
+
             if (hrefMatches) {
               for (const hrefMatch of hrefMatches) {
                 // Extract URL content from various href tag formats
                 let url = hrefMatch;
-                
+
                 // Remove all possible href tag variations
                 url = url.replace(/<[^>]*href[^>]*>/gi, '').replace(/<\/[^>]*href[^>]*>/gi, '');
                 url = url.replace(/<\/?[a-z]*:?href[^>]*>/gi, '');
-                
+
                 // Skip calendar collection URLs - we need specific event files
                 if (url.endsWith('/') || (!url.includes('.ics') && !url.match(/[a-f0-9-]{36}\.ics$/i))) {
                   console.log('⏭️ Skipping calendar collection URL:', url);
                   continue;
                 }
-                
+
                 console.log('🔍 Checking event file:', url);
-                
+
                 // Look for the calendar-data section that corresponds to this href
                 const hrefIndex = responseText.indexOf(hrefMatch);
                 const nextHrefIndex = responseText.indexOf('<d:href>', hrefIndex + 1);
                 const eventDataSection = responseText.substring(hrefIndex, nextHrefIndex !== -1 ? nextHrefIndex : responseText.length);
-                
+
                 // Also check for calendar-data tags that might contain the event
                 const calendarDataMatch = eventDataSection.match(/<[cd]:calendar-data[^>]*>(.*?)<\/[cd]:calendar-data>/gis);
                 let eventContainsTitle = false;
-                
+
                 if (calendarDataMatch) {
                   // Check inside the calendar data for our event title
                   for (const calendarData of calendarDataMatch) {
-                    if (calendarData.toLowerCase().includes(expectedEventTitle.toLowerCase()) || 
-                        calendarData.toLowerCase().includes(`summary:${expectedEventTitle.toLowerCase()}`) ||
-                        calendarData.toLowerCase().includes(customerName.toLowerCase())) {
+                    if (calendarData.toLowerCase().includes(expectedEventTitle.toLowerCase()) ||
+                      calendarData.toLowerCase().includes(`summary:${expectedEventTitle.toLowerCase()}`) ||
+                      calendarData.toLowerCase().includes(customerName.toLowerCase())) {
                       eventContainsTitle = true;
                       console.log('🎯 Found matching event content in calendar data');
                       break;
@@ -1655,14 +1662,14 @@ export class UserBookingsService {
                 } else {
                   // Fallback: check the entire event section
                   eventContainsTitle = eventDataSection.toLowerCase().includes(expectedEventTitle.toLowerCase()) ||
-                                      eventDataSection.toLowerCase().includes(customerName.toLowerCase());
+                    eventDataSection.toLowerCase().includes(customerName.toLowerCase());
                 }
-                
+
                 console.log('🔍 Event match check:', { url, eventContainsTitle, hasCalendarData: !!calendarDataMatch });
-                
+
                 if (eventContainsTitle) {
                   console.log('🎯 Found matching event in:', url);
-                  
+
                   // Get the full event URL
                   let eventUrl = url;
                   if (url.startsWith('/')) {
@@ -1671,9 +1678,9 @@ export class UserBookingsService {
                   } else if (!url.startsWith('http')) {
                     eventUrl = calendar.url.replace(/\/$/, '') + '/' + url.split('/').pop();
                   }
-                  
+
                   console.log('🗑️ Deleting event at:', eventUrl);
-                  
+
                   // Try to delete the event
                   const deleteResponse = await fetch(eventUrl, {
                     method: 'DELETE',
@@ -1683,7 +1690,7 @@ export class UserBookingsService {
                   });
 
                   console.log('🗑️ Delete response status:', deleteResponse.status);
-                  
+
                   if (deleteResponse.ok || deleteResponse.status === 404) {
                     console.log('✅ Successfully deleted event from Orange calendar');
                     eventDeleted = true;
@@ -1697,7 +1704,7 @@ export class UserBookingsService {
                 }
               }
             }
-            
+
             if (!eventDeleted) {
               console.log('❌ Could not delete any matching events from calendar');
             }
@@ -1709,7 +1716,7 @@ export class UserBookingsService {
           const errorText = await propfindResponse.text();
           console.log('❌ PROPFIND error response:', errorText.substring(0, 500));
         }
-        
+
       } catch (searchError) {
         console.log('ℹ️ Calendar event search failed, event may remain in calendar:', searchError.message);
       }
@@ -1735,7 +1742,7 @@ export class UserBookingsService {
 
       // Get a valid access token
       const accessToken = await this.connectorService.getMicrosoftAccessToken(booking.userId.toString());
-      
+
       if (!accessToken) {
         throw new Error('Failed to get valid Microsoft access token');
       }
