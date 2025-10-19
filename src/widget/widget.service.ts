@@ -6,6 +6,7 @@ import { DomainProfile } from '../schemas/domain-profile.schema';
 import { Availability } from '../schemas/availability.schema';
 import { PaymentMethods } from '../schemas/payment-methods.schema';
 import { WidgetDataQueryDto } from '../validators/widget.validators';
+import { NotificationPreferences } from 'src/schemas/notification-preferences.schema';
 
 @Injectable()
 export class WidgetService {
@@ -14,7 +15,8 @@ export class WidgetService {
     @InjectModel(DomainProfile.name) private domainProfileModel: Model<DomainProfile>,
     @InjectModel(Availability.name) private availabilityModel: Model<Availability>,
     @InjectModel(PaymentMethods.name) private paymentMethodsModel: Model<PaymentMethods>,
-  ) {}
+    @InjectModel(NotificationPreferences.name) private notificationPreferencesModel: Model<NotificationPreferences>,
+  ) { }
 
   async getWidgetData(query: WidgetDataQueryDto) {
     const { userId, serviceId } = query;
@@ -25,8 +27,8 @@ export class WidgetService {
 
     // 1. Check if user subscription is active
     const subscription = await this.subscriptionModel
-      .findOne({ 
-        userId: userObjectId, 
+      .findOne({
+        userId: userObjectId,
         isActive: true,
         startDate: { $lte: new Date() },
         endDate: { $gte: new Date() }
@@ -39,9 +41,9 @@ export class WidgetService {
 
     // 2. Get domain profile with the specific service
     const domainProfile = await this.domainProfileModel
-      .findOne({ 
+      .findOne({
         userId: userObjectId,
-        'services._id': serviceObjectId 
+        'services._id': serviceObjectId
       })
       .exec();
 
@@ -65,6 +67,11 @@ export class WidgetService {
 
     // 4. Get payment methods (optional)
     const paymentMethods = await this.paymentMethodsModel
+      .findOne({ userId: userId })
+      .exec();
+
+    // 5. Get notification preferences (optional)
+    const notificationPreferences = await this.notificationPreferencesModel
       .findOne({ userId: userId })
       .exec();
 
@@ -114,6 +121,11 @@ export class WidgetService {
       paymentMethods: {
         methods: paymentMethods ? paymentMethods.methods : [],
       },
+      notificationPreferences: notificationPreferences ? {
+        bookingAdvanceLimit: notificationPreferences.bookingAdvanceLimit,
+      } : {
+        bookingAdvanceLimit: '1_hour',
+      }
     };
   }
 }
