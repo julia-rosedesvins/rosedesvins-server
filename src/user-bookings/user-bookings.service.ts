@@ -91,7 +91,7 @@ export class UserBookingsService {
    */
   private constructImageUrls(domainProfile: any, service: any) {
     const backendUrl = this.configService.get('BACKEND_URL') || 'http://localhost:3000';
-
+    
     return {
       domainLogoUrl: this.joinUrl(backendUrl, domainProfile?.domainLogoUrl || '/assets/logo.png'),
       serviceBannerUrl: this.joinUrl(backendUrl, service?.serviceBannerUrl || '/uploads/default-service-banner.jpg'),
