@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Event } from '../schemas/events.schema';
 import { Connector } from '../schemas/connector.schema';
+import { DomainProfile } from '../schemas/domain-profile.schema';
 import { EncryptionService } from '../common/encryption.service';
 import { Buffer } from 'buffer';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -17,6 +18,7 @@ export class EventsService {
   constructor(
     @InjectModel(Event.name) private eventModel: Model<Event>,
     @InjectModel(Connector.name) private connectorModel: Model<Connector>,
+    @InjectModel(DomainProfile.name) private domainProfileModel: Model<DomainProfile>,
   ) { }
 
   /**
@@ -28,14 +30,42 @@ export class EventsService {
     try {
       const userObjectId = new Types.ObjectId(userId);
 
+      // Get events with populated booking details
       const events = await this.eventModel
         .find({ userId: userObjectId })
-        .populate('bookingId') // Populate booking details if linked
-        .sort({ eventDate: 1, eventTime: 1 }) // Sort by date and time ascending
+        .populate('bookingId')
+        .sort({ eventDate: 1, eventTime: 1 })
         .lean()
         .exec();
 
-      return events;
+      // Get domain profile to access services information
+      const domainProfile = await this.domainProfileModel
+        .findOne({ userId: userObjectId })
+        .lean()
+        .exec();
+
+      // Enhance events with service information
+      const eventsWithServices = events.map(event => {
+        if (event.bookingId && (event.bookingId as any).serviceId && domainProfile) {
+          const serviceId = (event.bookingId as any).serviceId.toString();
+          const service = domainProfile.services.find(s => (s as any)._id?.toString() === serviceId);
+          
+          if (service) {
+            return {
+              ...event,
+              serviceInfo: {
+                name: service.name,
+                description: service.description,
+                pricePerPerson: service.pricePerPerson,
+                timeOfServiceInMinutes: service.timeOfServiceInMinutes
+              }
+            };
+          }
+        }
+        return event;
+      });
+
+      return eventsWithServices;
     } catch (error) {
       throw error;
     }
