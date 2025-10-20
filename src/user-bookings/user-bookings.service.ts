@@ -91,32 +91,6 @@ export class UserBookingsService {
    */
   private constructImageUrls(domainProfile: any, service: any) {
     const backendUrl = this.configService.get('BACKEND_URL') || 'http://localhost:3000';
-
-    return {
-      domainLogoUrl: this.joinUrl(backendUrl, domainProfile?.domainLogoUrl || '/assets/logo.png'),
-      serviceBannerUrl: this.joinUrl(backendUrl, service?.serviceBannerUrl || '/uploads/default-service-banner.jpg'),
-      appLogoUrl: this.joinUrl(backendUrl, this.configService.get('APP_LOGO') || '/assets/logo.png'),
-    };
-  }
-
-  /**
-   * Helper method to safely join URL parts without double slashes
-   */
-  private joinUrl(baseUrl: string, path: string): string {
-    if (!baseUrl || !path) return baseUrl || path || '';
-    
-    // Remove trailing slash from base URL and leading slash from path
-    const cleanBase = baseUrl.replace(/\/+$/, '');
-    const cleanPath = path.replace(/^\/+/, '');
-    
-    return `${cleanBase}/${cleanPath}`;
-  }
-
-  /**
-   * Helper method to construct full image URLs for email templates
-   */
-  private constructImageUrls(domainProfile: any, service: any) {
-    const backendUrl = this.configService.get('BACKEND_URL') || 'http://localhost:3000';
     
     return {
       domainLogoUrl: this.joinUrl(backendUrl, domainProfile?.domainLogoUrl || '/assets/logo.png'),
