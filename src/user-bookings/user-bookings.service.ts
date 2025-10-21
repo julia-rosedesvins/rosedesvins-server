@@ -1819,4 +1819,91 @@ export class UserBookingsService {
       throw error;
     }
   }
+
+  /**
+   * Get basic booking details with service name (public endpoint)
+   * @param bookingId - Booking ID to retrieve details for
+   * @returns Basic booking information with service details
+   */
+  async getBookingDetails(bookingId: string) {
+    try {
+      // Validate booking ID format
+      if (!Types.ObjectId.isValid(bookingId)) {
+        throw new BadRequestException('ID de réservation invalide');
+      }
+
+      const bookingObjectId = new Types.ObjectId(bookingId);
+
+      // Find the booking
+      const booking = await this.userBookingModel.findById(bookingObjectId).lean();
+      
+      if (!booking) {
+        throw new NotFoundException('Réservation introuvable');
+      }
+
+      // Find the user to get domain profile
+      const user = await this.userModel.findById(booking.userId).lean();
+      if (!user) {
+        throw new NotFoundException('Utilisateur introuvable');
+      }
+
+      // Find domain profile to get service details
+      const domainProfile = await this.domainProfileModel.findOne({ userId: booking.userId }).lean();
+      if (!domainProfile) {
+        throw new NotFoundException('Profil de domaine introuvable');
+      }
+
+      // Find the specific service
+      const service = domainProfile.services.find(s => 
+        (s as any)._id && (s as any)._id.toString() === booking.serviceId.toString()
+      );
+
+      if (!service) {
+        throw new NotFoundException('Service introuvable');
+      }
+
+      // Return basic booking details with service information
+      return {
+        success: true,
+        message: 'Détails de la réservation récupérés avec succès',
+        data: {
+          bookingId: booking._id,
+          bookingDate: booking.bookingDate,
+          bookingTime: booking.bookingTime,
+          participantsAdults: booking.participantsAdults,
+          participantsEnfants: booking.participantsEnfants,
+          selectedLanguage: booking.selectedLanguage,
+          customerName: `${booking.userContactFirstname} ${booking.userContactLastname}`,
+          customerEmail: booking.customerEmail,
+          phoneNo: booking.phoneNo,
+          additionalNotes: booking.additionalNotes,
+          bookingStatus: booking.bookingStatus,
+          service: {
+            name: service.name,
+            description: service.description,
+            pricePerPerson: service.pricePerPerson,
+            timeOfServiceInMinutes: service.timeOfServiceInMinutes,
+            numberOfWinesTasted: service.numberOfWinesTasted,
+            languagesOffered: service.languagesOffered
+          },
+          domainInfo: {
+            domainName: user.domainName,
+            domainAddress: user.address && user.codePostal && user.city
+              ? `${user.address} - ${user.codePostal} - ${user.city}`
+              : 'Adresse non renseignée',
+            logoUrl: domainProfile.domainLogoUrl || null
+          },
+          createdAt: booking.createdAt
+        }
+      };
+
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+
+      console.error('❌ Error getting booking details:', error);
+      throw new InternalServerErrorException('Erreur lors de la récupération des détails de la réservation');
+    }
+  }
 }
