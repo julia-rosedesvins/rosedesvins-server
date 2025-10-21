@@ -494,8 +494,8 @@ export class UserBookingsService {
         ? new Date(`${bookingDto.bookingDate.toISOString().split('T')[0]}T${bookingDto.bookingTime}:00`)
         : new Date(`${bookingDto.bookingDate}T${bookingDto.bookingTime}:00`);
 
-      // ✅ QUICK FIX: Subtract 2 hours to compensate for Orange calendar timezone issue
-      const startDate = new Date(originalStartDate.getTime() - (2 * 60 * 60 * 1000)); // Subtract 2 hours
+      // ✅ QUICK FIX: Subtract 1 hour to compensate for Orange calendar timezone issue
+      const startDate = new Date(originalStartDate.getTime() - (1 * 60 * 60 * 1000)); // Subtract 1 hour
 
       if (isNaN(startDate.getTime())) {
         throw new Error(`Invalid date constructed from booking data`);
