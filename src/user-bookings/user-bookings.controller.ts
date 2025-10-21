@@ -213,4 +213,17 @@ export class UserBookingsController {
   async deleteBooking(@Param('id') bookingId: string) {
     return this.userBookingsService.deleteBooking(bookingId);
   }
+
+  @Post(':id/cancel-guest')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cancel a booking as guest (public endpoint)' })
+  @ApiParam({
+    name: 'id',
+    description: 'Booking ID to cancel',
+    type: 'string',
+    example: '60d0fe4f5311236168a109ca'
+  })
+  async cancelBookingAsGuest(@Param('id') bookingId: string) {
+    return this.userBookingsService.cancelBookingAsGuest(bookingId);
+  }
 }

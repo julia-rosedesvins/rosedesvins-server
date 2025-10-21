@@ -74,6 +74,53 @@ export class UserBookingsService {
   ) { }
 
   /**
+   * Cancel a booking as guest (public endpoint)
+   */
+  async cancelBookingAsGuest(bookingId: string): Promise<{ success: boolean; message: string }> {
+    try {
+      console.log(`🚫 Guest cancelling booking: ${bookingId}`);
+
+      // Find the booking
+      const booking = await this.userBookingModel.findById(bookingId).exec();
+      
+      if (!booking) {
+        throw new NotFoundException('Réservation non trouvée');
+      }
+
+      // Check if booking is already cancelled
+      if (booking.bookingStatus === 'cancelled_by_guest' || booking.bookingStatus === 'cancelled') {
+        throw new BadRequestException('Cette réservation est déjà annulée');
+      }
+
+      // Update booking status to cancelled_by_guest
+      await this.userBookingModel.findByIdAndUpdate(
+        bookingId,
+        { 
+          bookingStatus: 'cancelled_by_guest',
+          updatedAt: new Date()
+        },
+        { new: true }
+      ).exec();
+
+      console.log(`✅ Booking ${bookingId} cancelled by guest successfully`);
+
+      return {
+        success: true,
+        message: 'Réservation annulée avec succès'
+      };
+
+    } catch (error) {
+      console.error(`❌ Error cancelling booking ${bookingId}:`, error);
+      
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      
+      throw new InternalServerErrorException('Erreur lors de l\'annulation de la réservation');
+    }
+  }
+
+  /**
    * Helper method to safely join URL parts without double slashes
    */
   private joinUrl(baseUrl: string, path: string): string {
