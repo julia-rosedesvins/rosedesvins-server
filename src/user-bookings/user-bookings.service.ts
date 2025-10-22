@@ -37,6 +37,7 @@ export interface BookingEmailData {
   participantsChildren: number;
   selectedLanguage: string;
   additionalNotes?: string;
+  numberOfWinesTasted: number;
   // Enhanced template fields
   domainName: string;
   domainAddress: string;
@@ -218,6 +219,7 @@ export class UserBookingsService {
           participantsChildren: bookingData.participantsChildren,
           selectedLanguage: bookingData.selectedLanguage,
           additionalNotes: bookingData.additionalNotes,
+          numberOfWinesTasted: bookingData.numberOfWinesTasted,
           domainName: bookingData.domainName,
           domainAddress: bookingData.domainAddress,
           domainLogoUrl: bookingData.domainLogoUrl,
@@ -460,6 +462,7 @@ export class UserBookingsService {
             participantsChildren: createBookingDto.participantsEnfants || 0,
             selectedLanguage: this.getLanguageInFrench(createBookingDto.selectedLanguage),
             additionalNotes: createBookingDto.additionalNotes,
+            numberOfWinesTasted: service?.numberOfWinesTasted || 0,
             // Enhanced template data
             domainName: user?.domainName || 'Domaine La Bastide Blanche',
             domainAddress: user?.address && user?.codePostal && user?.city
@@ -1165,6 +1168,7 @@ export class UserBookingsService {
             participantsChildren: updatedBooking.participantsEnfants || 0,
             selectedLanguage: this.getLanguageInFrench(updatedBooking.selectedLanguage),
             additionalNotes: updatedBooking.additionalNotes,
+            numberOfWinesTasted: service?.numberOfWinesTasted || 0,
             // Enhanced template data
             domainName: user?.domainName || 'Domaine La Bastide Blanche',
             domainAddress: user?.address && user?.codePostal && user?.city
@@ -1534,6 +1538,7 @@ export class UserBookingsService {
             participantsChildren: booking.participantsEnfants || 0,
             selectedLanguage: this.getLanguageInFrench(booking.selectedLanguage),
             additionalNotes: booking.additionalNotes,
+            numberOfWinesTasted: service?.numberOfWinesTasted || 0,
             // Enhanced template data
             domainName: user?.domainName || 'Domaine La Bastide Blanche',
             domainAddress: user?.address && user?.codePostal && user?.city
