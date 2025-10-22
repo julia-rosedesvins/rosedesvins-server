@@ -231,6 +231,7 @@ export class UserBookingsService {
           backendUrl: bookingData.backendUrl,
           appLogoUrl: bookingData.appLogoUrl,
           serviceBannerUrl: bookingData.serviceBannerUrl,
+          cancelBookingUrl: bookingData.cancelBookingUrl,
         };
 
         let emailHtml: string;
