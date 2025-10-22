@@ -7,6 +7,8 @@ import { NotificationPreferences, NotificationPreferencesSchema } from '../schem
 import { User, UserSchema } from '../schemas/user.schema';
 import { UserBooking, UserBookingSchema } from '../schemas/user-bookings.schema';
 import { EmailModule } from 'src/email/email.module';
+import { DomainProfile, DomainProfileSchema } from 'src/schemas/domain-profile.schema';
+import { PaymentMethods, PaymentMethodsSchema } from 'src/schemas/payment-methods.schema';
 
 @Module({
   imports: [
@@ -15,6 +17,8 @@ import { EmailModule } from 'src/email/email.module';
       { name: NotificationPreferences.name, schema: NotificationPreferencesSchema },
       { name: User.name, schema: UserSchema },
       { name: UserBooking.name, schema: UserBookingSchema },
+      { name: DomainProfile.name, schema: DomainProfileSchema },
+      { name: PaymentMethods.name, schema: PaymentMethodsSchema },  
     ]),
     EmailModule
   ],

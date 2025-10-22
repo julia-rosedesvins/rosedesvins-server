@@ -1,77 +1,630 @@
-<div style="color: #4a4a4a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
-  <h2 style="color: #8B4513; font-weight: 600; margin-bottom: 24px;">
-    Upcoming Guest Experience Alert 📅
-  </h2>
-  
-  <p style="margin-bottom: 16px; line-height: 1.6;">
-    Hello {{providerName}}, this is a reminder about an upcoming wine experience with one of your guests.
-  </p>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notification Prestataire - {{domainName}}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-  <div style="background-color: #f8f4f0; border-left: 4px solid #8B4513; padding: 20px; margin: 24px 0; border-radius: 4px;">
-    <h3 style="color: #8B4513; margin: 0 0 16px 0; font-size: 18px;">Experience Details</h3>
-    
-    <p style="margin: 8px 0; color: #4a4a4a;">
-      <strong>Guest:</strong> {{customerName}}
-    </p>
-    
-    <p style="margin: 8px 0; color: #4a4a4a;">
-      <strong>Experience:</strong> {{eventTitle}}
-    </p>
-    
-    <p style="margin: 8px 0; color: #4a4a4a;">
-      <strong>Date:</strong> {{eventDate}}
-    </p>
-    
-    <p style="margin: 8px 0; color: #4a4a4a;">
-      <strong>Time:</strong> {{eventTime}} ({{eventTimezone}})
-    </p>
-    
-    {{#if eventDuration}}
-    <p style="margin: 8px 0; color: #4a4a4a;">
-      <strong>Duration:</strong> {{eventDuration}}
-    </p>
-    {{/if}}
-    
-    {{#if eventLocation}}
-    <p style="margin: 8px 0; color: #4a4a4a;">
-      <strong>Location:</strong> {{eventLocation}}
-    </p>
-    {{/if}}
-    
-    {{#if eventDescription}}
-    <p style="margin: 16px 0 0 0; color: #4a4a4a;">
-      <strong>Description:</strong><br>
-      {{eventDescription}}
-    </p>
-    {{/if}}
-  </div>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+            line-height: 1.6;
+        }
 
-  <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 16px; margin: 24px 0; border-radius: 4px;">
-    <p style="margin: 0; color: #856404; font-weight: 500;">
-      ⏰ <strong>Reminder:</strong> This experience is scheduled to begin in {{hoursBeforeEvent}} hours.
-    </p>
-  </div>
+        .email-container {
+            max-width: 650px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+        }
 
-  <p style="margin: 24px 0 16px 0; line-height: 1.6;">
-    Please ensure everything is prepared for {{customerName}}'s visit. This includes:
-  </p>
+        .header {
+            background: linear-gradient(135deg, #3A7B59 0%, #4a9968 100%);
+            padding: 30px 30px;
+            text-align: center;
+            color: white;
+            position: relative;
+        }
 
-  <ul style="margin: 16px 0; padding-left: 24px; color: #4a4a4a;">
-    <li style="margin-bottom: 8px;">Wine selection and tasting setup</li>
-    <li style="margin-bottom: 8px;">Venue preparation and ambiance</li>
-    <li style="margin-bottom: 8px;">Any special requests or dietary considerations</li>
-    <li style="margin-bottom: 8px;">Welcome materials and information</li>
-  </ul>
+        .logo-container {
+            border-radius: 16px;
+            padding: 20px 25px;
+            display: inline-block;
+            margin-bottom: 15px;
+        }
 
-  {{!-- <div style="text-align: center; margin: 32px 0;">
-    <a href="{{adminPanelUrl}}" 
-       style="background-color: #8B4513; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500; display: inline-block;">
-      View All Reservations
-    </a>
-  </div> --}}
+        .logo-image {
+            max-width: 120px;
+            height: auto;
+        }
 
-  <p style="margin-top: 32px; color: #666; font-size: 14px; line-height: 1.6;">
-    Thank you for providing exceptional wine experiences at Rose des Vins!<br>
-    Have a wonderful session with your guest. 🍷
-  </p>
-</div>
+        .content {
+            padding: 45px 35px;
+            background: linear-gradient(to bottom, #fffef7 0%, #fefdf5 100%);
+        }
+
+        .greeting {
+            color: #333;
+            font-size: 18px;
+            margin-bottom: 20px;
+            text-align: center;
+            text-transform: capitalize;
+        }
+
+        .provider-title {
+            color: #3A7B59;
+            font-size: 32px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 25px;
+            letter-spacing: -0.5px;
+        }
+
+        .hours-notice {
+            background: linear-gradient(135deg, #FF6B35 0%, #FF8A50 100%);
+            color: white;
+            padding: 15px 25px;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: 600;
+            text-align: center;
+            margin-bottom: 35px;
+            box-shadow: 0 4px 15px rgba(255, 107, 53, 0.3);
+        }
+
+        .customer-info-card {
+            background: linear-gradient(135deg, #e8f5e8 0%, #f0f8f0 100%);
+            border: 1px solid #3A7B59;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+            text-align: center;
+        }
+
+        .customer-info-card h3 {
+            color: #3A7B59;
+            font-size: 20px;
+            margin-bottom: 10px;
+        }
+
+        .customer-info-card p {
+            color: #2d5f44;
+            font-size: 16px;
+            margin: 5px 0;
+        }
+
+        .reservation-card {
+            background-color: white;
+            border-radius: 12px;
+            padding: 35px;
+            margin-bottom: 35px;
+            box-shadow: 0 6px 30px rgba(0, 0, 0, 0.08);
+            border: 1px solid rgba(58, 123, 89, 0.1);
+        }
+
+        .domain-name {
+            color: #333 !important;
+            font-size: 22px;
+            font-weight: 600;
+            margin-bottom: 25px;
+            text-align: center;
+            text-decoration: none !important;
+        }
+
+        .wine-cellar-image {
+            width: 180px;
+            height: 180px;
+            border-radius: 50%;
+            object-fit: cover;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .reservation-details {
+            width: 100%;
+        }
+
+        .reservation-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .image-column {
+            width: 50%;
+            text-align: center;
+            vertical-align: top;
+            padding-right: 25px;
+        }
+
+        .details-column {
+            width: 50%;
+            vertical-align: top;
+        }
+
+        .details-grid {
+            width: 100%;
+        }
+
+        .grid-row {
+            width: 100%;
+            margin-bottom: 18px;
+        }
+
+        .grid-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .grid-cell {
+            width: 50%;
+            padding-right: 15px;
+            vertical-align: top;
+        }
+
+        .grid-cell:last-child {
+            padding-right: 0;
+        }
+
+        .detail-row {
+            display: flex;
+            align-items: center;
+            font-size: 12px;
+            min-height: 24px;
+        }
+
+        .detail-icon {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            margin-right: 8px;
+            font-size: 14px;
+            text-align: center;
+            flex-shrink: 0;
+            line-height: 1;
+        }
+
+        .detail-icon img {
+            width: 16px;
+            height: 16px;
+            object-fit: contain;
+            vertical-align: middle;
+        }
+
+        .detail-text {
+            color: #444;
+            font-weight: 500;
+            line-height: 1.3;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .detail-text.long-text {
+            white-space: normal;
+            font-size: 11px;
+        }
+
+        .price-row {
+            border-top: 1px solid #e0e0e0;
+            padding-top: 15px;
+            margin-top: 20px;
+        }
+
+        .price-text {
+            color: #3A7B59;
+            font-weight: 700;
+            font-size: 16px;
+        }
+
+        .description {
+            clear: both;
+            color: #666;
+            font-size: 15px;
+            line-height: 1.7;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .preparation-checklist {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 10px;
+            padding: 25px;
+            margin-top: 25px;
+        }
+
+        .preparation-checklist h3 {
+            color: #856404;
+            font-size: 18px;
+            margin-bottom: 15px;
+        }
+
+        .checklist {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .checklist li {
+            display: flex;
+            align-items: center;
+            padding: 8px 0;
+            color: #856404;
+            border-bottom: 1px solid #f5e79e;
+        }
+
+        .checklist li:last-child {
+            border-bottom: none;
+        }
+
+        .checklist li::before {
+            content: "✓";
+            background-color: #28a745;
+            color: white;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 15px;
+            font-size: 12px;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        .footer {
+            background-color: #3A7B59;
+            padding: 30px 20px;
+            text-align: center;
+            color: white;
+            clear: both;
+            overflow: hidden;
+        }
+
+        .footer-table {
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto;
+            border-collapse: collapse;
+        }
+
+        .footer-left-cell {
+            width: 70%;
+            text-align: left;
+            vertical-align: middle;
+        }
+
+        .footer-right-cell {
+            width: 30%;
+            text-align: right;
+            vertical-align: middle;
+        }
+
+        .footer-logo-container {
+            width: 100%;
+        }
+
+        .footer-logo-table {
+            border-collapse: collapse;
+        }
+
+        .footer-logo-icon-cell {
+            width: 50px;
+            vertical-align: middle;
+            padding-right: 15px;
+        }
+
+        .footer-logo-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 5px;
+            box-sizing: border-box;
+        }
+
+        .footer-logo-icon img {
+            max-width: 30px;
+            max-height: 30px;
+            width: auto;
+            height: auto;
+            display: block;
+        }
+
+        .footer-logo-text-cell {
+            vertical-align: middle;
+        }
+
+        .footer-logo-text {
+            font-size: 18px;
+            font-weight: 500;
+            color: white;
+            margin: 0;
+        }
+
+        .footer-contact {
+            font-size: 16px;
+            font-weight: 500;
+            color: white;
+        }
+
+        .domain-address {
+            color: #999;
+            font-size: 14px;
+            text-align: center;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        @media (max-width: 600px) {
+            .email-container {
+                margin: 10px;
+                max-width: none;
+            }
+            
+            .content {
+                padding: 30px 25px;
+            }
+            
+            .reservation-card {
+                padding: 25px 20px;
+            }
+            
+            .reservation-table {
+                display: block;
+            }
+            
+            .image-column,
+            .details-column {
+                display: block;
+                width: 100% !important;
+                padding: 0 !important;
+            }
+            
+            .image-column {
+                margin-bottom: 25px;
+            }
+            
+            .wine-cellar-image {
+                width: 140px;
+                height: 140px;
+                margin: 0 auto;
+            }
+            
+            .grid-table {
+                display: block;
+            }
+            
+            .grid-cell {
+                display: block;
+                width: 100% !important;
+                padding: 0 !important;
+                margin-bottom: 10px;
+            }
+            
+            .detail-row {
+                font-size: 13px;
+            }
+            
+            .detail-text {
+                white-space: normal;
+            }
+            
+            .provider-title {
+                font-size: 26px;
+            }
+            
+            .footer-table {
+                display: block;
+            }
+            
+            .footer-left-cell,
+            .footer-right-cell {
+                display: block;
+                width: 100% !important;
+                text-align: center !important;
+                padding: 10px 0;
+            }
+            
+            .footer-logo-table {
+                margin: 0 auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <!-- Header with Logo -->
+        <div class="header">
+            <div class="logo-container">
+                <img src="{{domainLogoUrl}}" alt="{{domainName}} Logo" class="logo-image">
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="content">
+            <div class="greeting">Bonjour {{providerName}}</div>
+            
+            <h1 class="provider-title">Invité attendu prochainement</h1>
+            
+            <div class="hours-notice">
+                L'expérience commence dans {{hoursBeforeEvent}} heure{{#if (gt hoursBeforeEvent 1)}}s{{/if}} !
+            </div>
+            
+            <div class="customer-info-card">
+                <h3>👤 Invité</h3>
+                <p><strong>{{customerName}}</strong></p>
+                {{#if customerEmail}}
+                <p style="font-size: 14px; color: #666;">{{customerEmail}}</p>
+                {{/if}}
+            </div>
+            
+            <div class="reservation-card">
+                <h2 class="domain-name">{{domainName}}</h2>
+                
+                <div class="reservation-details">
+                    <table class="reservation-table">
+                        <tr>
+                            <td class="image-column">
+                                <img src="{{serviceBannerUrl}}" alt="{{serviceName}}" class="wine-cellar-image">
+                            </td>
+                            
+                            <td class="details-column">
+                                <div class="details-grid">
+                                    <!-- Row 1: Date/Time and Language -->
+                                    <div class="grid-row">
+                                        <table class="grid-table">
+                                            <tr>
+                                                <td class="grid-cell">
+                                                    <div class="detail-row">
+                                                        <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/clock" alt="Clock"></span>
+                                                        <span class="detail-text">{{eventDate}} - {{eventTime}}</span>
+                                                    </div>
+                                                </td>
+                                                <td class="grid-cell">
+                                                    <div class="detail-row">
+                                                        <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/language" alt="language"></span>
+                                                        <span class="detail-text">{{selectedLanguage}}</span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </div>
+                                    
+                                    <!-- Row 2: Service and Duration -->
+                                    <div class="grid-row">
+                                        <table class="grid-table">
+                                            <tr>
+                                                <td class="grid-cell">
+                                                    <div class="detail-row">
+                                                        <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/type-of-experience" alt="Experience"></span>
+                                                        <span class="detail-text long-text">{{serviceName}}</span>
+                                                    </div>
+                                                </td>
+                                                <td class="grid-cell">
+                                                    <div class="detail-row">
+                                                        <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/clock" alt="Duration"></span>
+                                                        <span class="detail-text">{{eventDuration}}</span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </div>
+                                    
+                                    <!-- Row 3: Participants and Wine Count -->
+                                    <div class="grid-row">
+                                        <table class="grid-table">
+                                            <tr>
+                                                <td class="grid-cell">
+                                                    <div class="detail-row">
+                                                        <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/user" alt="Participants"></span>
+                                                        <span class="detail-text">{{participantsAdults}} personne{{#if (gt participantsAdults 1)}}s{{/if}} (adultes)</span>
+                                                    </div>
+                                                </td>
+                                                <td class="grid-cell">
+                                                    <div class="detail-row">
+                                                        <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/wine-glass" alt="Wine"></span>
+                                                        <span class="detail-text">{{numberOfWinesTasted}} vins</span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </div>
+                                </div>
+                                
+                                <div class="detail-row" style="margin-top: 20px; font-size: 11px;">
+                                    <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/euro-currency-symbol" alt="Payment"></span>
+                                    <span class="detail-text" style="white-space: normal; color: #666;">{{paymentMethod}}</span>
+                                </div>
+                                
+                                <div class="detail-row price-row">
+                                    <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/total%20amount" alt="Price"></span>
+                                    <span class="detail-text price-text">{{totalPrice}}</span>
+                                </div>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                
+                <p class="description">
+                    {{serviceDescription}}
+                </p>
+                
+                {{#if additionalNotes}}
+                <div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; margin-top: 20px;">
+                    <strong style="color: #3A7B59;">Notes particulières de l'invité:</strong><br>
+                    <span style="color: #666;">{{additionalNotes}}</span>
+                </div>
+                {{/if}}
+                
+                {{#if eventLocation}}
+                <div style="background-color: #f0f8f5; border-radius: 8px; padding: 15px; margin-top: 20px;">
+                    <div style="display: flex; align-items: center;">
+                        <span style="margin-right: 10px;"><img src="https://api.rosedesvins.co/v1/web/image/location" alt="Location" width="16" height="16"></span>
+                        <span style="color: #3A7B59; font-weight: 600;">Lieu: {{eventLocation}}</span>
+                    </div>
+                </div>
+                {{/if}}
+                
+                <div class="preparation-checklist">
+                    <h3>📋 Préparation de l'accueil</h3>
+                    <ul class="checklist">
+                        <li>Sélection et préparation des vins pour la dégustation</li>
+                        <li>Aménagement et ambiance du lieu d'accueil</li>
+                        <li>Vérification des demandes spéciales ou restrictions alimentaires</li>
+                        <li>Préparation des supports d'information et de dégustation</li>
+                        <li>Accueil chaleureux et présentation du domaine</li>
+                    </ul>
+                </div>
+            </div>
+            
+            {{#if domainAddress}}
+            <div class="domain-address">
+                <strong>{{domainName}}</strong><br>
+                {{domainAddress}}
+            </div>
+            {{/if}}
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <table class="footer-table">
+                <tr>
+                    <td class="footer-left-cell">
+                        <div class="footer-logo-container">
+                            <table class="footer-logo-table">
+                                <tr>
+                                    <td class="footer-logo-icon-cell">
+                                        <div class="footer-logo-icon">
+                                            <img src="{{appLogoUrl}}" alt="Rose des Vins Logo" width="30" height="30">
+                                        </div>
+                                    </td>
+                                    <td class="footer-logo-text-cell">
+                                        <div class="footer-logo-text">Rose des Vins</div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </td>
+                    <td class="footer-right-cell">
+                        <a href="https://rosedesvins.co/#contact" class="footer-contact" style="color: white; text-decoration: none;">Contact</a>
+                    </td>
+                </tr>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

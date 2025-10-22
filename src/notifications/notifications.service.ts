@@ -1,11 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Event } from '../schemas/events.schema';
 import { NotificationPreferences } from '../schemas/notification-preferences.schema';
 import { User } from '../schemas/user.schema';
 import { UserBooking } from '../schemas/user-bookings.schema';
+import { DomainProfile } from '../schemas/domain-profile.schema';
+import { PaymentMethods } from '../schemas/payment-methods.schema';
 import { EmailService, EmailJob } from '../email/email.service';
 import { TemplateService } from '../email/template.service';
 
@@ -41,6 +43,8 @@ export class NotificationsService {
     @InjectModel(NotificationPreferences.name) private notificationPreferencesModel: Model<NotificationPreferences>,
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(UserBooking.name) private userBookingModel: Model<UserBooking>,
+    @InjectModel(DomainProfile.name) private domainProfileModel: Model<DomainProfile>,
+    @InjectModel(PaymentMethods.name) private paymentMethodsModel: Model<PaymentMethods>,
     private emailService: EmailService,
     private templateService: TemplateService,
   ) {}
@@ -308,6 +312,34 @@ export class NotificationsService {
             const customerName = `${booking.userContactFirstname} ${booking.userContactLastname}`;
             const customerEmail = booking.customerEmail;
 
+            // Get additional data for enhanced template (similar to booking confirmation)
+            const provider = event.userId;
+            const frontendUrl = 'https://rosedesvins.co';
+            const backendUrl = 'https://api.rosedesvins.co';
+            
+            // Get domain profile for additional details
+            const domain = await this.domainProfileModel.findOne({
+                userId: provider._id
+            }).exec();
+            
+            // Get service details from domain profile
+            const service = domain?.services?.find(s => 
+                s.name && (
+                    event.eventName.toLowerCase().includes(s.name.toLowerCase()) ||
+                    s.name.toLowerCase().includes(event.eventName.toLowerCase())
+                )
+            );
+
+            // Calculate cancel booking URL
+            const cancelBookingUrl = `${frontendUrl}/cancel-booking/${booking._id}`;
+            
+            // Get payment methods for the user
+            const paymentMethod = await this.getUserPaymentMethods(provider._id);
+
+            // Get user info for domain name (from User model)
+            const userInfo = await this.userModel.findById(provider._id).exec();
+            const domainName = userInfo ? `${userInfo.firstName} ${userInfo.lastName}` : 'Rose des Vins';
+
             // Prepare email data
             const emailData = {
                 customerName: customerName,
@@ -316,10 +348,29 @@ export class NotificationsService {
                 eventDate: eventDateFormatted,
                 eventTime: event.eventTime,
                 eventTimezone: DEFAULT_TIMEZONE,
+                eventDuration: service?.timeOfServiceInMinutes ? `${service.timeOfServiceInMinutes} minutes` : '60 minutes',
                 eventLocation: event.location || 'Rose des Vins',
-                eventDescription: event.eventDescription,
-                providerName: 'Rose des Vins Team',
+                eventDescription: event.eventDescription || service?.description,
+                providerName: domainName,
                 hoursBeforeEvent: hoursBeforeEvent,
+                // Enhanced fields for booking-style template
+                domainName: domainName,
+                domainAddress: '', // Domain profile doesn't have address field
+                domainLogoUrl: domain?.domainLogoUrl ? `${backendUrl}${domain.domainLogoUrl}` : `${backendUrl}/assets/logo.png`,
+                serviceName: service?.name || event.eventName,
+                serviceDescription: service?.description || event.eventDescription,
+                participantsAdults: booking.participantsAdults || 1,
+                participantsChildren: booking.participantsEnfants || 0,
+                selectedLanguage: booking.selectedLanguage || 'Français',
+                numberOfWinesTasted: service?.numberOfWinesTasted || 3,
+                totalPrice: service?.pricePerPerson ? `${service.pricePerPerson}€` : 'Prix sur demande',
+                paymentMethod: paymentMethod,
+                frontendUrl: frontendUrl,
+                appLogoUrl: `${backendUrl}/assets/logo.png`,
+                backendUrl: backendUrl,
+                serviceBannerUrl: service?.serviceBannerUrl ? `${backendUrl}${service.serviceBannerUrl}` : `${backendUrl}/uploads/default-service-banner.jpg`,
+                cancelBookingUrl: cancelBookingUrl,
+                additionalNotes: booking.additionalNotes || null,
             };
 
             // Generate email HTML
@@ -388,6 +439,30 @@ export class NotificationsService {
             // Customer info comes from booking data
             const customerName = `${booking.userContactFirstname} ${booking.userContactLastname}`;
 
+            // Get additional data for enhanced template (similar to booking confirmation)
+            const frontendUrl = 'https://rosedesvins.co';
+            const backendUrl = 'https://api.rosedesvins.co';
+            
+            // Get domain profile for additional details
+            const domain = await this.domainProfileModel.findOne({
+                userId: provider._id
+            }).exec();
+            
+            // Get service details from domain profile
+            const service = domain?.services?.find(s => 
+                s.name && (
+                    event.eventName.toLowerCase().includes(s.name.toLowerCase()) ||
+                    s.name.toLowerCase().includes(event.eventName.toLowerCase())
+                )
+            );
+
+            // Get payment methods for the user
+            const paymentMethod = await this.getUserPaymentMethods(provider._id);
+
+            // Get user info for domain name (from User model)
+            const userInfo = await this.userModel.findById(provider._id).exec();
+            const domainName = userInfo ? `${userInfo.firstName} ${userInfo.lastName}` : 'Rose des Vins';
+
             // Prepare email data
             const emailData = {
                 providerName: providerName,
@@ -397,9 +472,28 @@ export class NotificationsService {
                 eventDate: eventDateFormatted,
                 eventTime: event.eventTime,
                 eventTimezone: DEFAULT_TIMEZONE,
+                eventDuration: service?.timeOfServiceInMinutes ? `${service.timeOfServiceInMinutes} minutes` : '60 minutes',
                 eventLocation: event.location || 'Rose des Vins',
-                eventDescription: event.eventDescription,
+                eventDescription: event.eventDescription || service?.description,
                 hoursBeforeEvent: hoursBeforeEvent,
+                // Enhanced fields for booking-style template
+                domainName: domainName,
+                domainAddress: '', // Domain profile doesn't have address field
+                domainLogoUrl: domain?.domainLogoUrl ? `${backendUrl}${domain.domainLogoUrl}` : `${backendUrl}/assets/logo.png`,
+                serviceName: service?.name || event.eventName,
+                serviceDescription: service?.description || event.eventDescription,
+                participantsAdults: booking.participantsAdults || 1,
+                participantsChildren: booking.participantsEnfants || 0,
+                selectedLanguage: booking.selectedLanguage || 'Français',
+                numberOfWinesTasted: service?.numberOfWinesTasted || 3,
+                totalPrice: service?.pricePerPerson ? `${service.pricePerPerson}€` : 'Prix sur demande',
+                paymentMethod: paymentMethod,
+                frontendUrl: frontendUrl,
+                appLogoUrl: `${backendUrl}/assets/logo.png`,
+                backendUrl: backendUrl,
+                serviceBannerUrl: service?.serviceBannerUrl ? `${backendUrl}${service.serviceBannerUrl}` : `${backendUrl}/uploads/default-service-banner.jpg`,
+                customerEmail: booking.customerEmail,
+                additionalNotes: booking.additionalNotes || null,
             };
 
             // Generate email HTML
@@ -477,6 +571,53 @@ export class NotificationsService {
             second: '2-digit',
             hour12: false
         });
+    }
+
+    /**
+     * Get formatted payment methods for a user
+     * @param userId - User ID to fetch payment methods for
+     * @returns Formatted payment methods string
+     */
+    private async getUserPaymentMethods(userId: Types.ObjectId): Promise<string> {
+        try {
+            const paymentMethods = await this.paymentMethodsModel
+                .findOne({ userId })
+                .lean()
+                .exec();
+
+            if (paymentMethods && paymentMethods.methods.length > 0) {
+                return this.formatPaymentMethodsForEmail(paymentMethods.methods);
+            }
+
+            // Default fallback if no payment methods found
+            return 'Paiement sur place (Carte bancaire, Chèques, Espèces)';
+        } catch (error) {
+            console.warn('Could not fetch payment methods for user:', userId, error);
+            return 'Paiement sur place (Carte bancaire, Chèques, Espèces)';
+        }
+    }
+
+    /**
+     * Format payment methods for email display
+     * @param methods - Array of payment method strings from database
+     * @returns Formatted string for email display
+     */
+    private formatPaymentMethodsForEmail(methods: string[]): string {
+        if (!methods || methods.length === 0) {
+            return 'Paiement sur place (Carte bancaire, Chèques, Espèces)'; // Default fallback
+        }
+
+        const methodTranslations: { [key: string]: string } = {
+            'bank card': 'Carte bancaire',
+            'checks': 'Chèques', 
+            'cash': 'Espèces'
+        };
+
+        const translatedMethods = methods
+            .map(method => methodTranslations[method] || method)
+            .join(', ');
+
+        return `Paiement sur place (${translatedMethods})`;
     }
 
     /**
@@ -675,7 +816,10 @@ export class NotificationsService {
                     day: 'numeric' 
                 });
 
-                // Prepare customer email data
+                // Prepare customer email data with enhanced fields
+                const frontendUrl = 'https://rosedesvins.co';
+                const backendUrl = 'https://api.rosedesvins.co';
+                
                 const customerEmailData = {
                     customerName: `${mockEvent.userId.firstName} ${mockEvent.userId.lastName}`,
                     customerEmail: mockEvent.userId.email,
@@ -683,10 +827,29 @@ export class NotificationsService {
                     eventDate: eventDateFormatted,
                     eventTime: mockEvent.eventTime,
                     eventTimezone: DEFAULT_TIMEZONE,
+                    eventDuration: '60 minutes',
                     eventLocation: mockEvent.location,
                     eventDescription: mockEvent.eventDescription,
                     providerName: 'Rose des Vins Team',
                     hoursBeforeEvent: 24,
+                    // Enhanced fields for booking-style template
+                    domainName: 'Rose des Vins',
+                    domainAddress: '123 Rue des Vignobles, 33000 Bordeaux',
+                    domainLogoUrl: `${backendUrl}/assets/logo.png`,
+                    serviceName: 'Découverte des Vins de Bordeaux',
+                    serviceDescription: 'Une expérience unique de dégustation dans notre domaine historique. Découvrez nos meilleurs crus accompagnés d\'explications sur notre terroir.',
+                    participantsAdults: 2,
+                    participantsChildren: 0,
+                    selectedLanguage: 'Français',
+                    numberOfWinesTasted: 5,
+                    totalPrice: '45€ par personne',
+                    paymentMethod: 'Paiement sur place (Carte bancaire, Chèques, Espèces)',
+                    frontendUrl: frontendUrl,
+                    appLogoUrl: `${backendUrl}/assets/logo.png`,
+                    backendUrl: backendUrl,
+                    serviceBannerUrl: `${backendUrl}/uploads/default-service-banner.jpg`,
+                    cancelBookingUrl: `${frontendUrl}/cancel-booking/mock-booking-id`,
+                    additionalNotes: 'Merci de nous faire savoir si vous avez des allergies alimentaires.',
                 };
 
                 // Generate and send customer email
@@ -726,7 +889,10 @@ export class NotificationsService {
                     day: 'numeric' 
                 });
 
-                // Prepare provider email data
+                // Prepare provider email data with enhanced fields
+                const frontendUrl = 'https://rosedesvins.co';
+                const backendUrl = 'https://api.rosedesvins.co';
+                
                 const providerEmailData = {
                     providerName: 'Wine Experience Host',
                     providerEmail: email,
@@ -735,9 +901,28 @@ export class NotificationsService {
                     eventDate: eventDateFormatted,
                     eventTime: mockEvent.eventTime,
                     eventTimezone: DEFAULT_TIMEZONE,
+                    eventDuration: '60 minutes',
                     eventLocation: mockEvent.location,
                     eventDescription: mockEvent.eventDescription,
                     hoursBeforeEvent: 24,
+                    // Enhanced fields for booking-style template
+                    domainName: 'Rose des Vins',
+                    domainAddress: '123 Rue des Vignobles, 33000 Bordeaux',
+                    domainLogoUrl: `${backendUrl}/assets/logo.png`,
+                    serviceName: 'Découverte des Vins de Bordeaux',
+                    serviceDescription: 'Une expérience unique de dégustation dans notre domaine historique. Découvrez nos meilleurs crus accompagnés d\'explications sur notre terroir.',
+                    participantsAdults: 2,
+                    participantsChildren: 0,
+                    selectedLanguage: 'Français',
+                    numberOfWinesTasted: 5,
+                    totalPrice: '45€ par personne',
+                    paymentMethod: 'Paiement sur place (Carte bancaire, Chèques, Espèces)',
+                    frontendUrl: frontendUrl,
+                    appLogoUrl: `${backendUrl}/assets/logo.png`,
+                    backendUrl: backendUrl,
+                    serviceBannerUrl: `${backendUrl}/uploads/default-service-banner.jpg`,
+                    customerEmail: email,
+                    additionalNotes: 'L\'invité a mentionné être amateur de vins rouges corsés.',
                 };
 
                 // Generate and send provider email

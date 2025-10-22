@@ -40,6 +40,24 @@ export interface CustomerNotificationEmailData {
   eventDescription?: string;
   providerName?: string;
   hoursBeforeEvent: number;
+  // Enhanced fields for booking-style template
+  domainName?: string;
+  domainAddress?: string;
+  domainLogoUrl?: string;
+  serviceName?: string;
+  serviceDescription?: string;
+  participantsAdults?: number;
+  participantsChildren?: number;
+  selectedLanguage?: string;
+  numberOfWinesTasted?: number;
+  totalPrice?: string;
+  paymentMethod?: string;
+  frontendUrl?: string;
+  appLogoUrl?: string;
+  backendUrl?: string;
+  serviceBannerUrl?: string;
+  cancelBookingUrl?: string;
+  additionalNotes?: string;
 }
 
 export interface ProviderNotificationEmailData {
@@ -54,6 +72,24 @@ export interface ProviderNotificationEmailData {
   eventLocation?: string;
   eventDescription?: string;
   hoursBeforeEvent: number;
+  // Enhanced fields for booking-style template
+  domainName?: string;
+  domainAddress?: string;
+  domainLogoUrl?: string;
+  serviceName?: string;
+  serviceDescription?: string;
+  participantsAdults?: number;
+  participantsChildren?: number;
+  selectedLanguage?: string;
+  numberOfWinesTasted?: number;
+  totalPrice?: string;
+  paymentMethod?: string;
+  frontendUrl?: string;
+  appLogoUrl?: string;
+  backendUrl?: string;
+  serviceBannerUrl?: string;
+  customerEmail?: string;
+  additionalNotes?: string;
 }
 
 export interface BookingEmailTemplateData {
@@ -192,32 +228,12 @@ export class TemplateService {
 
   generateCustomerNotificationEmail(data: CustomerNotificationEmailData): string {
     const customerNotificationTemplate = this.loadTemplate('customer-notification');
-    const contentHtml = customerNotificationTemplate({
-      ...data,
-      loginUrl: this.getBaseData().loginUrl,
-    });
-
-    return this.baseTemplate({
-      ...this.getBaseData(),
-      title: 'Upcoming Wine Experience Reminder',
-      subtitle: `Your reservation is in ${data.hoursBeforeEvent} hours`,
-      content: contentHtml,
-    });
+    return customerNotificationTemplate(data);
   }
 
   generateProviderNotificationEmail(data: ProviderNotificationEmailData): string {
     const providerNotificationTemplate = this.loadTemplate('provider-notification');
-    const contentHtml = providerNotificationTemplate({
-      ...data,
-      adminPanelUrl: this.getBaseData().adminPanelUrl,
-    });
-
-    return this.baseTemplate({
-      ...this.getBaseData(),
-      title: 'Upcoming Wine Experience - Guest Reminder',
-      subtitle: `Reservation in ${data.hoursBeforeEvent} hours`,
-      content: contentHtml,
-    });
+    return providerNotificationTemplate(data);
   }
 
   generateBookingConfirmationEmail(data: BookingEmailTemplateData): string {
