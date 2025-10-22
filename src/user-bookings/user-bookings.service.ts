@@ -77,6 +77,20 @@ export class UserBookingsService {
   ) { }
 
   /**
+   * Convert language to French format
+   * @param language - The language string to convert
+   * @returns Formatted language in French
+   */
+  private getLanguageInFrench(language: string): string {
+    const lang = language.toLowerCase();
+    if (lang === 'français' || lang === 'french') return 'Français';
+    if (lang === 'anglais' || lang === 'english') return 'Anglais';
+    if (lang === 'español' || lang === 'spanish') return 'Espagnol';
+    if (lang === 'deutsch' || lang === 'german') return 'Allemand';
+    return language; // Return original if no match
+  }
+
+  /**
    * Format payment methods for email display
    * @param methods - Array of payment method strings from database
    * @returns Formatted string for email display
@@ -444,7 +458,7 @@ export class UserBookingsService {
             eventDuration: service?.timeOfServiceInMinutes ? `${service.timeOfServiceInMinutes} minutes` : '60 minutes',
             participantsAdults: createBookingDto.participantsAdults,
             participantsChildren: createBookingDto.participantsEnfants || 0,
-            selectedLanguage: createBookingDto.selectedLanguage,
+            selectedLanguage: this.getLanguageInFrench(createBookingDto.selectedLanguage),
             additionalNotes: createBookingDto.additionalNotes,
             // Enhanced template data
             domainName: user?.domainName || 'Domaine La Bastide Blanche',
@@ -1149,7 +1163,7 @@ export class UserBookingsService {
             eventDuration: service?.timeOfServiceInMinutes ? `${service.timeOfServiceInMinutes} minutes` : '60 minutes',
             participantsAdults: updatedBooking.participantsAdults,
             participantsChildren: updatedBooking.participantsEnfants || 0,
-            selectedLanguage: updatedBooking.selectedLanguage,
+            selectedLanguage: this.getLanguageInFrench(updatedBooking.selectedLanguage),
             additionalNotes: updatedBooking.additionalNotes,
             // Enhanced template data
             domainName: user?.domainName || 'Domaine La Bastide Blanche',
@@ -1518,7 +1532,7 @@ export class UserBookingsService {
             eventDuration: service?.timeOfServiceInMinutes ? `${service.timeOfServiceInMinutes} minutes` : '60 minutes',
             participantsAdults: booking.participantsAdults,
             participantsChildren: booking.participantsEnfants || 0,
-            selectedLanguage: booking.selectedLanguage,
+            selectedLanguage: this.getLanguageInFrench(booking.selectedLanguage),
             additionalNotes: booking.additionalNotes,
             // Enhanced template data
             domainName: user?.domainName || 'Domaine La Bastide Blanche',
