@@ -166,6 +166,13 @@
             line-height: 1;
         }
 
+        .detail-icon img {
+            width: 16px;
+            height: 16px;
+            object-fit: contain;
+            vertical-align: middle;
+        }
+
         .detail-text {
             color: #444;
             font-weight: 500;
@@ -433,13 +440,13 @@
                                             <tr>
                                                 <td class="grid-cell">
                                                     <div class="detail-row">
-                                                        <span class="detail-icon">🕐</span>
+                                                        <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/clock" alt="Clock"></span>
                                                         <span class="detail-text">{{eventDate}} - {{eventTime}}</span>
                                                     </div>
                                                 </td>
                                                 <td class="grid-cell">
                                                     <div class="detail-row">
-                                                        <span class="detail-icon">👤</span>
+                                                        <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/user" alt="User"></span>
                                                         <span class="detail-text">{{selectedLanguage}}</span>
                                                     </div>
                                                 </td>
@@ -453,13 +460,13 @@
                                             <tr>
                                                 <td class="grid-cell">
                                                     <div class="detail-row">
-                                                        <span class="detail-icon">🍷</span>
+                                                        <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/type-of-experience" alt="Experience"></span>
                                                         <span class="detail-text long-text">{{serviceName}}</span>
                                                     </div>
                                                 </td>
                                                 <td class="grid-cell">
                                                     <div class="detail-row">
-                                                        <span class="detail-icon">⏱️</span>
+                                                        <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/clock" alt="Duration"></span>
                                                         <span class="detail-text">{{eventDuration}}</span>
                                                     </div>
                                                 </td>
@@ -473,13 +480,13 @@
                                             <tr>
                                                 <td class="grid-cell">
                                                     <div class="detail-row">
-                                                        <span class="detail-icon">👥</span>
+                                                        <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/user" alt="Participants"></span>
                                                         <span class="detail-text">{{participantsAdults}} personne{{#if (gt participantsAdults 1)}}s{{/if}} (adultes)</span>
                                                     </div>
                                                 </td>
                                                 <td class="grid-cell">
                                                     <div class="detail-row">
-                                                        <span class="detail-icon">🍇</span>
+                                                        <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/wine-glass" alt="Wine"></span>
                                                         <span class="detail-text">{{numberOfWinesTasted}}</span>
                                                     </div>
                                                 </td>
@@ -489,12 +496,12 @@
                                 </div>
                                 
                                 <div class="detail-row" style="margin-top: 20px; font-size: 11px;">
-                                    <span class="detail-icon">💳</span>
+                                    <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/euro-currency-symbol" alt="Wine"></span>
                                     <span class="detail-text" style="white-space: normal; color: #666;">{{paymentMethod}}</span>
                                 </div>
                                 
                                 <div class="detail-row price-row">
-                                    <span class="detail-icon">💰</span>
+                                    <span class="detail-icon"><img src="https://api.rosedesvins.co/v1/web/image/total%20amount" alt="Price"></span>
                                     <span class="detail-text price-text">{{totalPrice}}</span>
                                 </div>
                             </td>
