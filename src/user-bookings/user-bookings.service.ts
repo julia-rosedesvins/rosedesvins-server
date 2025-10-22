@@ -130,33 +130,22 @@ export class UserBookingsService {
     try {
       console.log(`🚫 Guest cancelling booking: ${bookingId}`);
 
-      // Find the booking
+      // Find the booking first to validate it exists
       const booking = await this.userBookingModel.findById(bookingId).exec();
       
       if (!booking) {
         throw new NotFoundException('Réservation non trouvée');
       }
 
-      // Check if booking is already cancelled
-      if (booking.bookingStatus === 'cancelled_by_guest' || booking.bookingStatus === 'cancelled') {
-        throw new BadRequestException('Cette réservation est déjà annulée');
-      }
+      // Use the existing deleteBooking function to completely remove the booking
+      // This will delete from bookings table, events table, and calendar
+      const deleteResult = await this.deleteBooking(bookingId);
 
-      // Update booking status to cancelled_by_guest
-      await this.userBookingModel.findByIdAndUpdate(
-        bookingId,
-        { 
-          bookingStatus: 'cancelled_by_guest',
-          updatedAt: new Date()
-        },
-        { new: true }
-      ).exec();
-
-      console.log(`✅ Booking ${bookingId} cancelled by guest successfully`);
+      console.log(`✅ Booking ${bookingId} deleted by guest successfully`);
 
       return {
-        success: true,
-        message: 'Réservation annulée avec succès'
+        success: deleteResult.success,
+        message: deleteResult.success ? 'Réservation annulée avec succès' : 'Erreur lors de l\'annulation de la réservation'
       };
 
     } catch (error) {
