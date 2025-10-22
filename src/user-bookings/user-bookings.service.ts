@@ -12,6 +12,7 @@ import { DomainProfile } from '../schemas/domain-profile.schema';
 import { Subscription } from '../schemas/subscriptions.schema';
 import { Event } from '../schemas/events.schema';
 import { Connector } from '../schemas/connector.schema';
+import { PaymentMethods } from '../schemas/payment-methods.schema';
 import { CreateBookingDto, UpdateBookingDto } from '../validators/user-bookings.validators';
 import { EncryptionService } from '../common/encryption.service';
 import { EmailService } from '../email/email.service';
@@ -67,12 +68,60 @@ export class UserBookingsService {
     @InjectModel(Subscription.name) private subscriptionModel: Model<Subscription>,
     @InjectModel(Event.name) private eventModel: Model<Event>,
     @InjectModel(Connector.name) private connectorModel: Model<Connector>,
+    @InjectModel(PaymentMethods.name) private paymentMethodsModel: Model<PaymentMethods>,
     private encryptionService: EncryptionService,
     private emailService: EmailService,
     private templateService: TemplateService,
     private connectorService: ConnectorService,
     private configService: ConfigService,
   ) { }
+
+  /**
+   * Format payment methods for email display
+   * @param methods - Array of payment method strings from database
+   * @returns Formatted string for email display
+   */
+  private formatPaymentMethodsForEmail(methods: string[]): string {
+    if (!methods || methods.length === 0) {
+      return 'Paiement sur place (Carte bancaire, Chèques, Espèces)'; // Default fallback
+    }
+
+    const methodTranslations: { [key: string]: string } = {
+      'bank card': 'Carte bancaire',
+      'checks': 'Chèques', 
+      'cash': 'Espèces'
+    };
+
+    const translatedMethods = methods
+      .map(method => methodTranslations[method] || method)
+      .join(', ');
+
+    return `Paiement sur place (${translatedMethods})`;
+  }
+
+  /**
+   * Get formatted payment methods for a user
+   * @param userId - User ID to fetch payment methods for
+   * @returns Formatted payment methods string
+   */
+  private async getUserPaymentMethods(userId: Types.ObjectId): Promise<string> {
+    try {
+      const paymentMethods = await this.paymentMethodsModel
+        .findOne({ userId })
+        .lean()
+        .exec();
+
+      if (paymentMethods && paymentMethods.methods.length > 0) {
+        return this.formatPaymentMethodsForEmail(paymentMethods.methods);
+      }
+
+      // Default fallback if no payment methods found
+      return 'Paiement sur place (Carte bancaire, Chèques, Espèces)';
+    } catch (error) {
+      console.warn('Could not fetch payment methods for user:', userId, error);
+      return 'Paiement sur place (Carte bancaire, Chèques, Espèces)';
+    }
+  }
 
   /**
    * Cancel a booking as guest (public endpoint)
@@ -172,7 +221,7 @@ export class UserBookingsService {
           serviceName: bookingData.serviceName,
           serviceDescription: bookingData.serviceDescription,
           totalPrice: bookingData.totalPrice,
-          paymentMethod: bookingData.paymentMethod || 'Paiement sur place (cartes, chèques, liquide)',
+          paymentMethod: bookingData.paymentMethod,
           frontendUrl: bookingData.frontendUrl,
           backendUrl: bookingData.backendUrl,
           appLogoUrl: bookingData.appLogoUrl,
@@ -391,6 +440,9 @@ export class UserBookingsService {
 
           console.log('Debug - Final eventTitle:', eventTitle);
 
+          // Get dynamic payment methods for the user
+          const formattedPaymentMethods = await this.getUserPaymentMethods(userObjectIdForQuery);
+
           const bookingEmailData: BookingEmailData = {
             customerName: `${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
             customerEmail: createBookingDto.customerEmail,
@@ -414,7 +466,7 @@ export class UserBookingsService {
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
             totalPrice: service?.pricePerPerson ? `${service.pricePerPerson} €` : '20 €',
-            paymentMethod: 'Paiement sur place (cartes, chèques, liquide)',
+            paymentMethod: formattedPaymentMethods,
             frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
             appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
             backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
@@ -1093,6 +1145,9 @@ export class UserBookingsService {
 
           console.log('Debug UPDATE - final service found:', service);
 
+          // Get dynamic payment methods for the user
+          const formattedPaymentMethods = await this.getUserPaymentMethods(updatedBooking.userId);
+
           const bookingEmailData: BookingEmailData = {
             customerName: `${updatedBooking.userContactFirstname} ${updatedBooking.userContactLastname}`,
             customerEmail: updatedBooking.customerEmail,
@@ -1116,7 +1171,7 @@ export class UserBookingsService {
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
             totalPrice: service?.pricePerPerson ? `${service.pricePerPerson} €` : '20 €',
-            paymentMethod: 'Paiement sur place (cartes, chèques, liquide)',
+            paymentMethod: formattedPaymentMethods,
             frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
             appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
             backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
@@ -1459,6 +1514,9 @@ export class UserBookingsService {
 
           console.log('Debug DELETE - final service found:', service);
 
+          // Get dynamic payment methods for the user
+          const formattedPaymentMethods = await this.getUserPaymentMethods(booking.userId);
+
           const bookingEmailData: BookingEmailData = {
             customerName: `${booking.userContactFirstname} ${booking.userContactLastname}`,
             customerEmail: booking.customerEmail,
@@ -1482,7 +1540,7 @@ export class UserBookingsService {
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
             totalPrice: service?.pricePerPerson ? `${service.pricePerPerson} €` : '20 €',
-            paymentMethod: 'Paiement sur place (cartes, chèques, liquide)',
+            paymentMethod: formattedPaymentMethods,
             frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
             appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
             backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
