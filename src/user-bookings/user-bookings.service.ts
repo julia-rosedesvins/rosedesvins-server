@@ -48,6 +48,7 @@ export interface BookingEmailData {
   appLogoUrl: string;
   backendUrl: string;
   serviceBannerUrl: string;
+  cancelBookingUrl?: string;
 }
 
 /**
@@ -418,6 +419,7 @@ export class UserBookingsService {
             appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
             backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
             serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
+            cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${savedBooking._id}`,
           };
 
           // Fix URLs to avoid double slashes
@@ -1119,6 +1121,7 @@ export class UserBookingsService {
             appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
             backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
             serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
+            cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${updatedBooking._id}`,
           };
 
           // Fix URLs to avoid double slashes
@@ -1484,6 +1487,7 @@ export class UserBookingsService {
             appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
             backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
             serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
+            cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${booking._id}`,
           };
 
           // Fix URLs to avoid double slashes
