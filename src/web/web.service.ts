@@ -14,8 +14,14 @@ export class WebService {
       '.avi': 'video/x-msvideo',
       '.mov': 'video/quicktime',
       '.wmv': 'video/x-ms-wmv',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml',
     };
-    return mimeTypes[ext] || 'video/mp4';
+    return mimeTypes[ext] || 'application/octet-stream';
   }
 
   async streamVideo(filename: string, req: Request, res: Response) {
@@ -102,6 +108,62 @@ export class WebService {
       console.error('Error streaming video:', error);
       if (!res.headersSent) {
         return res.status(500).json({ message: 'Internal server error while streaming video' });
+      }
+    }
+  }
+
+  async serveImage(imageName: string, res: Response, req?: Request) {
+    try {
+      // Validate image name to prevent directory traversal
+      if (imageName.includes('..') || imageName.includes('/') || imageName.includes('\\')) {
+        return res.status(400).json({ message: 'Invalid image name' });
+      }
+
+      // Ensure it's a PNG file (add .png if not provided)
+      const fileName = imageName.endsWith('.png') ? imageName : `${imageName}.png`;
+      
+      const imagePath = path.join(process.cwd(), 'src', 'web', 'statics', fileName);
+      
+      // Check if file exists
+      if (!fs.existsSync(imagePath)) {
+        return res.status(404).json({ message: 'Image not found' });
+      }
+
+      // Get file stats and mime type
+      const stat = fs.statSync(imagePath);
+      const mimeType = this.getMimeType(fileName);
+
+      // Set headers for image serving
+      const headers = {
+        'Content-Type': mimeType,
+        'Content-Length': stat.size,
+        'Cache-Control': 'public, max-age=31536000', // Cache for 1 year
+        'Last-Modified': stat.mtime.toUTCString(),
+        'ETag': `"${stat.size}-${stat.mtime.getTime()}"`,
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        'X-Content-Type-Options': 'nosniff',
+      };
+
+      // Check if client has cached version (ETag)
+      if (req) {
+        const clientETag = req.headers['if-none-match'];
+        const serverETag = headers.ETag;
+        
+        if (clientETag === serverETag) {
+          return res.status(304).end();
+        }
+      }
+
+      // Send image
+      res.set(headers);
+      const imageStream = fs.createReadStream(imagePath);
+      imageStream.pipe(res);
+      
+    } catch (error) {
+      console.error('Error serving image:', error);
+      if (!res.headersSent) {
+        return res.status(500).json({ message: 'Internal server error while serving image' });
       }
     }
   }
