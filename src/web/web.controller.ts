@@ -13,6 +13,13 @@ export class WebController {
   }
 
   @Version('1')
+  @Get('image/:imageName')
+  async getImage(@Req() req: Request, @Res() res: Response) {
+    const imageName = req.params.imageName;
+    return this.webService.serveImage(imageName, res, req);
+  }
+
+  @Version('1')
   @Get('demo')
   getDemoPage(@Res() res: Response) {
     return this.webService.getDemoPage(res);

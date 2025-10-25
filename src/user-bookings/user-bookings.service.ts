@@ -12,6 +12,7 @@ import { DomainProfile } from '../schemas/domain-profile.schema';
 import { Subscription } from '../schemas/subscriptions.schema';
 import { Event } from '../schemas/events.schema';
 import { Connector } from '../schemas/connector.schema';
+import { PaymentMethods } from '../schemas/payment-methods.schema';
 import { CreateBookingDto, UpdateBookingDto } from '../validators/user-bookings.validators';
 import { EncryptionService } from '../common/encryption.service';
 import { EmailService } from '../email/email.service';
@@ -36,6 +37,7 @@ export interface BookingEmailData {
   participantsChildren: number;
   selectedLanguage: string;
   additionalNotes?: string;
+  numberOfWinesTasted: number;
   // Enhanced template fields
   domainName: string;
   domainAddress: string;
@@ -48,6 +50,7 @@ export interface BookingEmailData {
   appLogoUrl: string;
   backendUrl: string;
   serviceBannerUrl: string;
+  cancelBookingUrl?: string;
 }
 
 /**
@@ -66,12 +69,110 @@ export class UserBookingsService {
     @InjectModel(Subscription.name) private subscriptionModel: Model<Subscription>,
     @InjectModel(Event.name) private eventModel: Model<Event>,
     @InjectModel(Connector.name) private connectorModel: Model<Connector>,
+    @InjectModel(PaymentMethods.name) private paymentMethodsModel: Model<PaymentMethods>,
     private encryptionService: EncryptionService,
     private emailService: EmailService,
     private templateService: TemplateService,
     private connectorService: ConnectorService,
     private configService: ConfigService,
   ) { }
+
+  /**
+   * Convert language to French format
+   * @param language - The language string to convert
+   * @returns Formatted language in French
+   */
+  private getLanguageInFrench(language: string): string {
+    const lang = language.toLowerCase();
+    if (lang === 'français' || lang === 'french') return 'Français';
+    if (lang === 'anglais' || lang === 'english') return 'Anglais';
+    if (lang === 'español' || lang === 'spanish') return 'Espagnol';
+    if (lang === 'deutsch' || lang === 'german') return 'Allemand';
+    return language; // Return original if no match
+  }
+
+  /**
+   * Format payment methods for email display
+   * @param methods - Array of payment method strings from database
+   * @returns Formatted string for email display
+   */
+  private formatPaymentMethodsForEmail(methods: string[]): string {
+    if (!methods || methods.length === 0) {
+      return 'Paiement sur place (Carte bancaire, Chèques, Espèces)'; // Default fallback
+    }
+
+    const methodTranslations: { [key: string]: string } = {
+      'bank card': 'Carte bancaire',
+      'checks': 'Chèques', 
+      'cash': 'Espèces'
+    };
+
+    const translatedMethods = methods
+      .map(method => methodTranslations[method] || method)
+      .join(', ');
+
+    return `Paiement sur place (${translatedMethods})`;
+  }
+
+  /**
+   * Get formatted payment methods for a user
+   * @param userId - User ID to fetch payment methods for
+   * @returns Formatted payment methods string
+   */
+  private async getUserPaymentMethods(userId: Types.ObjectId): Promise<string> {
+    try {
+      const paymentMethods = await this.paymentMethodsModel
+        .findOne({ userId })
+        .lean()
+        .exec();
+
+      if (paymentMethods && paymentMethods.methods.length > 0) {
+        return this.formatPaymentMethodsForEmail(paymentMethods.methods);
+      }
+
+      // Default fallback if no payment methods found
+      return 'Paiement sur place (Carte bancaire, Chèques, Espèces)';
+    } catch (error) {
+      console.warn('Could not fetch payment methods for user:', userId, error);
+      return 'Paiement sur place (Carte bancaire, Chèques, Espèces)';
+    }
+  }
+
+  /**
+   * Cancel a booking as guest (public endpoint)
+   */
+  async cancelBookingAsGuest(bookingId: string): Promise<{ success: boolean; message: string }> {
+    try {
+      console.log(`🚫 Guest cancelling booking: ${bookingId}`);
+
+      // Find the booking first to validate it exists
+      const booking = await this.userBookingModel.findById(bookingId).exec();
+      
+      if (!booking) {
+        throw new NotFoundException('Réservation non trouvée');
+      }
+
+      // Use the existing deleteBooking function to completely remove the booking
+      // This will delete from bookings table, events table, and calendar
+      const deleteResult = await this.deleteBooking(bookingId);
+
+      console.log(`✅ Booking ${bookingId} deleted by guest successfully`);
+
+      return {
+        success: deleteResult.success,
+        message: deleteResult.success ? 'Réservation annulée avec succès' : 'Erreur lors de l\'annulation de la réservation'
+      };
+
+    } catch (error) {
+      console.error(`❌ Error cancelling booking ${bookingId}:`, error);
+      
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      
+      throw new InternalServerErrorException('Erreur lors de l\'annulation de la réservation');
+    }
+  }
 
   /**
    * Helper method to safely join URL parts without double slashes
@@ -118,17 +219,19 @@ export class UserBookingsService {
           participantsChildren: bookingData.participantsChildren,
           selectedLanguage: bookingData.selectedLanguage,
           additionalNotes: bookingData.additionalNotes,
+          numberOfWinesTasted: bookingData.numberOfWinesTasted,
           domainName: bookingData.domainName,
           domainAddress: bookingData.domainAddress,
           domainLogoUrl: bookingData.domainLogoUrl,
           serviceName: bookingData.serviceName,
           serviceDescription: bookingData.serviceDescription,
           totalPrice: bookingData.totalPrice,
-          paymentMethod: bookingData.paymentMethod || 'Paiement sur place (cartes, chèques, liquide)',
+          paymentMethod: bookingData.paymentMethod,
           frontendUrl: bookingData.frontendUrl,
           backendUrl: bookingData.backendUrl,
           appLogoUrl: bookingData.appLogoUrl,
           serviceBannerUrl: bookingData.serviceBannerUrl,
+          cancelBookingUrl: bookingData.cancelBookingUrl,
         };
 
         let emailHtml: string;
@@ -343,6 +446,9 @@ export class UserBookingsService {
 
           console.log('Debug - Final eventTitle:', eventTitle);
 
+          // Get dynamic payment methods for the user
+          const formattedPaymentMethods = await this.getUserPaymentMethods(userObjectIdForQuery);
+
           const bookingEmailData: BookingEmailData = {
             customerName: `${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
             customerEmail: createBookingDto.customerEmail,
@@ -355,8 +461,9 @@ export class UserBookingsService {
             eventDuration: service?.timeOfServiceInMinutes ? `${service.timeOfServiceInMinutes} minutes` : '60 minutes',
             participantsAdults: createBookingDto.participantsAdults,
             participantsChildren: createBookingDto.participantsEnfants || 0,
-            selectedLanguage: createBookingDto.selectedLanguage,
+            selectedLanguage: this.getLanguageInFrench(createBookingDto.selectedLanguage),
             additionalNotes: createBookingDto.additionalNotes,
+            numberOfWinesTasted: service?.numberOfWinesTasted || 0,
             // Enhanced template data
             domainName: user?.domainName || 'Domaine La Bastide Blanche',
             domainAddress: user?.address && user?.codePostal && user?.city
@@ -366,11 +473,12 @@ export class UserBookingsService {
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
             totalPrice: service?.pricePerPerson ? `${service.pricePerPerson} €` : '20 €',
-            paymentMethod: 'Paiement sur place (cartes, chèques, liquide)',
+            paymentMethod: formattedPaymentMethods,
             frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
             appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
             backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
             serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
+            cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${savedBooking._id}`,
           };
 
           // Fix URLs to avoid double slashes
@@ -494,8 +602,8 @@ export class UserBookingsService {
         ? new Date(`${bookingDto.bookingDate.toISOString().split('T')[0]}T${bookingDto.bookingTime}:00`)
         : new Date(`${bookingDto.bookingDate}T${bookingDto.bookingTime}:00`);
 
-      // ✅ QUICK FIX: Subtract 2 hours to compensate for Orange calendar timezone issue
-      const startDate = new Date(originalStartDate.getTime() - (2 * 60 * 60 * 1000)); // Subtract 2 hours
+      // ✅ QUICK FIX: Subtract 1 hour to compensate for Orange calendar timezone issue
+      const startDate = new Date(originalStartDate.getTime() - (1 * 60 * 60 * 1000)); // Subtract 1 hour
 
       if (isNaN(startDate.getTime())) {
         throw new Error(`Invalid date constructed from booking data`);
@@ -1044,6 +1152,9 @@ export class UserBookingsService {
 
           console.log('Debug UPDATE - final service found:', service);
 
+          // Get dynamic payment methods for the user
+          const formattedPaymentMethods = await this.getUserPaymentMethods(updatedBooking.userId);
+
           const bookingEmailData: BookingEmailData = {
             customerName: `${updatedBooking.userContactFirstname} ${updatedBooking.userContactLastname}`,
             customerEmail: updatedBooking.customerEmail,
@@ -1056,8 +1167,9 @@ export class UserBookingsService {
             eventDuration: service?.timeOfServiceInMinutes ? `${service.timeOfServiceInMinutes} minutes` : '60 minutes',
             participantsAdults: updatedBooking.participantsAdults,
             participantsChildren: updatedBooking.participantsEnfants || 0,
-            selectedLanguage: updatedBooking.selectedLanguage,
+            selectedLanguage: this.getLanguageInFrench(updatedBooking.selectedLanguage),
             additionalNotes: updatedBooking.additionalNotes,
+            numberOfWinesTasted: service?.numberOfWinesTasted || 0,
             // Enhanced template data
             domainName: user?.domainName || 'Domaine La Bastide Blanche',
             domainAddress: user?.address && user?.codePostal && user?.city
@@ -1067,11 +1179,12 @@ export class UserBookingsService {
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
             totalPrice: service?.pricePerPerson ? `${service.pricePerPerson} €` : '20 €',
-            paymentMethod: 'Paiement sur place (cartes, chèques, liquide)',
+            paymentMethod: formattedPaymentMethods,
             frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
             appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
             backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
             serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
+            cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${updatedBooking._id}`,
           };
 
           // Fix URLs to avoid double slashes
@@ -1409,6 +1522,9 @@ export class UserBookingsService {
 
           console.log('Debug DELETE - final service found:', service);
 
+          // Get dynamic payment methods for the user
+          const formattedPaymentMethods = await this.getUserPaymentMethods(booking.userId);
+
           const bookingEmailData: BookingEmailData = {
             customerName: `${booking.userContactFirstname} ${booking.userContactLastname}`,
             customerEmail: booking.customerEmail,
@@ -1421,8 +1537,9 @@ export class UserBookingsService {
             eventDuration: service?.timeOfServiceInMinutes ? `${service.timeOfServiceInMinutes} minutes` : '60 minutes',
             participantsAdults: booking.participantsAdults,
             participantsChildren: booking.participantsEnfants || 0,
-            selectedLanguage: booking.selectedLanguage,
+            selectedLanguage: this.getLanguageInFrench(booking.selectedLanguage),
             additionalNotes: booking.additionalNotes,
+            numberOfWinesTasted: service?.numberOfWinesTasted || 0,
             // Enhanced template data
             domainName: user?.domainName || 'Domaine La Bastide Blanche',
             domainAddress: user?.address && user?.codePostal && user?.city
@@ -1432,11 +1549,12 @@ export class UserBookingsService {
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
             totalPrice: service?.pricePerPerson ? `${service.pricePerPerson} €` : '20 €',
-            paymentMethod: 'Paiement sur place (cartes, chèques, liquide)',
+            paymentMethod: formattedPaymentMethods,
             frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
             appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
             backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
             serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
+            cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${booking._id}`,
           };
 
           // Fix URLs to avoid double slashes
@@ -1770,6 +1888,93 @@ export class UserBookingsService {
     } catch (error) {
       console.error('❌ Microsoft calendar deletion error:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Get basic booking details with service name (public endpoint)
+   * @param bookingId - Booking ID to retrieve details for
+   * @returns Basic booking information with service details
+   */
+  async getBookingDetails(bookingId: string) {
+    try {
+      // Validate booking ID format
+      if (!Types.ObjectId.isValid(bookingId)) {
+        throw new BadRequestException('ID de réservation invalide');
+      }
+
+      const bookingObjectId = new Types.ObjectId(bookingId);
+
+      // Find the booking
+      const booking = await this.userBookingModel.findById(bookingObjectId).lean();
+      
+      if (!booking) {
+        throw new NotFoundException('Réservation introuvable');
+      }
+
+      // Find the user to get domain profile
+      const user = await this.userModel.findById(booking.userId).lean();
+      if (!user) {
+        throw new NotFoundException('Utilisateur introuvable');
+      }
+
+      // Find domain profile to get service details
+      const domainProfile = await this.domainProfileModel.findOne({ userId: booking.userId }).lean();
+      if (!domainProfile) {
+        throw new NotFoundException('Profil de domaine introuvable');
+      }
+
+      // Find the specific service
+      const service = domainProfile.services.find(s => 
+        (s as any)._id && (s as any)._id.toString() === booking.serviceId.toString()
+      );
+
+      if (!service) {
+        throw new NotFoundException('Service introuvable');
+      }
+
+      // Return basic booking details with service information
+      return {
+        success: true,
+        message: 'Détails de la réservation récupérés avec succès',
+        data: {
+          bookingId: booking._id,
+          bookingDate: booking.bookingDate,
+          bookingTime: booking.bookingTime,
+          participantsAdults: booking.participantsAdults,
+          participantsEnfants: booking.participantsEnfants,
+          selectedLanguage: booking.selectedLanguage,
+          customerName: `${booking.userContactFirstname} ${booking.userContactLastname}`,
+          customerEmail: booking.customerEmail,
+          phoneNo: booking.phoneNo,
+          additionalNotes: booking.additionalNotes,
+          bookingStatus: booking.bookingStatus,
+          service: {
+            name: service.name,
+            description: service.description,
+            pricePerPerson: service.pricePerPerson,
+            timeOfServiceInMinutes: service.timeOfServiceInMinutes,
+            numberOfWinesTasted: service.numberOfWinesTasted,
+            languagesOffered: service.languagesOffered
+          },
+          domainInfo: {
+            domainName: user.domainName,
+            domainAddress: user.address && user.codePostal && user.city
+              ? `${user.address} - ${user.codePostal} - ${user.city}`
+              : 'Adresse non renseignée',
+            logoUrl: domainProfile.domainLogoUrl || null
+          },
+          createdAt: booking.createdAt
+        }
+      };
+
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+
+      console.error('❌ Error getting booking details:', error);
+      throw new InternalServerErrorException('Erreur lors de la récupération des détails de la réservation');
     }
   }
 }

@@ -12,6 +12,7 @@ import { Connector, ConnectorSchema } from 'src/schemas/connector.schema';
 import { EmailModule } from '../email/email.module';
 import { EncryptionService } from '../common/encryption.service';
 import { ConnectorService } from '../connector/connector.service';
+import { PaymentMethods, PaymentMethodsSchema } from 'src/schemas/payment-methods.schema';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { ConnectorService } from '../connector/connector.service';
       { name: Subscription.name, schema: SubscriptionSchema },
       { name: Event.name, schema: EventSchema },
       { name: Connector.name, schema: ConnectorSchema },
+      { name: PaymentMethods.name, schema: PaymentMethodsSchema },
     ]),
   ],
   controllers: [UserBookingsController],

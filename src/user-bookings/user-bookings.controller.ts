@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Delete, Param, Put } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Delete, Param, Put, Get } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBody, ApiParam } from '@nestjs/swagger';
 import { UserBookingsService } from './user-bookings.service';
 import { CreateBookingDto, CreateBookingSchema, UpdateBookingDto, UpdateBookingSchema } from '../validators/user-bookings.validators';
@@ -212,5 +212,31 @@ export class UserBookingsController {
   })
   async deleteBooking(@Param('id') bookingId: string) {
     return this.userBookingsService.deleteBooking(bookingId);
+  }
+
+  @Post(':id/cancel-guest')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cancel a booking as guest (public endpoint)' })
+  @ApiParam({
+    name: 'id',
+    description: 'Booking ID to cancel',
+    type: 'string',
+    example: '60d0fe4f5311236168a109ca'
+  })
+  async cancelBookingAsGuest(@Param('id') bookingId: string) {
+    return this.userBookingsService.cancelBookingAsGuest(bookingId);
+  }
+
+  @Get(':id/details')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Get basic booking details with service name (public endpoint)' })
+  @ApiParam({
+    name: 'id',
+    description: 'Booking ID to retrieve details for',
+    type: 'string',
+    example: '60d0fe4f5311236168a109ca'
+  })
+  async getBookingDetails(@Param('id') bookingId: string) {
+    return this.userBookingsService.getBookingDetails(bookingId);
   }
 }

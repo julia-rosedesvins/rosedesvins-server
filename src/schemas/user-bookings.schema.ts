@@ -163,7 +163,8 @@ export class UserBooking extends Document {
       'no_show',          // User didn't show up
       'payment_pending',   // Awaiting payment
       'payment_failed',    // Payment failed
-      'refunded'          // Booking refunded
+      'refunded',          // Booking refunded
+      'cancelled_by_guest'   // Booking cancelled by guest user
     ],
     default: 'pending',
     lowercase: true,
