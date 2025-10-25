@@ -180,6 +180,13 @@ export class UserBooking extends Document {
   })
   microsoftEventId?: string; // Microsoft Graph API event ID for calendar integration
 
+  @Prop({ 
+    type: String,
+    required: false,
+    trim: true
+  })
+  googleEventId?: string; // Google Calendar API event ID for calendar integration
+
   @Prop()
   createdAt?: Date;
 

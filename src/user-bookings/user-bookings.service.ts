@@ -18,6 +18,7 @@ import { EncryptionService } from '../common/encryption.service';
 import { EmailService } from '../email/email.service';
 import { TemplateService } from '../email/template.service';
 import { ConnectorService } from '../connector/connector.service';
+import { GoogleEventsApiService } from './utils/google-events-apis.utils';
 
 const dav = require('dav');
 
@@ -75,6 +76,7 @@ export class UserBookingsService {
     private templateService: TemplateService,
     private connectorService: ConnectorService,
     private configService: ConfigService,
+    private googleEventsApiService: GoogleEventsApiService,
   ) { }
 
   /**
@@ -556,6 +558,13 @@ export class UserBookingsService {
           }
           break;
 
+        case 'google':
+          if (activeConnector.connector_creds?.google?.isActive && activeConnector.connector_creds?.google?.isValid) {
+            console.log('🔵 Using Google calendar for user:', booking.userId);
+            await this.addToGoogleCalendar(booking, bookingDto, activeConnector.connector_creds.google);
+          }
+          break;
+
         case 'ovh':
           console.log('ℹ️ OVH calendar integration not yet implemented');
           break;
@@ -889,6 +898,99 @@ export class UserBookingsService {
       }
 
       throw error; // Re-throw to be caught by the main addToCalendar method
+    }
+  }
+
+  /**
+   * Add booking event to Google Calendar using Calendar API
+   * Creates a wine tasting reservation event with booking details
+   */
+  private async addToGoogleCalendar(booking: UserBooking, bookingDto: CreateBookingDto, googleCreds: any): Promise<void> {
+    try {
+      console.log('🔵 Starting Google calendar integration for booking:', booking._id);
+
+      // Validate credentials
+      if (!googleCreds.isActive || !googleCreds.isValid) {
+        console.log('ℹ️ Google connector is inactive or invalid for user:', booking.userId);
+        return;
+      }
+
+      console.log('📧 Using Google credentials for user:', googleCreds.email);
+
+      // Construct event start date in Paris timezone
+      // Format: YYYY-MM-DDTHH:mm:ss (without timezone conversion)
+      const bookingDateStr = bookingDto.bookingDate instanceof Date
+        ? bookingDto.bookingDate.toISOString().split('T')[0]
+        : bookingDto.bookingDate;
+
+      // Create datetime strings in Europe/Paris timezone (without UTC conversion)
+      const startDateTimeStr = `${bookingDateStr}T${bookingDto.bookingTime}:00`;
+      
+      // Calculate end time based on service duration
+      const eventDuration = await this.getServiceDuration(booking.userId, bookingDto.serviceId);
+      
+      // Parse the time to calculate end time
+      const [hours, minutes] = bookingDto.bookingTime.split(':').map(Number);
+      const startMinutes = hours * 60 + minutes;
+      const endMinutes = startMinutes + eventDuration;
+      const endHours = Math.floor(endMinutes / 60);
+      const endMins = endMinutes % 60;
+      const endDateTimeStr = `${bookingDateStr}T${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}:00`;
+
+      // Create event title
+      const eventTitle = `Réservation: ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
+
+      console.log('🕐 Event timing:', {
+        startDateTime: startDateTimeStr,
+        endDateTime: endDateTimeStr,
+        timezone: 'Europe/Paris',
+        duration: `${eventDuration} minutes`
+      });
+
+      // Prepare event data for Google Calendar API
+      const eventData = {
+        summary: eventTitle,
+        description: this.generateEventDescription(bookingDto),
+        location: 'Rose des Vins - Dégustation',
+        startDateTime: startDateTimeStr,
+        endDateTime: endDateTimeStr,
+        attendees: [
+          {
+            email: bookingDto.customerEmail,
+            displayName: `${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`
+          }
+        ],
+        timeZone: 'Europe/Paris'
+      };
+
+      // Create event via Google Calendar API (with automatic token refresh)
+      const eventId = await this.googleEventsApiService.addBookingToGoogleCalendar(
+        booking.userId.toString(),
+        eventData
+      );
+
+      if (eventId) {
+        // Store the Google event ID in the booking for future operations
+        await this.userBookingModel.updateOne(
+          { _id: booking._id },
+          { $set: { googleEventId: eventId } }
+        );
+
+        console.log('✅ Successfully added booking to Google calendar!');
+        console.log('📅 Event details:', {
+          title: eventTitle,
+          start: `${startDateTimeStr} (Europe/Paris)`,
+          end: `${endDateTimeStr} (Europe/Paris)`,
+          eventId: eventId,
+          bookingId: booking._id
+        });
+      } else {
+        console.log('⚠️ Failed to create Google calendar event (non-blocking)');
+      }
+
+    } catch (error) {
+      console.error('❌ Google calendar integration error:', error);
+      // Don't throw - this is a background process
     }
   }
 
