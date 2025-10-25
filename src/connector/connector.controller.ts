@@ -525,4 +525,236 @@ export class ConnectorController {
       throw error;
     }
   }
+
+  @Get('google/oauth-url')
+  @UseGuards(UserGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get Google OAuth URL for calendar permissions' })
+  @ApiResponse({
+    status: 200,
+    description: 'Google OAuth URL generated successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        data: {
+          type: 'object',
+          properties: {
+            authUrl: { type: 'string' },
+            state: { type: 'string' }
+          }
+        }
+      }
+    }
+  })
+  async getGoogleOAuthUrl(
+    @CurrentUser() user: any
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: {
+      authUrl: string;
+      state: string;
+    };
+  }> {
+    try {
+      const userId = user.sub;
+      const result = await this.connectorService.generateGoogleOAuthUrl(userId);
+
+      return {
+        success: true,
+        message: 'Google OAuth URL generated successfully',
+        data: result
+      };
+    } catch (error) {
+      console.error('Error generating Google OAuth URL:', error);
+      throw new HttpException({
+        success: false,
+        message: 'Failed to generate Google OAuth URL',
+        error: error.message
+      }, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get('google/callback')
+  @ApiOperation({
+    summary: 'Google OAuth callback endpoint',
+    description: 'Handles the OAuth redirect from Google and logs the authorization code and tokens'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'OAuth callback handled successfully - data logged to console',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Google OAuth callback received - check console for details' },
+        data: {
+          type: 'object',
+          properties: {
+            provider: { type: 'string', example: 'google' },
+            userId: { type: 'string', example: 'user123' },
+            timestamp: { type: 'string', example: '2025-10-25T11:30:00.000Z' }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'OAuth error or missing authorization code',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'OAuth callback failed' },
+        error: { type: 'string', example: 'Error details' }
+      }
+    }
+  })
+  async handleGoogleCallback(
+    @Res() res: Response,
+    @Query('code') code?: string,
+    @Query('state') state?: string,
+    @Query('error') error?: string,
+    @Query('error_description') errorDescription?: string
+  ): Promise<void> {
+    try {
+      // Handle OAuth error
+      if (error) {
+        console.error('❌ Google OAuth Error:', error, errorDescription);
+        const clientUrl = this.configService.get<string>('CLIENT_URL') || 'http://localhost:3000';
+        const errorRedirectUrl = `${clientUrl}/dashboard/settings?google_error=${encodeURIComponent(errorDescription || error || 'OAuth failed')}`;
+        res.redirect(errorRedirectUrl);
+        return;
+      }
+
+      // Check for authorization code
+      if (!code) {
+        console.error('❌ No authorization code received');
+        const clientUrl = this.configService.get<string>('CLIENT_URL') || 'http://localhost:3000';
+        const errorRedirectUrl = `${clientUrl}/dashboard/settings?google_error=${encodeURIComponent('No authorization code received')}`;
+        res.redirect(errorRedirectUrl);
+        return;
+      }
+
+      console.log('\n🔄 ==================== GOOGLE OAUTH CALLBACK ====================');
+      console.log('📋 Callback Data Received:');
+      console.log('  - Authorization Code:', code);
+      console.log('  - State:', state);
+      console.log('  - Has Error:', !!error);
+      console.log('==============================================================\n');
+
+      // Extract userId from state (format: userId_timestamp_random)
+      let userId = 'unknown';
+      if (state) {
+        const stateParts = state.split('_');
+        if (stateParts.length >= 3) {
+          userId = stateParts[0];
+          console.log('👤 User ID from state:', userId);
+        }
+      }
+
+      // Exchange the code for tokens and log the response
+      await this.connectorService.exchangeGoogleToken(userId, code);
+
+      // Get client URL for redirect
+      const clientUrl = this.configService.get<string>('CLIENT_URL') || 'http://localhost:3000';
+      const redirectUrl = `${clientUrl}/dashboard/settings?google_connected=true`;
+
+      console.log('\n🔄 Redirecting user to:', redirectUrl);
+      console.log('==============================================================\n');
+      
+      // Redirect to the client
+      res.redirect(redirectUrl);
+
+    } catch (error) {
+      console.error('❌ Error in Google OAuth callback:', error);
+      
+      const clientUrl = this.configService.get<string>('CLIENT_URL') || 'http://localhost:3000';
+      const errorRedirectUrl = `${clientUrl}/dashboard/settings?google_error=${encodeURIComponent(error.message || 'Failed to connect Google Calendar')}`;
+      res.redirect(errorRedirectUrl);
+    }
+  }
+
+  @Get('google/status')
+  @UseGuards(UserGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get Google calendar connection status' })
+  @ApiResponse({
+    status: 200,
+    description: 'Google calendar connection status retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        data: {
+          type: 'object',
+          nullable: true,
+          description: 'Connector data or null if not connected'
+        }
+      }
+    }
+  })
+  async getGoogleCalendarStatus(
+    @CurrentUser() user: any
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: any;
+  }> {
+    try {
+      const userId = user.sub;
+      const connector = await this.connectorService.getGoogleConnector(userId);
+
+      return {
+        success: true,
+        message: connector 
+          ? 'Google calendar connection found'
+          : 'No Google calendar connection found',
+        data: connector
+      };
+    } catch (error) {
+      console.error('Error getting Google connector status:', error);
+      throw error;
+    }
+  }
+
+  @Delete('google/disconnect')
+  @UseGuards(UserGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Disconnect Google calendar' })
+  @ApiResponse({
+    status: 200,
+    description: 'Google calendar disconnected successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' }
+      }
+    }
+  })
+  async disconnectGoogleCalendar(
+    @CurrentUser() user: any
+  ): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    try {
+      const userId = user.sub;
+
+      await this.connectorService.disconnectGoogleCalendar(userId);
+
+      return {
+        success: true,
+        message: 'Google calendar disconnected successfully'
+      };
+    } catch (error) {
+      console.error('Error disconnecting Google calendar:', error);
+      throw error;
+    }
+  }
 }
