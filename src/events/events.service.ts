@@ -7,6 +7,7 @@ import { DomainProfile } from '../schemas/domain-profile.schema';
 import { EncryptionService } from '../common/encryption.service';
 import { Buffer } from 'buffer';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import axios from 'axios';
 const dav = require('dav');
 
 @Injectable()
@@ -346,6 +347,21 @@ export class EventsService {
               };
               break;
 
+            case 'google':
+              if (connector.connector_creds?.google?.isActive && connector.connector_creds?.google?.isValid) {
+                result = await this.syncGoogleCalendarEvents(connector);
+                totalProcessed++;
+              } else {
+                this.logger.warn(`⚠️ Google connector inactive/invalid for user: ${connector.userId}`);
+                result = {
+                  connectorType: 'google',
+                  userId: connector.userId.toString(),
+                  status: 'skipped',
+                  message: 'Connector inactive or invalid'
+                };
+              }
+              break;
+
             default:
               this.logger.warn(`❓ Unknown connector type: ${connector.connector_name}`);
               result = {
@@ -501,6 +517,285 @@ export class EventsService {
     } catch (error) {
       this.logger.error(`❌ Orange calendar sync error for user ${connector.userId}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Sync events from Google Calendar
+   */
+  private async syncGoogleCalendarEvents(connector: any): Promise<any> {
+    try {
+      this.logger.log(`🔵 Starting Google Calendar sync for user: ${connector.userId}`);
+
+      const googleCreds = connector.connector_creds.google;
+      if (!googleCreds?.accessToken || !googleCreds?.refreshToken) {
+        throw new Error('Missing Google credentials');
+      }
+
+      // Check if token needs refresh (5 minute buffer)
+      const now = new Date();
+      const expiresAt = new Date(googleCreds.expiresAt);
+      const bufferTime = 5 * 60 * 1000; // 5 minutes
+      
+      let accessToken = googleCreds.accessToken;
+
+      if (now.getTime() > (expiresAt.getTime() - bufferTime)) {
+        this.logger.log('🔄 Google token expired, refreshing...');
+        
+        // Refresh token logic
+        const refreshed = await this.refreshGoogleTokenForSync(connector);
+        if (!refreshed) {
+          throw new Error('Failed to refresh Google access token');
+        }
+        accessToken = refreshed;
+      }
+
+      // Get current month's date range
+      const currentDate = new Date();
+      const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+      const lastDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59);
+
+      // Fetch events from Google Calendar API
+      const timeMin = firstDayOfMonth.toISOString();
+      const timeMax = lastDayOfMonth.toISOString();
+
+      this.logger.log(`📅 Fetching Google Calendar events from ${timeMin} to ${timeMax}`);
+
+      const eventsUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events`;
+
+      // Use axios instead of fetch for better network compatibility
+      const response = await axios.get(eventsUrl, {
+        params: {
+          timeMin: timeMin,
+          timeMax: timeMax,
+          singleEvents: true,
+          orderBy: 'startTime'
+        },
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json'
+        },
+        timeout: 15000, // 15 second timeout
+        family: 4,
+        proxy: false
+      });
+
+      const calendarData = response.data;
+      const googleEvents = calendarData.items || [];
+
+      if (googleEvents.length === 0) {
+        this.logger.log(`📭 No events found in Google Calendar for user: ${connector.userId}`);
+        return {
+          connectorType: 'google',
+          userId: connector.userId.toString(),
+          status: 'success',
+          message: 'No events found to sync',
+          eventsSynced: 0
+        };
+      }
+
+      this.logger.log(`📊 Found ${googleEvents.length} event(s) in Google Calendar`);
+
+      // Parse Google Calendar events to our format
+      const events: any[] = [];
+      for (const gEvent of googleEvents) {
+        try {
+          const eventInfo = this.parseGoogleCalendarEvent(gEvent);
+          if (eventInfo) {
+            events.push(eventInfo);
+          }
+        } catch (parseError) {
+          this.logger.warn(`⚠️ Error parsing Google event: ${parseError.message}`);
+        }
+      }
+
+      if (events.length === 0) {
+        return {
+          connectorType: 'google',
+          userId: connector.userId.toString(),
+          status: 'success',
+          message: 'No valid events found to sync',
+          eventsSynced: 0
+        };
+      }
+
+      // Save events to database with conflict prevention
+      const syncedEvents = await this.saveEventsToDatabase(events, connector.userId, 'google');
+
+      this.logger.log(`✅ Successfully synced ${syncedEvents} events from Google Calendar`);
+
+      return {
+        connectorType: 'google',
+        userId: connector.userId.toString(),
+        status: 'success',
+        message: `Successfully synced ${syncedEvents} events`,
+        eventsSynced: syncedEvents,
+        eventsData: events
+      };
+
+    } catch (error) {
+      this.logger.error(`❌ Google Calendar sync error for user ${connector.userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Parse Google Calendar event to our event format
+   */
+  private parseGoogleCalendarEvent(gEvent: any): any | null {
+    try {
+      const eventInfo: any = {};
+
+      // Extract event title
+      eventInfo.title = gEvent.summary || 'Untitled Event';
+
+      // Extract event ID
+      eventInfo.uid = gEvent.id;
+
+      // Extract description
+      eventInfo.description = gEvent.description || '';
+
+      // Extract start time and date
+      const start = gEvent.start?.dateTime || gEvent.start?.date;
+      const end = gEvent.end?.dateTime || gEvent.end?.date;
+
+      if (!start) {
+        this.logger.warn('⚠️ Google event missing start time');
+        return null;
+      }
+
+      // Check if all-day event
+      eventInfo.isAllDay = !!gEvent.start?.date; // If 'date' is used instead of 'dateTime', it's all-day
+
+      if (eventInfo.isAllDay) {
+        // All-day event
+        const startDate = new Date(start);
+        eventInfo.startDate = startDate.toISOString().split('T')[0];
+        eventInfo.startTimeFormatted = '00:00';
+      } else {
+        // Timed event - parse datetime
+        const startDate = new Date(start);
+        
+        // Convert to Paris timezone
+        const parisFormatter = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Europe/Paris',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        });
+
+        const parts = parisFormatter.formatToParts(startDate);
+        const partsMap = parts.reduce((acc, part) => {
+          acc[part.type] = part.value;
+          return acc;
+        }, {} as any);
+
+        eventInfo.startDate = `${partsMap.year}-${partsMap.month}-${partsMap.day}`;
+        eventInfo.startTimeFormatted = `${partsMap.hour}:${partsMap.minute}`;
+        eventInfo.startTimeLocal = eventInfo.startTimeFormatted;
+        eventInfo.startDateLocal = eventInfo.startDate;
+        eventInfo.timezone = 'Europe/Paris';
+      }
+
+      // Log parsed event
+      this.logger.log(`📋 Parsed Google event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted}`);
+
+      return eventInfo;
+
+    } catch (error) {
+      this.logger.warn('⚠️ Error parsing Google Calendar event:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Refresh Google token specifically for sync operations
+   */
+  private async refreshGoogleTokenForSync(connector: any): Promise<string | null> {
+    try {
+      const googleCreds = connector.connector_creds.google;
+      
+      if (!googleCreds?.refreshToken) {
+        throw new Error('Missing Google refresh token');
+      }
+
+      // Note: We need ConfigService injected for this
+      // For now, use environment variables directly or pass from the main service
+      const clientId = process.env.GOOGLE_CLIENT_ID;
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+      if (!clientId || !clientSecret) {
+        throw new Error('Google OAuth credentials are not configured');
+      }
+
+      const refreshToken = googleCreds.refreshToken;
+
+      // Exchange refresh token for new access token
+      const tokenUrl = 'https://oauth2.googleapis.com/token';
+      
+      const params = new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token'
+      });
+
+      // Use axios instead of fetch for better network compatibility
+      const response = await axios.post(tokenUrl, params.toString(), {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        timeout: 10000, // 10 second timeout
+        family: 4,
+        proxy: false
+      });
+
+      const tokenData = response.data;
+
+      if (!tokenData || !tokenData.access_token) {
+        this.logger.error('❌ Google token refresh failed: Invalid response', tokenData);
+        // Mark connector as invalid
+        connector.connector_creds.google.isValid = false;
+        await connector.save();
+        return null;
+      }
+
+      // Update access token in database
+      const newExpiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
+      
+      connector.connector_creds.google.accessToken = tokenData.access_token;
+      connector.connector_creds.google.expiresIn = tokenData.expires_in;
+      connector.connector_creds.google.expiresAt = newExpiresAt;
+      connector.connector_creds.google.isValid = true;
+      
+      // Keep existing refresh token if not provided
+      if (tokenData.refresh_token) {
+        connector.connector_creds.google.refreshToken = tokenData.refresh_token;
+      }
+
+      await connector.save();
+
+      this.logger.log('✅ Google token refreshed successfully for sync');
+      return tokenData.access_token;
+      
+    } catch (error) {
+      this.logger.error('❌ Error refreshing Google token for sync:', error);
+      
+      // Mark connector as invalid if authentication failed
+      if (error.response?.status === 401 || error.response?.status === 400) {
+        try {
+          connector.connector_creds.google.isValid = false;
+          await connector.save();
+          this.logger.warn('⚠️ Marked Google connector as invalid due to auth failure');
+        } catch (saveError) {
+          this.logger.error('❌ Failed to mark connector as invalid:', saveError);
+        }
+      }
+      
+      return null;
     }
   }
 
