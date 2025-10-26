@@ -458,14 +458,14 @@
         <div class="content">
             <div class="greeting">Bonjour {{providerName}}</div>
             
-            <h1 class="provider-title">Invité attendu prochainement</h1>
+            <h1 class="provider-title">Votre réservation approche !</h1>
             
-            <div class="hours-notice">
+            {{!-- <div class="hours-notice">
                 L'expérience commence dans {{hoursBeforeEvent}} heure{{#if (gt hoursBeforeEvent 1)}}s{{/if}} !
-            </div>
+            </div> --}}
             
             <div class="customer-info-card">
-                <h3>👤 Invité</h3>
+                <h3>Réservation</h3>
                 <p><strong>{{eventName}}</strong></p>
             </div>
             
@@ -567,16 +567,16 @@
                 </div>
                 {{/if}}
                 
-                {{#if eventLocation}}
+                {{!-- {{#if eventLocation}}
                 <div style="background-color: #f0f8f5; border-radius: 8px; padding: 15px; margin-top: 20px;">
                     <div style="display: flex; align-items: center;">
                         <span style="margin-right: 10px;"><img src="https://api.rosedesvins.co/v1/web/image/location" alt="Location" width="16" height="16"></span>
                         <span style="color: #3A7B59; font-weight: 600;">Lieu: {{eventLocation}}</span>
                     </div>
                 </div>
-                {{/if}}
+                {{/if}} --}}
                 
-                <div class="preparation-checklist">
+                {{!-- <div class="preparation-checklist">
                     <h3>📋 Préparation de l'accueil</h3>
                     <ul class="checklist">
                         <li>Sélection et préparation des vins pour la dégustation</li>
@@ -585,7 +585,7 @@
                         <li>Préparation des supports d'information et de dégustation</li>
                         <li>Accueil chaleureux et présentation du domaine</li>
                     </ul>
-                </div>
+                </div> --}}
             </div>
             
             {{#if domainAddress}}
