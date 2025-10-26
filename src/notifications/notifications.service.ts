@@ -382,7 +382,7 @@ export class NotificationsService {
             // Send email to customer
             const emailJob: EmailJob = {
                 to: customerEmail,
-                subject: `Rappel : Votre expérience œnologique "${event.eventName}" dans ${hoursBeforeEvent} heures`,
+                subject: `Rappel : Votre expérience œnologique "${service?.name}" dans ${hoursBeforeEvent} heures`,
                 html: emailHtml,
             };
             await this.emailService.sendEmail(emailJob);
@@ -508,7 +508,7 @@ export class NotificationsService {
             // Send email
             const emailJob: EmailJob = {
                 to: providerEmail,
-                subject: `Expérience client à venir : ${event.eventName} dans ${hoursBeforeEvent} heures`,
+                subject: `Expérience client à venir : ${service?.name} dans ${hoursBeforeEvent} heures`,
                 html: emailHtml,
             };
             await this.emailService.sendEmail(emailJob);
