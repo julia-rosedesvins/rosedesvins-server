@@ -301,7 +301,10 @@ export class NotificationsService {
 
             // Get hours before event for notification
             const hoursBeforeEvent = this.getHoursFromNotificationSetting(preferences.customerNotificationBefore);
-            console.log(`Hours before event for customer notification: ${hoursBeforeEvent}`, preferences.customerNotificationBefore);
+            
+            if(hoursBeforeEvent === 0) {
+                return 
+            }
 
             // Get booking details to access customer information
             const booking = event.bookingId;
@@ -424,6 +427,10 @@ export class NotificationsService {
             // Get hours before event for notification
             const hoursBeforeEvent = this.getHoursFromNotificationSetting(preferences.providerNotificationBefore);
 
+            if(hoursBeforeEvent === 0) {
+                return 
+            }
+
             // Get booking details to access customer information
             const booking = event.bookingId;
             if (!booking) {
@@ -474,6 +481,7 @@ export class NotificationsService {
                 eventLocation: event.location || 'Rose des Vins',
                 eventDescription: event.eventDescription || service?.description,
                 hoursBeforeEvent: hoursBeforeEvent,
+                eventName: event.eventName,
                 // Enhanced fields for booking-style template
                 domainName: domainName,
                 domainAddress: '', // Domain profile doesn't have address field
