@@ -301,6 +301,7 @@ export class NotificationsService {
 
             // Get hours before event for notification
             const hoursBeforeEvent = this.getHoursFromNotificationSetting(preferences.customerNotificationBefore);
+            console.log(`Hours before event for customer notification: ${hoursBeforeEvent}`, preferences.customerNotificationBefore);
 
             // Get booking details to access customer information
             const booking = event.bookingId;
@@ -636,6 +637,16 @@ export class NotificationsService {
                 return 24;
             case '2day':
                 return 48;
+            case '1_hour':
+                return 1;
+            case '2_hours':
+                return 2;
+            case 'day_before':
+                return 24;
+            case 'last_minute':
+                return 0.0833; // 5 minutes
+            case 'never':
+                return 0;
             default:
                 return 2; // Default to 2 hours
         }
@@ -686,19 +697,21 @@ export class NotificationsService {
 
             // Find user's notification preferences (or use defaults)
             let preferences = await this.notificationPreferencesModel
-                .findOne({ userId: event.userId._id })
-                .populate('domainId')
+                .findOne({ userId: event.userId._id.toString() })
+                // .populate('domainId')
                 .exec();
 
+            console.log('User notification preferences:', preferences);
+
             // If no preferences found, create default preferences object for testing
-            if (!preferences) {
-                preferences = {
-                    userId: event.userId._id,
-                    customerNotificationBefore: '2_hours' as any,
-                    providerNotificationBefore: '2_hours' as any,
-                } as any;
-                this.logger.warn(`No notification preferences found for user ${event.userId._id}, using defaults`);
-            }
+            // if (!preferences) {
+            //     preferences = {
+            //         userId: event.userId._id,
+            //         customerNotificationBefore: '2_hours' as any,
+            //         providerNotificationBefore: '2_hours' as any,
+            //     } as any;
+            //     this.logger.warn(`No notification preferences found for user ${event.userId._id}, using defaults`);
+            // }
 
             // Get booking and user data
             const booking = event.bookingId as any;
