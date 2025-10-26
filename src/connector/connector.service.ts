@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { ConfigService } from '@nestjs/config';
 import { Model, Types } from 'mongoose';
 import * as dav from 'dav';
+import axios from 'axios';
 import { EncryptionService } from '../common/encryption.service';
 import { Connector } from '../schemas/connector.schema';
 import { User } from '../schemas/user.schema';
@@ -427,6 +428,7 @@ export class ConnectorService {
       console.log('  - Token Type:', tokenData.token_type);
       console.log('  - Expires In:', tokenData.expires_in, 'seconds');
       console.log('  - Scope:', tokenData.scope);
+      console.log('- access token', tokenData)
 
       // Calculate token expiration date
       const expiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
@@ -614,6 +616,8 @@ export class ConnectorService {
       return 'orange';
     } else if (connector.connector_name === 'microsoft' && creds?.microsoft?.isActive) {
       return 'microsoft';
+    } else if (connector.connector_name === 'google' && creds?.google?.isActive) {
+      return 'google';
     } else if (connector.connector_name === 'ovh' && creds?.ovh) {
       return 'ovh';
     }
@@ -780,6 +784,246 @@ export class ConnectorService {
     } catch (error) {
       console.error('❌ Error refreshing Microsoft token:', error);
       return false;
+    }
+  }
+
+  /**
+   * Generate Google OAuth URL for calendar integration
+   */
+  async generateGoogleOAuthUrl(userId: string): Promise<{
+    authUrl: string;
+    state: string;
+  }> {
+    try {
+      const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
+      const redirectUri = this.configService.get<string>('GOOGLE_REDIRECT_URI') || 'http://localhost:5001/v1/connectors/google/callback';
+      
+      if (!clientId) {
+        throw new BadRequestException('Google OAuth client ID is not configured');
+      }
+
+      // Generate a unique state parameter for security (prevents CSRF attacks)
+      const state = `${userId}_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+      
+      // Required scopes for Google Calendar operations and user info
+      // Only using calendar scopes that are enabled in Google Cloud Console
+      const scopes = [
+        'https://www.googleapis.com/auth/calendar',
+        'https://www.googleapis.com/auth/calendar.events',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/userinfo.profile'
+      ].join(' ');
+
+      // Google OAuth 2.0 authorization endpoint
+      const baseUrl = 'https://accounts.google.com/o/oauth2/v2/auth';
+      
+      const params = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        scope: scopes,
+        state: state,
+        access_type: 'offline', // Required for refresh token
+        prompt: 'consent' // Force consent screen to ensure refresh token
+      });
+
+      const authUrl = `${baseUrl}?${params.toString()}`;
+
+      return {
+        authUrl,
+        state
+      };
+    } catch (error) {
+      console.error('Error generating Google OAuth URL:', error);
+      throw new BadRequestException('Failed to generate Google OAuth URL');
+    }
+  }
+
+  /**
+   * Exchange Google authorization code for access token and save to database
+   */
+  async exchangeGoogleToken(userId: string, authCode: string): Promise<void> {
+    try {
+      const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
+      const clientSecret = this.configService.get<string>('GOOGLE_CLIENT_SECRET');
+      const redirectUri = this.configService.get<string>('GOOGLE_REDIRECT_URI') || 'http://localhost:5001/v1/connectors/google/callback';
+
+      if (!clientId || !clientSecret) {
+        throw new BadRequestException('Google OAuth credentials are not configured');
+      }
+
+      // Exchange code for token
+      const tokenUrl = 'https://oauth2.googleapis.com/token';
+      
+      const params = new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code: authCode,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code'
+      });
+
+      const response = await axios.post(tokenUrl, params.toString(), {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        timeout: 30000,
+        family: 4,
+        proxy: false
+      });
+
+      const tokenData = response.data;
+
+      // Fetch user profile information using the access token
+      let userProfile: any = {};
+      if (tokenData.access_token) {
+        try {
+          const userInfoResponse = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
+            headers: {
+              'Authorization': `Bearer ${tokenData.access_token}`
+            },
+            timeout: 30000,
+            family: 4,
+            proxy: false
+          });
+
+          userProfile = userInfoResponse.data;
+        } catch (profileError) {
+          console.error('Failed to fetch Google user profile:', profileError.message);
+        }
+      }
+
+      // Calculate token expiration date
+      const expiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
+
+      // Convert userId to ObjectId
+      const userObjectId = new Types.ObjectId(userId);
+
+      // Save Google credentials to database
+      const existingConnector = await this.connectorModel.findOne({ 
+        userId: userObjectId
+      });
+
+      if (existingConnector) {
+        // Only one calendar can be connected at a time
+        // Clear all existing credentials and set only Google
+        existingConnector.connector_creds = {
+          orange: null,
+          ovh: null,
+          microsoft: null,
+          google: {
+            accessToken: tokenData.access_token,
+            refreshToken: tokenData.refresh_token,
+            tokenType: tokenData.token_type || 'Bearer',
+            expiresIn: tokenData.expires_in,
+            scope: tokenData.scope || '',
+            expiresAt: expiresAt,
+            email: userProfile.email || '',
+            name: userProfile.name || '',
+            givenName: userProfile.given_name || '',
+            familyName: userProfile.family_name || '',
+            picture: userProfile.picture || '',
+            googleUserId: userProfile.id || '',
+            verifiedEmail: userProfile.verified_email || false,
+            isActive: true,
+            isValid: true,
+            connectedAt: new Date()
+          }
+        };
+
+        // Update connector_name to 'google'
+        existingConnector.connector_name = 'google';
+
+        await existingConnector.save();
+        console.log('✅ Updated existing connector with Google credentials');
+      } else {
+        // Create new connector document for this user
+        const newConnector = new this.connectorModel({
+          userId: userObjectId,
+          connector_name: 'google',
+          connector_creds: {
+            orange: null,
+            ovh: null,
+            microsoft: null,
+            google: {
+              accessToken: tokenData.access_token,
+              refreshToken: tokenData.refresh_token,
+              tokenType: tokenData.token_type || 'Bearer',
+              expiresIn: tokenData.expires_in,
+              scope: tokenData.scope || '',
+              expiresAt: expiresAt,
+              email: userProfile.email || '',
+              name: userProfile.name || '',
+              givenName: userProfile.given_name || '',
+              familyName: userProfile.family_name || '',
+              picture: userProfile.picture || '',
+              googleUserId: userProfile.id || '',
+              verifiedEmail: userProfile.verified_email || false,
+              isActive: true,
+              isValid: true,
+              connectedAt: new Date()
+            }
+          }
+        });
+
+        await newConnector.save();
+        console.log('✅ Created new connector document with Google credentials');
+      }
+
+      console.log('💾 Google credentials saved successfully to database');
+
+    } catch (error) {
+      console.error('❌ Error exchanging Google token:', error);
+      
+      if (axios.isAxiosError(error)) {
+        if (error.response?.data) {
+          throw new BadRequestException(`Failed to exchange Google authorization code: ${error.response.data.error_description || error.response.data.error || 'Unknown error'}`);
+        }
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's Google calendar connection status
+   * @param userId - User ID
+   * @returns Google connector if exists
+   */
+  async getGoogleConnector(userId: string): Promise<Connector | null> {
+    const userObjectId = new Types.ObjectId(userId);
+    
+    const connector = await this.connectorModel
+      .findOne({ 
+        userId: userObjectId
+      })
+      .populate('userId', 'firstName lastName email domainName')
+      .exec();
+
+    return connector;
+  }
+
+  /**
+   * Disconnect Google calendar
+   * @param userId - User ID
+   * @returns Success confirmation
+   */
+  async disconnectGoogleCalendar(userId: string): Promise<void> {
+    const userObjectId = new Types.ObjectId(userId);
+    
+    const connector = await this.connectorModel.findOne({ 
+      userId: userObjectId
+    });
+
+    if (!connector) {
+      throw new NotFoundException('Connector not found for this user');
+    }
+
+    // Clear the google credentials and set connector_name to 'none'
+    if (connector.connector_creds) {
+      connector.connector_creds.google = null;
+      connector.connector_name = 'none';
+      await connector.save();
     }
   }
 }

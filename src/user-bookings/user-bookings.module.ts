@@ -13,6 +13,7 @@ import { EmailModule } from '../email/email.module';
 import { EncryptionService } from '../common/encryption.service';
 import { ConnectorService } from '../connector/connector.service';
 import { PaymentMethods, PaymentMethodsSchema } from 'src/schemas/payment-methods.schema';
+import { GoogleEventsApiService } from './utils/google-events-apis.utils';
 
 @Module({
   imports: [
@@ -32,7 +33,8 @@ import { PaymentMethods, PaymentMethodsSchema } from 'src/schemas/payment-method
   providers: [
     UserBookingsService, 
     EncryptionService,
-    ConnectorService
+    ConnectorService,
+    GoogleEventsApiService
   ],
 })
 export class UserBookingsModule {}

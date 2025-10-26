@@ -287,6 +287,7 @@ export class NotificationsService {
      */
     private async sendCustomerNotification(event: any, preferences: any): Promise<void> {
         try {
+            console.log(event);
             const eventDateTime = this.combineDateTime(event.eventDate, event.eventTime);
             const timeUntilEvent = this.getTimeUntilEvent(eventDateTime);
 
@@ -300,6 +301,10 @@ export class NotificationsService {
 
             // Get hours before event for notification
             const hoursBeforeEvent = this.getHoursFromNotificationSetting(preferences.customerNotificationBefore);
+            
+            if(hoursBeforeEvent === 0) {
+                return 
+            }
 
             // Get booking details to access customer information
             const booking = event.bookingId;
@@ -319,15 +324,13 @@ export class NotificationsService {
             
             // Get domain profile for additional details
             const domain = await this.domainProfileModel.findOne({
-                userId: provider._id
+                userId: provider._id,
             }).exec();
-            
+  
             // Get service details from domain profile
-            const service = domain?.services?.find(s => 
-                s.name && (
-                    event.eventName.toLowerCase().includes(s.name.toLowerCase()) ||
-                    s.name.toLowerCase().includes(event.eventName.toLowerCase())
-                )
+            const service = domain?.services?.find(s =>
+                // @ts-ignore 
+                s._id.toString() === booking.serviceId.toString()
             );
 
             // Calculate cancel booking URL
@@ -338,7 +341,7 @@ export class NotificationsService {
 
             // Get user info for domain name (from User model)
             const userInfo = await this.userModel.findById(provider._id).exec();
-            const domainName = userInfo ? `${userInfo.firstName} ${userInfo.lastName}` : 'Rose des Vins';
+            const domainName = userInfo ? `${userInfo.domainName}` : 'Rose des Vins';
 
             // Prepare email data
             const emailData = {
@@ -366,7 +369,7 @@ export class NotificationsService {
                 totalPrice: service?.pricePerPerson ? `${service.pricePerPerson}€` : 'Prix sur demande',
                 paymentMethod: paymentMethod,
                 frontendUrl: frontendUrl,
-                appLogoUrl: `${backendUrl}/assets/logo.png`,
+                appLogoUrl: `${frontendUrl}/assets/logo.png`,
                 backendUrl: backendUrl,
                 serviceBannerUrl: service?.serviceBannerUrl ? `${backendUrl}${service.serviceBannerUrl}` : `${backendUrl}/uploads/default-service-banner.jpg`,
                 cancelBookingUrl: cancelBookingUrl,
@@ -379,7 +382,7 @@ export class NotificationsService {
             // Send email to customer
             const emailJob: EmailJob = {
                 to: customerEmail,
-                subject: `Reminder: Your wine experience "${event.eventName}" is in ${hoursBeforeEvent} hours`,
+                subject: `Rappel : Votre expérience œnologique "${service?.name}" dans ${hoursBeforeEvent} heures`,
                 html: emailHtml,
             };
             await this.emailService.sendEmail(emailJob);
@@ -424,6 +427,10 @@ export class NotificationsService {
             // Get hours before event for notification
             const hoursBeforeEvent = this.getHoursFromNotificationSetting(preferences.providerNotificationBefore);
 
+            if(hoursBeforeEvent === 0) {
+                return 
+            }
+
             // Get booking details to access customer information
             const booking = event.bookingId;
             if (!booking) {
@@ -450,10 +457,8 @@ export class NotificationsService {
             
             // Get service details from domain profile
             const service = domain?.services?.find(s => 
-                s.name && (
-                    event.eventName.toLowerCase().includes(s.name.toLowerCase()) ||
-                    s.name.toLowerCase().includes(event.eventName.toLowerCase())
-                )
+                // @ts-ignore 
+                s._id.toString() === booking.serviceId.toString()
             );
 
             // Get payment methods for the user
@@ -461,7 +466,7 @@ export class NotificationsService {
 
             // Get user info for domain name (from User model)
             const userInfo = await this.userModel.findById(provider._id).exec();
-            const domainName = userInfo ? `${userInfo.firstName} ${userInfo.lastName}` : 'Rose des Vins';
+            const domainName = userInfo ? `${userInfo.domainName}` : 'Rose des Vins';
 
             // Prepare email data
             const emailData = {
@@ -476,11 +481,12 @@ export class NotificationsService {
                 eventLocation: event.location || 'Rose des Vins',
                 eventDescription: event.eventDescription || service?.description,
                 hoursBeforeEvent: hoursBeforeEvent,
+                eventName: event.eventName,
                 // Enhanced fields for booking-style template
                 domainName: domainName,
                 domainAddress: '', // Domain profile doesn't have address field
                 domainLogoUrl: domain?.domainLogoUrl ? `${backendUrl}${domain.domainLogoUrl}` : `${backendUrl}/assets/logo.png`,
-                serviceName: service?.name || event.eventName,
+                serviceName: service?.name,
                 serviceDescription: service?.description || event.eventDescription,
                 participantsAdults: booking.participantsAdults || 1,
                 participantsChildren: booking.participantsEnfants || 0,
@@ -489,7 +495,7 @@ export class NotificationsService {
                 totalPrice: service?.pricePerPerson ? `${service.pricePerPerson}€` : 'Prix sur demande',
                 paymentMethod: paymentMethod,
                 frontendUrl: frontendUrl,
-                appLogoUrl: `${backendUrl}/assets/logo.png`,
+                appLogoUrl: `${frontendUrl}/assets/logo.png`,
                 backendUrl: backendUrl,
                 serviceBannerUrl: service?.serviceBannerUrl ? `${backendUrl}${service.serviceBannerUrl}` : `${backendUrl}/uploads/default-service-banner.jpg`,
                 customerEmail: booking.customerEmail,
@@ -502,7 +508,7 @@ export class NotificationsService {
             // Send email
             const emailJob: EmailJob = {
                 to: providerEmail,
-                subject: `Upcoming Guest Experience: ${event.eventName} in ${hoursBeforeEvent} hours`,
+                subject: `Expérience client à venir : ${service?.name} dans ${hoursBeforeEvent} heures`,
                 html: emailHtml,
             };
             await this.emailService.sendEmail(emailJob);
@@ -639,6 +645,16 @@ export class NotificationsService {
                 return 24;
             case '2day':
                 return 48;
+            case '1_hour':
+                return 1;
+            case '2_hours':
+                return 2;
+            case 'day_before':
+                return 24;
+            case 'last_minute':
+                return 0.0833; // 5 minutes
+            case 'never':
+                return 0;
             default:
                 return 2; // Default to 2 hours
         }
@@ -689,19 +705,21 @@ export class NotificationsService {
 
             // Find user's notification preferences (or use defaults)
             let preferences = await this.notificationPreferencesModel
-                .findOne({ userId: event.userId._id })
-                .populate('domainId')
+                .findOne({ userId: event.userId._id.toString() })
+                // .populate('domainId')
                 .exec();
 
+            console.log('User notification preferences:', preferences);
+
             // If no preferences found, create default preferences object for testing
-            if (!preferences) {
-                preferences = {
-                    userId: event.userId._id,
-                    customerNotificationBefore: '2_hours' as any,
-                    providerNotificationBefore: '2_hours' as any,
-                } as any;
-                this.logger.warn(`No notification preferences found for user ${event.userId._id}, using defaults`);
-            }
+            // if (!preferences) {
+            //     preferences = {
+            //         userId: event.userId._id,
+            //         customerNotificationBefore: '2_hours' as any,
+            //         providerNotificationBefore: '2_hours' as any,
+            //     } as any;
+            //     this.logger.warn(`No notification preferences found for user ${event.userId._id}, using defaults`);
+            // }
 
             // Get booking and user data
             const booking = event.bookingId as any;
