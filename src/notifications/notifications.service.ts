@@ -287,6 +287,7 @@ export class NotificationsService {
      */
     private async sendCustomerNotification(event: any, preferences: any): Promise<void> {
         try {
+            console.log(event);
             const eventDateTime = this.combineDateTime(event.eventDate, event.eventTime);
             const timeUntilEvent = this.getTimeUntilEvent(eventDateTime);
 
@@ -319,15 +320,13 @@ export class NotificationsService {
             
             // Get domain profile for additional details
             const domain = await this.domainProfileModel.findOne({
-                userId: provider._id
+                userId: provider._id,
             }).exec();
-            
+  
             // Get service details from domain profile
-            const service = domain?.services?.find(s => 
-                s.name && (
-                    event.eventName.toLowerCase().includes(s.name.toLowerCase()) ||
-                    s.name.toLowerCase().includes(event.eventName.toLowerCase())
-                )
+            const service = domain?.services?.find(s =>
+                // @ts-ignore 
+                s._id.toString() === booking.serviceId.toString()
             );
 
             // Calculate cancel booking URL
@@ -338,7 +337,7 @@ export class NotificationsService {
 
             // Get user info for domain name (from User model)
             const userInfo = await this.userModel.findById(provider._id).exec();
-            const domainName = userInfo ? `${userInfo.firstName} ${userInfo.lastName}` : 'Rose des Vins';
+            const domainName = userInfo ? `${userInfo.domainName}` : 'Rose des Vins';
 
             // Prepare email data
             const emailData = {
@@ -450,10 +449,8 @@ export class NotificationsService {
             
             // Get service details from domain profile
             const service = domain?.services?.find(s => 
-                s.name && (
-                    event.eventName.toLowerCase().includes(s.name.toLowerCase()) ||
-                    s.name.toLowerCase().includes(event.eventName.toLowerCase())
-                )
+                // @ts-ignore 
+                s._id.toString() === booking.serviceId.toString()
             );
 
             // Get payment methods for the user
@@ -461,7 +458,7 @@ export class NotificationsService {
 
             // Get user info for domain name (from User model)
             const userInfo = await this.userModel.findById(provider._id).exec();
-            const domainName = userInfo ? `${userInfo.firstName} ${userInfo.lastName}` : 'Rose des Vins';
+            const domainName = userInfo ? `${userInfo.domainName}` : 'Rose des Vins';
 
             // Prepare email data
             const emailData = {
@@ -480,7 +477,7 @@ export class NotificationsService {
                 domainName: domainName,
                 domainAddress: '', // Domain profile doesn't have address field
                 domainLogoUrl: domain?.domainLogoUrl ? `${backendUrl}${domain.domainLogoUrl}` : `${backendUrl}/assets/logo.png`,
-                serviceName: service?.name || event.eventName,
+                serviceName: service?.name,
                 serviceDescription: service?.description || event.eventDescription,
                 participantsAdults: booking.participantsAdults || 1,
                 participantsChildren: booking.participantsEnfants || 0,

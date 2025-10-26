@@ -428,6 +428,7 @@ export class ConnectorService {
       console.log('  - Token Type:', tokenData.token_type);
       console.log('  - Expires In:', tokenData.expires_in, 'seconds');
       console.log('  - Scope:', tokenData.scope);
+      console.log('- access token', tokenData)
 
       // Calculate token expiration date
       const expiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
