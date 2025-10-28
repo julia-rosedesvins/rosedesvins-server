@@ -194,8 +194,8 @@ export class TemplateService {
 
     return this.baseTemplate({
       ...this.getBaseData(),
-      title: 'Welcome to Rose des Vins',
-      subtitle: 'Your Account Has Been Approved',
+      title: 'Bienvenue chez Rose des Vins',
+      subtitle: 'Votre compte a été approuvé',
       content: contentHtml,
     });
   }
@@ -206,8 +206,8 @@ export class TemplateService {
 
     return this.baseTemplate({
       ...this.getBaseData(),
-      title: 'Application Status Update',
-      subtitle: 'Thank you for your interest',
+      title: 'Mise à jour du statut de la candidature',
+      subtitle: 'Merci de votre intérêt',
       content: contentHtml,
     });
   }
@@ -221,8 +221,8 @@ export class TemplateService {
 
     return this.baseTemplate({
       ...this.getBaseData(),
-      title: 'New Contact Form Submission',
-      subtitle: 'Admin Notification',
+      title: 'Nouvelle soumission de formulaire de contact',
+      subtitle: 'Notification administrateur',
       content: contentHtml,
     });
   }

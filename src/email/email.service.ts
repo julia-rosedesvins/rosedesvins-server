@@ -41,7 +41,7 @@ export class EmailService {
   async sendWelcomeEmail(userData: WelcomeEmailData): Promise<void> {
     const emailJob: EmailJob = {
       to: userData.email,
-      subject: 'Welcome to Rose des Vins - Account Approved! 🎉',
+      subject: 'Bienvenue chez Rose des Vins - Compte approuvé ! 🎉',
       html: this.templateService.generateWelcomeEmail(userData),
     };
 
@@ -52,7 +52,7 @@ export class EmailService {
   async sendRejectionEmail(userData: RejectionEmailData): Promise<void> {
     const emailJob: EmailJob = {
       to: userData.email,
-      subject: 'Rose des Vins - Application Status Update',
+      subject: 'Rose des Vins - Mise à jour du statut de la candidature',
       html: this.templateService.generateRejectionEmail(userData),
     };
 
@@ -65,7 +65,7 @@ export class EmailService {
     
     const emailJob: EmailJob = {
       to: adminEmail,
-      subject: `New Contact Form Submission - ${formData.fullName}`,
+      subject: `Nouvelle soumission de formulaire de contact - ${formData.fullName}`,
       html: this.templateService.generateContactFormEmail(formData),
     };
     
