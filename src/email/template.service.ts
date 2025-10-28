@@ -90,6 +90,7 @@ export interface ProviderNotificationEmailData {
   serviceBannerUrl?: string;
   customerEmail?: string;
   additionalNotes?: string;
+  eventName?: string;
 }
 
 export interface BookingEmailTemplateData {
