@@ -52,6 +52,7 @@ export interface BookingEmailData {
   backendUrl: string;
   serviceBannerUrl: string;
   cancelBookingUrl?: string;
+  eventName?: string;
 }
 
 /**
@@ -105,7 +106,7 @@ export class UserBookingsService {
 
     const methodTranslations: { [key: string]: string } = {
       'bank card': 'Carte bancaire',
-      'checks': 'Chèques', 
+      'checks': 'Chèques',
       'cash': 'Espèces'
     };
 
@@ -149,7 +150,7 @@ export class UserBookingsService {
 
       // Find the booking first to validate it exists
       const booking = await this.userBookingModel.findById(bookingId).exec();
-      
+
       if (!booking) {
         throw new NotFoundException('Réservation non trouvée');
       }
@@ -167,11 +168,11 @@ export class UserBookingsService {
 
     } catch (error) {
       console.error(`❌ Error cancelling booking ${bookingId}:`, error);
-      
+
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
       }
-      
+
       throw new InternalServerErrorException('Erreur lors de l\'annulation de la réservation');
     }
   }
@@ -194,7 +195,7 @@ export class UserBookingsService {
    */
   private constructImageUrls(domainProfile: any, service: any) {
     const backendUrl = this.configService.get('BACKEND_URL') || 'http://localhost:3000';
-    
+
     return {
       domainLogoUrl: this.joinUrl(backendUrl, domainProfile?.domainLogoUrl || '/assets/logo.png'),
       serviceBannerUrl: this.joinUrl(backendUrl, service?.serviceBannerUrl || '/uploads/default-service-banner.jpg'),
@@ -285,6 +286,26 @@ export class UserBookingsService {
           eventDuration: bookingData.eventDuration,
           eventDescription: this.formatEventDescription(bookingData, type),
           hoursBeforeEvent: 0, // Immediate notification
+          eventName: bookingData.eventName,
+
+          // Enhanced fields for booking-style template
+          domainName: bookingData.domainName,
+          domainAddress: '', // Domain profile doesn't have address field
+          domainLogoUrl: bookingData.domainLogoUrl,
+          serviceName: bookingData.serviceName,
+          serviceDescription: bookingData.serviceDescription,
+          participantsAdults: bookingData.participantsAdults || 1,
+          participantsChildren: bookingData.participantsChildren || 0,
+          selectedLanguage: bookingData.selectedLanguage || 'Français',
+          numberOfWinesTasted: bookingData.numberOfWinesTasted || 3,
+          totalPrice: bookingData.totalPrice,
+          paymentMethod: bookingData.paymentMethod,
+          frontendUrl: bookingData.frontendUrl,
+          appLogoUrl: bookingData.appLogoUrl,
+          backendUrl: bookingData.backendUrl,
+          serviceBannerUrl: bookingData.serviceBannerUrl,
+          customerEmail: bookingData.customerEmail,
+          additionalNotes: bookingData.additionalNotes ?? undefined,
         });
 
         const emailJob = {
@@ -466,6 +487,7 @@ export class UserBookingsService {
             selectedLanguage: this.getLanguageInFrench(createBookingDto.selectedLanguage),
             additionalNotes: createBookingDto.additionalNotes,
             numberOfWinesTasted: service?.numberOfWinesTasted || 0,
+            eventName: `Réservation: ${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
             // Enhanced template data
             domainName: user?.domainName || 'Domaine La Bastide Blanche',
             domainAddress: user?.address && user?.codePostal && user?.city
@@ -474,7 +496,7 @@ export class UserBookingsService {
             domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
-            totalPrice: service?.pricePerPerson ? `${service.pricePerPerson} €` : '20 €',
+            totalPrice: service?.pricePerPerson ? `${service.pricePerPerson * (createBookingDto.participantsAdults + createBookingDto.participantsEnfants || 0)} €` : '20 €',
             paymentMethod: formattedPaymentMethods,
             frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
             appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
@@ -925,10 +947,10 @@ export class UserBookingsService {
 
       // Create datetime strings in Europe/Paris timezone (without UTC conversion)
       const startDateTimeStr = `${bookingDateStr}T${bookingDto.bookingTime}:00`;
-      
+
       // Calculate end time based on service duration
       const eventDuration = await this.getServiceDuration(booking.userId, bookingDto.serviceId);
-      
+
       // Parse the time to calculate end time
       const [hours, minutes] = bookingDto.bookingTime.split(':').map(Number);
       const startMinutes = hours * 60 + minutes;
@@ -1280,7 +1302,7 @@ export class UserBookingsService {
             domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
-            totalPrice: service?.pricePerPerson ? `${service.pricePerPerson} €` : '20 €',
+            totalPrice: service?.pricePerPerson ? `${service.pricePerPerson * (updatedBooking.participantsAdults + updatedBooking.participantsEnfants || 0)} €` : '20 €',
             paymentMethod: formattedPaymentMethods,
             frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
             appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
@@ -1657,7 +1679,7 @@ export class UserBookingsService {
             domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
-            totalPrice: service?.pricePerPerson ? `${service.pricePerPerson} €` : '20 €',
+            totalPrice: service?.pricePerPerson ? `${service.pricePerPerson * (booking.participantsAdults + booking.participantsEnfants || 0)} €` : '20 €',
             paymentMethod: formattedPaymentMethods,
             frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
             appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
@@ -2017,7 +2039,7 @@ export class UserBookingsService {
       // Check if we have a Google event ID to update
       if (!newBooking.googleEventId) {
         console.log('ℹ️ No Google event ID found, creating new event instead');
-        
+
         // Convert newBooking to CreateBookingDto format for creating new event
         const bookingDto = {
           userId: newBooking.userId.toString(),
@@ -2044,10 +2066,10 @@ export class UserBookingsService {
         : newBooking.bookingDate;
 
       const startDateTimeStr = `${bookingDateStr}T${newBooking.bookingTime}:00`;
-      
+
       // Calculate end time based on service duration
       const eventDuration = await this.getServiceDuration(newBooking.userId, newBooking.serviceId.toString());
-      
+
       const [hours, minutes] = newBooking.bookingTime.split(':').map(Number);
       const startMinutes = hours * 60 + minutes;
       const endMinutes = startMinutes + eventDuration;
@@ -2153,7 +2175,7 @@ export class UserBookingsService {
 
       // Find the booking
       const booking = await this.userBookingModel.findById(bookingObjectId).lean();
-      
+
       if (!booking) {
         throw new NotFoundException('Réservation introuvable');
       }
@@ -2171,7 +2193,7 @@ export class UserBookingsService {
       }
 
       // Find the specific service
-      const service = domainProfile.services.find(s => 
+      const service = domainProfile.services.find(s =>
         (s as any)._id && (s as any)._id.toString() === booking.serviceId.toString()
       );
 
