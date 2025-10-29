@@ -111,8 +111,6 @@ export class DomainProfileController {
         // Remove services from here as they'll be managed separately
       };
 
-      console.log('Domain profile data for validation:', JSON.stringify(domainProfileData, null, 2));
-
       // Validate the data (excluding files)
       const validatedData = CreateOrUpdateDomainProfileSchema.parse(domainProfileData);
 

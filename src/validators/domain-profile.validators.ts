@@ -47,14 +47,12 @@ const ServiceSchema = z.object({
 export const CreateOrUpdateDomainProfileSchema = z.object({
   domainName: z
     .string()
-    .min(2, 'Domain name must be at least 2 characters')
     .max(100, 'Domain name must not exceed 100 characters')
     .trim()
     .optional(),
   
   domainDescription: z
     .string()
-    .min(10, 'Domain description must be at least 10 characters')
     .max(2000, 'Domain description must not exceed 2000 characters')
     .trim()
     .optional(),
@@ -83,7 +81,6 @@ export const CreateOrUpdateDomainProfileSchema = z.object({
   
   domainColor: z
     .string()
-    .regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/, 'Color must be a valid hex color (e.g., #3A7B59 or #FFF)')
     .optional()
 });
 
