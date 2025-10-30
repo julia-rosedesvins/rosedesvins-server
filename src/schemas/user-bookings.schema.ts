@@ -201,12 +201,12 @@ UserBookingSchema.index({ userId: 1, bookingDate: 1 }); // Query bookings by use
 UserBookingSchema.index({ serviceId: 1, bookingDate: 1 }); // Query bookings by service and date
 UserBookingSchema.index({ bookingStatus: 1, bookingDate: 1 }); // Query by status and date
 UserBookingSchema.index({ createdAt: -1 }); // Sort by creation date
-UserBookingSchema.index({ 
-  userId: 1, 
-  serviceId: 1, 
-  bookingDate: 1, 
-  bookingTime: 1 
-}, { 
-  unique: true,
-  name: 'unique_booking_slot'
-}); // Prevent duplicate bookings for same user, service, date, and time
+// UserBookingSchema.index({ 
+//   userId: 1, 
+//   serviceId: 1, 
+//   bookingDate: 1, 
+//   bookingTime: 1 
+// }, { 
+//   unique: true,
+//   name: 'unique_booking_slot'
+// }); // Prevent duplicate bookings for same user, service, date, and time
