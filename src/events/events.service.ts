@@ -863,12 +863,24 @@ export class EventsService {
           this.logger.log(`   🌍 Timezone: ${eventInfo.timezone}`);
           this.logger.log(`   📍 StartTimeLocal: ${eventInfo.startTimeLocal}`);
 
+          // Determine event time - only add 3-hour offset for Orange Calendar (not Google)
+          let finalEventTime = eventInfo.startTimeFormatted || '00:00';
+          if (source === 'orange') {
+            // Orange Calendar needs 3-hour adjustment due to timezone handling quirks
+            finalEventTime = this.addHoursToTimeString(eventInfo.startTimeFormatted, 3) || '00:00';
+            this.logger.log(`   🍊 Applied 3-hour Orange Calendar adjustment: ${eventInfo.startTimeFormatted} → ${finalEventTime}`);
+          } else if (source === 'google') {
+            // Google Calendar times are already correctly converted to Paris timezone
+            finalEventTime = eventInfo.startTimeFormatted || '00:00';
+            this.logger.log(`   🔵 Using Google Calendar time as-is (already in Paris timezone): ${finalEventTime}`);
+          }
+
           // Create new event document
           const newEvent = new this.eventModel({
             userId: userId,
             eventName: eventInfo.title || 'Untitled Event',
             eventDate: new Date(eventInfo.startDate),
-            eventTime: this.addHoursToTimeString(eventInfo.startTimeFormatted, 3) || '00:00',
+            eventTime: finalEventTime,
             eventDescription: eventInfo.description || '',
             eventType: 'external',
             externalCalendarSource: source,
@@ -880,7 +892,7 @@ export class EventsService {
           await newEvent.save();
           savedCount++;
 
-          this.logger.log(`✅ Saved event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted}`);
+          this.logger.log(`✅ Saved event: ${eventInfo.title} on ${eventInfo.startDate} at ${finalEventTime} (${source} calendar)`);
 
         } catch (saveError) {
           this.logger.error(`❌ Error saving event ${eventInfo.title}:`, saveError);
