@@ -460,6 +460,11 @@ export class EventsService {
       const currentDate = new Date();
       const currentMonth = currentDate.getMonth() + 1; // JavaScript months are 0-based
       const currentYear = currentDate.getFullYear();
+      
+      // Calculate next month and year (handle year rollover)
+      const nextMonth = currentDate.getMonth() + 2; // +2 because getMonth() is 0-based, and we want next month
+      const nextMonthYear = nextMonth > 12 ? currentYear + 1 : currentYear;
+      const adjustedNextMonth = nextMonth > 12 ? 1 : nextMonth;
 
       for (const icsUrl of icsFiles) {
         try {
@@ -477,9 +482,15 @@ export class EventsService {
             if (icsContent.includes('VEVENT')) {
               const eventInfo = this.extractBasicEventInfo(icsContent);
               if (eventInfo && eventInfo.startDate) {
-                // Filter for current month events
+                // Filter for current month + next month events (2 months total)
                 const eventDate = new Date(eventInfo.startDate);
-                if (eventDate.getMonth() + 1 === currentMonth && eventDate.getFullYear() === currentYear) {
+                const eventMonth = eventDate.getMonth() + 1;
+                const eventYear = eventDate.getFullYear();
+                
+                const isCurrentMonth = (eventMonth === currentMonth && eventYear === currentYear);
+                const isNextMonth = (eventMonth === adjustedNextMonth && eventYear === nextMonthYear);
+                
+                if (isCurrentMonth || isNextMonth) {
                   events.push(eventInfo);
                 }
               }
@@ -495,7 +506,7 @@ export class EventsService {
           connectorType: 'orange',
           userId: connector.userId.toString(),
           status: 'success',
-          message: 'No current month events found to sync',
+          message: 'No events found to sync (current + next month)',
           eventsSynced: 0
         };
       }
@@ -550,16 +561,16 @@ export class EventsService {
         accessToken = refreshed;
       }
 
-      // Get current month's date range
+      // Get current month + next month date range (2 months total)
       const currentDate = new Date();
-      const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-      const lastDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59);
+      const firstDayOfCurrentMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+      const lastDayOfNextMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 2, 0, 23, 59, 59);
 
       // Fetch events from Google Calendar API
-      const timeMin = firstDayOfMonth.toISOString();
-      const timeMax = lastDayOfMonth.toISOString();
+      const timeMin = firstDayOfCurrentMonth.toISOString();
+      const timeMax = lastDayOfNextMonth.toISOString();
 
-      this.logger.log(`📅 Fetching Google Calendar events from ${timeMin} to ${timeMax}`);
+      this.logger.log(`📅 Fetching Google Calendar events from ${timeMin} to ${timeMax} (current + next month)`);
 
       const eventsUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events`;
 
@@ -589,7 +600,7 @@ export class EventsService {
           connectorType: 'google',
           userId: connector.userId.toString(),
           status: 'success',
-          message: 'No events found to sync',
+          message: 'No events found to sync (current + next month)',
           eventsSynced: 0
         };
       }
@@ -614,7 +625,7 @@ export class EventsService {
           connectorType: 'google',
           userId: connector.userId.toString(),
           status: 'success',
-          message: 'No valid events found to sync',
+          message: 'No valid events found to sync (current + next month)',
           eventsSynced: 0
         };
       }
