@@ -814,30 +814,44 @@ export class UserBookingsService {
         }
       }
 
-      // Construct event start date from booking data
-      const startDate = bookingDto.bookingDate instanceof Date
-        ? new Date(`${bookingDto.bookingDate.toISOString().split('T')[0]}T${bookingDto.bookingTime}:00`)
-        : new Date(`${bookingDto.bookingDate}T${bookingDto.bookingTime}:00`);
+      // Construct event start date in Paris timezone (without UTC conversion)
+      // Format: YYYY-MM-DDTHH:mm:ss (same as Google Calendar)
+      const bookingDateStr = bookingDto.bookingDate instanceof Date
+        ? bookingDto.bookingDate.toISOString().split('T')[0]
+        : bookingDto.bookingDate;
 
-      if (isNaN(startDate.getTime())) {
-        throw new Error(`Invalid date constructed from booking data`);
-      }
+      // Create datetime strings in Europe/Paris timezone (without UTC conversion)
+      const startDateTimeStr = `${bookingDateStr}T${bookingDto.bookingTime}:00`;
 
-      // Determine event duration from service details
+      // Calculate end time based on service duration
       const eventDuration = await this.getServiceDuration(booking.userId, bookingDto.serviceId);
-      const endDate = new Date(startDate.getTime() + (eventDuration * 60 * 1000));
+
+      // Parse the time to calculate end time
+      const [hours, minutes] = bookingDto.bookingTime.split(':').map(Number);
+      const startMinutes = hours * 60 + minutes;
+      const endMinutes = startMinutes + eventDuration;
+      const endHours = Math.floor(endMinutes / 60);
+      const endMins = endMinutes % 60;
+      const endDateTimeStr = `${bookingDateStr}T${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}:00`;
 
       // Create Microsoft Graph API event
       const eventTitle = `Réservation: ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
 
+      console.log('🕐 Event timing:', {
+        startDateTime: startDateTimeStr,
+        endDateTime: endDateTimeStr,
+        timezone: 'Europe/Paris',
+        duration: `${eventDuration} minutes`
+      });
+
       const eventBody = {
         subject: eventTitle,
         start: {
-          dateTime: startDate.toISOString(),
+          dateTime: startDateTimeStr,
           timeZone: 'Europe/Paris'
         },
         end: {
-          dateTime: endDate.toISOString(),
+          dateTime: endDateTimeStr,
           timeZone: 'Europe/Paris'
         },
         body: {
@@ -1517,31 +1531,44 @@ export class UserBookingsService {
 
       console.log('✅ Access token retrieved successfully');
 
-      // Construct updated event data
-      const startDate = newBooking.bookingDate instanceof Date
-        ? new Date(`${newBooking.bookingDate.toISOString().split('T')[0]}T${newBooking.bookingTime}:00`)
-        : new Date(`${newBooking.bookingDate}T${newBooking.bookingTime}:00`);
+      // Construct updated event data in Paris timezone (without UTC conversion)
+      // Format: YYYY-MM-DDTHH:mm:ss (same as Google Calendar)
+      const bookingDateStr = newBooking.bookingDate instanceof Date
+        ? newBooking.bookingDate.toISOString().split('T')[0]
+        : newBooking.bookingDate;
 
+      // Create datetime strings in Europe/Paris timezone (without UTC conversion)
+      const startDateTimeStr = `${bookingDateStr}T${newBooking.bookingTime}:00`;
+
+      // Calculate end time based on service duration
       const eventDuration = await this.getServiceDuration(newBooking.userId, newBooking.serviceId.toString());
-      const endDate = new Date(startDate.getTime() + (eventDuration * 60 * 1000));
+
+      // Parse the time to calculate end time
+      const [hours, minutes] = newBooking.bookingTime.split(':').map(Number);
+      const startMinutes = hours * 60 + minutes;
+      const endMinutes = startMinutes + eventDuration;
+      const endHours = Math.floor(endMinutes / 60);
+      const endMins = endMinutes % 60;
+      const endDateTimeStr = `${bookingDateStr}T${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}:00`;
 
       const eventTitle = `Réservation: ${newBooking.userContactFirstname} ${newBooking.userContactLastname}`;
 
       console.log('📋 Updating Microsoft event:', {
         eventId: newBooking.microsoftEventId,
         title: eventTitle,
-        startDate: startDate.toISOString(),
-        endDate: endDate.toISOString()
+        startDateTime: startDateTimeStr,
+        endDateTime: endDateTimeStr,
+        timezone: 'Europe/Paris'
       });
 
       const updateBody = {
         subject: eventTitle,
         start: {
-          dateTime: startDate.toISOString(),
+          dateTime: startDateTimeStr,
           timeZone: 'Europe/Paris'
         },
         end: {
-          dateTime: endDate.toISOString(),
+          dateTime: endDateTimeStr,
           timeZone: 'Europe/Paris'
         },
         body: {
