@@ -814,30 +814,44 @@ export class UserBookingsService {
         }
       }
 
-      // Construct event start date from booking data
-      const startDate = bookingDto.bookingDate instanceof Date
-        ? new Date(`${bookingDto.bookingDate.toISOString().split('T')[0]}T${bookingDto.bookingTime}:00`)
-        : new Date(`${bookingDto.bookingDate}T${bookingDto.bookingTime}:00`);
+      // Construct event start date in Paris timezone (without UTC conversion)
+      // Format: YYYY-MM-DDTHH:mm:ss (same as Google Calendar)
+      const bookingDateStr = bookingDto.bookingDate instanceof Date
+        ? bookingDto.bookingDate.toISOString().split('T')[0]
+        : bookingDto.bookingDate;
 
-      if (isNaN(startDate.getTime())) {
-        throw new Error(`Invalid date constructed from booking data`);
-      }
+      // Create datetime strings in Europe/Paris timezone (without UTC conversion)
+      const startDateTimeStr = `${bookingDateStr}T${bookingDto.bookingTime}:00`;
 
-      // Determine event duration from service details
+      // Calculate end time based on service duration
       const eventDuration = await this.getServiceDuration(booking.userId, bookingDto.serviceId);
-      const endDate = new Date(startDate.getTime() + (eventDuration * 60 * 1000));
+
+      // Parse the time to calculate end time
+      const [hours, minutes] = bookingDto.bookingTime.split(':').map(Number);
+      const startMinutes = hours * 60 + minutes;
+      const endMinutes = startMinutes + eventDuration;
+      const endHours = Math.floor(endMinutes / 60);
+      const endMins = endMinutes % 60;
+      const endDateTimeStr = `${bookingDateStr}T${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}:00`;
 
       // Create Microsoft Graph API event
       const eventTitle = `Réservation: ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
 
+      console.log('🕐 Event timing:', {
+        startDateTime: startDateTimeStr,
+        endDateTime: endDateTimeStr,
+        timezone: 'Europe/Paris',
+        duration: `${eventDuration} minutes`
+      });
+
       const eventBody = {
         subject: eventTitle,
         start: {
-          dateTime: startDate.toISOString(),
+          dateTime: startDateTimeStr,
           timeZone: 'Europe/Paris'
         },
         end: {
-          dateTime: endDate.toISOString(),
+          dateTime: endDateTimeStr,
           timeZone: 'Europe/Paris'
         },
         body: {
@@ -1477,6 +1491,12 @@ export class UserBookingsService {
     try {
       console.log('🟦 Updating Microsoft calendar event for booking:', newBooking._id);
 
+      // Validate credentials
+      if (!microsoftCreds.isActive || !microsoftCreds.isValid) {
+        console.log('ℹ️ Microsoft connector is inactive or invalid');
+        return;
+      }
+
       // Check if we have a Microsoft event ID to update
       if (!newBooking.microsoftEventId) {
         console.log('ℹ️ No Microsoft event ID found, creating new event instead');
@@ -1501,30 +1521,54 @@ export class UserBookingsService {
       }
 
       // Get a valid access token
+      console.log('🔑 Retrieving Microsoft access token for user:', newBooking.userId.toString());
       const accessToken = await this.connectorService.getMicrosoftAccessToken(newBooking.userId.toString());
 
       if (!accessToken) {
-        throw new Error('Failed to get valid Microsoft access token');
+        console.error('❌ Failed to get valid Microsoft access token');
+        return; // Non-blocking: calendar update failure shouldn't prevent booking update
       }
 
-      // Construct updated event data
-      const startDate = newBooking.bookingDate instanceof Date
-        ? new Date(`${newBooking.bookingDate.toISOString().split('T')[0]}T${newBooking.bookingTime}:00`)
-        : new Date(`${newBooking.bookingDate}T${newBooking.bookingTime}:00`);
+      console.log('✅ Access token retrieved successfully');
 
+      // Construct updated event data in Paris timezone (without UTC conversion)
+      // Format: YYYY-MM-DDTHH:mm:ss (same as Google Calendar)
+      const bookingDateStr = newBooking.bookingDate instanceof Date
+        ? newBooking.bookingDate.toISOString().split('T')[0]
+        : newBooking.bookingDate;
+
+      // Create datetime strings in Europe/Paris timezone (without UTC conversion)
+      const startDateTimeStr = `${bookingDateStr}T${newBooking.bookingTime}:00`;
+
+      // Calculate end time based on service duration
       const eventDuration = await this.getServiceDuration(newBooking.userId, newBooking.serviceId.toString());
-      const endDate = new Date(startDate.getTime() + (eventDuration * 60 * 1000));
+
+      // Parse the time to calculate end time
+      const [hours, minutes] = newBooking.bookingTime.split(':').map(Number);
+      const startMinutes = hours * 60 + minutes;
+      const endMinutes = startMinutes + eventDuration;
+      const endHours = Math.floor(endMinutes / 60);
+      const endMins = endMinutes % 60;
+      const endDateTimeStr = `${bookingDateStr}T${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}:00`;
 
       const eventTitle = `Réservation: ${newBooking.userContactFirstname} ${newBooking.userContactLastname}`;
+
+      console.log('📋 Updating Microsoft event:', {
+        eventId: newBooking.microsoftEventId,
+        title: eventTitle,
+        startDateTime: startDateTimeStr,
+        endDateTime: endDateTimeStr,
+        timezone: 'Europe/Paris'
+      });
 
       const updateBody = {
         subject: eventTitle,
         start: {
-          dateTime: startDate.toISOString(),
+          dateTime: startDateTimeStr,
           timeZone: 'Europe/Paris'
         },
         end: {
-          dateTime: endDate.toISOString(),
+          dateTime: endDateTimeStr,
           timeZone: 'Europe/Paris'
         },
         body: {
@@ -1556,18 +1600,40 @@ export class UserBookingsService {
         ]
       };
 
-      // Update event via Microsoft Graph API
-      const response = await fetch(`https://graph.microsoft.com/v1.0/me/events/${newBooking.microsoftEventId}`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(updateBody)
+      // Update event via Microsoft Graph API with retry logic
+      console.log('📤 Updating Microsoft calendar event with retry logic');
+      const response = await this.callMicrosoftGraphWithRetry(
+        `https://graph.microsoft.com/v1.0/me/events/${newBooking.microsoftEventId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(updateBody)
+        }
+      );
+
+      console.log('📥 Microsoft Graph API update response:', {
+        status: response.status,
+        statusText: response.statusText
       });
 
       if (!response.ok) {
         const errorData = await response.text();
+        console.error('❌ Microsoft Graph API error response:', errorData);
+
+        // Handle 404 - event doesn't exist anymore
+        if (response.status === 404) {
+          console.log('⚠️ Event not found in Microsoft calendar (may have been deleted manually)');
+          // Clear the event ID since it no longer exists
+          await this.userBookingModel.updateOne(
+            { _id: newBooking._id },
+            { $unset: { microsoftEventId: "" } }
+          );
+          return;
+        }
+
         throw new Error(`Microsoft Graph API update error: ${response.status} - ${errorData}`);
       }
 
@@ -1575,7 +1641,15 @@ export class UserBookingsService {
 
     } catch (error) {
       console.error('❌ Microsoft calendar update error:', error);
-      throw error;
+
+      // Provide specific error messages based on error type
+      if (error.name === 'TimeoutError' || error.code === 'ETIMEDOUT') {
+        console.error('⏰ Network timeout when updating Microsoft calendar event');
+        console.error('💡 This might be a temporary network issue or Microsoft Graph API slowness');
+      }
+
+      // Don't throw - background process should not block booking updates
+      console.log('⚠️ Calendar update failed but continuing with booking update');
     }
   }
 
@@ -1990,25 +2064,42 @@ export class UserBookingsService {
     try {
       console.log('🟦 Deleting from Microsoft calendar for booking:', booking._id);
 
+      // Validate credentials
+      if (!microsoftCreds.isActive || !microsoftCreds.isValid) {
+        console.log('ℹ️ Microsoft connector is inactive or invalid for user:', booking.userId);
+        return;
+      }
+
       // Check if we have a Microsoft event ID to delete
       if (!booking.microsoftEventId) {
         console.log('ℹ️ No Microsoft event ID found for booking, nothing to delete');
         return;
       }
 
-      // Get a valid access token
+      // Get a valid access token (with automatic refresh)
+      console.log('🔑 Getting Microsoft access token for deletion...');
       const accessToken = await this.connectorService.getMicrosoftAccessToken(booking.userId.toString());
 
       if (!accessToken) {
         throw new Error('Failed to get valid Microsoft access token');
       }
 
-      // Delete event via Microsoft Graph API
-      const response = await fetch(`https://graph.microsoft.com/v1.0/me/events/${booking.microsoftEventId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`
+      console.log('🗑️ Attempting to delete Microsoft event ID:', booking.microsoftEventId);
+
+      // Delete event via Microsoft Graph API with retry logic
+      const response = await this.callMicrosoftGraphWithRetry(
+        `https://graph.microsoft.com/v1.0/me/events/${booking.microsoftEventId}`,
+        {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`
+          }
         }
+      );
+
+      console.log('📥 Microsoft Graph API delete response:', {
+        status: response.status,
+        statusText: response.statusText
       });
 
       if (response.status === 404) {
@@ -2018,6 +2109,7 @@ export class UserBookingsService {
 
       if (!response.ok) {
         const errorData = await response.text();
+        console.error('❌ Delete error response:', errorData);
         throw new Error(`Microsoft Graph API delete error: ${response.status} - ${errorData}`);
       }
 
@@ -2025,7 +2117,14 @@ export class UserBookingsService {
 
     } catch (error) {
       console.error('❌ Microsoft calendar deletion error:', error);
-      throw error;
+      
+      // Provide specific error messages
+      if (error.name === 'TimeoutError' || error.code === 'ETIMEDOUT') {
+        console.error('⏰ Network timeout when deleting from Microsoft Graph API');
+      }
+      
+      // Don't throw - this is a background process, deletion failure shouldn't prevent booking deletion
+      console.log('⚠️ Calendar deletion failed but continuing with booking deletion');
     }
   }
 
