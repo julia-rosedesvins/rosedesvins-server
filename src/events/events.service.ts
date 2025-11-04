@@ -86,7 +86,7 @@ export class EventsService {
           userId: userObjectId,
           eventStatus: 'active' // Only return active events
         })
-        .select('eventDate eventTime') // Only select date and time fields
+        .select('eventDate eventTime eventEndTime') // Only select date and time fields
         .sort({ eventDate: 1, eventTime: 1 }) // Sort by date and time ascending
         .lean()
         .exec();
@@ -250,6 +250,36 @@ export class EventsService {
       const dtendMatch = icsContent.match(/DTEND[^:]*:(.*?)(?:\r?\n)/);
       if (dtendMatch) {
         eventInfo.endTime = dtendMatch[1].trim();
+        
+        // Parse end time similar to start time
+        try {
+          const endDateStr = dtendMatch[1].trim();
+          if (endDateStr.includes('T') && !eventInfo.isAllDay) {
+            const endTimePart = endDateStr.split('T')[1].replace(/[Z]/g, '');
+            const endHour = endTimePart.substring(0, 2);
+            const endMinute = endTimePart.substring(2, 4);
+            
+            eventInfo.endTimeFormatted = `${endHour}:${endMinute}`;
+            
+            // Apply same timezone adjustments as start time
+            if (eventInfo.timezone === 'Orange_calendar_adjusted_+5h') {
+              const endHourNum = parseInt(endHour);
+              let adjustedEndHour = endHourNum + 5;
+              
+              // Handle day overflow
+              if (adjustedEndHour >= 24) {
+                adjustedEndHour = adjustedEndHour - 24;
+              }
+              
+              eventInfo.endTimeFormatted = `${adjustedEndHour.toString().padStart(2, '0')}:${endMinute}`;
+              this.logger.log(`🕐 Orange calendar end time adjustment: ${endHour}:${endMinute} → ${eventInfo.endTimeFormatted} (+5 hours)`);
+            }
+          } else if (eventInfo.isAllDay) {
+            eventInfo.endTimeFormatted = '23:59'; // All-day events end at end of day
+          }
+        } catch (parseError) {
+          this.logger.warn('Error parsing end time:', parseError);
+        }
       }
 
       // Extract DESCRIPTION
@@ -338,13 +368,18 @@ export class EventsService {
               break;
 
             case 'microsoft':
-              this.logger.log(`🔧 Microsoft connector found for user ${connector.userId} - Not implemented yet`);
-              result = {
-                connectorType: 'microsoft',
-                userId: connector.userId.toString(),
-                status: 'not_implemented',
-                message: 'Microsoft connector sync not implemented yet'
-              };
+              if (connector.connector_creds?.microsoft?.isActive && connector.connector_creds?.microsoft?.isValid) {
+                result = await this.syncMicrosoftCalendarEvents(connector);
+                totalProcessed++;
+              } else {
+                this.logger.warn(`⚠️ Microsoft connector inactive/invalid for user: ${connector.userId}`);
+                result = {
+                  connectorType: 'microsoft',
+                  userId: connector.userId.toString(),
+                  status: 'skipped',
+                  message: 'Connector inactive or invalid'
+                };
+              }
               break;
 
             case 'google':
@@ -683,9 +718,11 @@ export class EventsService {
         const startDate = new Date(start);
         eventInfo.startDate = startDate.toISOString().split('T')[0];
         eventInfo.startTimeFormatted = '00:00';
+        eventInfo.endTimeFormatted = '23:59'; // All-day events end at end of day
       } else {
         // Timed event - parse datetime
         const startDate = new Date(start);
+        const endDate = new Date(end);
         
         // Convert to Paris timezone
         const parisFormatter = new Intl.DateTimeFormat('en-CA', {
@@ -698,21 +735,28 @@ export class EventsService {
           hour12: false
         });
 
-        const parts = parisFormatter.formatToParts(startDate);
-        const partsMap = parts.reduce((acc, part) => {
+        const startParts = parisFormatter.formatToParts(startDate);
+        const startPartsMap = startParts.reduce((acc, part) => {
           acc[part.type] = part.value;
           return acc;
         }, {} as any);
 
-        eventInfo.startDate = `${partsMap.year}-${partsMap.month}-${partsMap.day}`;
-        eventInfo.startTimeFormatted = `${partsMap.hour}:${partsMap.minute}`;
+        const endParts = parisFormatter.formatToParts(endDate);
+        const endPartsMap = endParts.reduce((acc, part) => {
+          acc[part.type] = part.value;
+          return acc;
+        }, {} as any);
+
+        eventInfo.startDate = `${startPartsMap.year}-${startPartsMap.month}-${startPartsMap.day}`;
+        eventInfo.startTimeFormatted = `${startPartsMap.hour}:${startPartsMap.minute}`;
+        eventInfo.endTimeFormatted = `${endPartsMap.hour}:${endPartsMap.minute}`;
         eventInfo.startTimeLocal = eventInfo.startTimeFormatted;
         eventInfo.startDateLocal = eventInfo.startDate;
         eventInfo.timezone = 'Europe/Paris';
       }
 
       // Log parsed event
-      this.logger.log(`📋 Parsed Google event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted}`);
+      this.logger.log(`📋 Parsed Google event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted} - ${eventInfo.endTimeFormatted}`);
 
       return eventInfo;
 
@@ -811,6 +855,283 @@ export class EventsService {
   }
 
   /**
+   * Sync events from Microsoft Calendar
+   */
+  private async syncMicrosoftCalendarEvents(connector: any): Promise<any> {
+    try {
+      this.logger.log(`🟦 Starting Microsoft Calendar sync for user: ${connector.userId}`);
+
+      const microsoftCreds = connector.connector_creds.microsoft;
+      if (!microsoftCreds?.accessToken || !microsoftCreds?.refreshToken) {
+        throw new Error('Missing Microsoft credentials');
+      }
+
+      // Check if token needs refresh (5 minute buffer)
+      const now = new Date();
+      const expiresAt = new Date(microsoftCreds.expiresAt);
+      const bufferTime = 5 * 60 * 1000; // 5 minutes
+      
+      let accessToken = microsoftCreds.accessToken;
+
+      if (now.getTime() > (expiresAt.getTime() - bufferTime)) {
+        this.logger.log('🔄 Microsoft token expired, refreshing...');
+        
+        // Refresh token logic
+        const refreshed = await this.refreshMicrosoftTokenForSync(connector);
+        if (!refreshed) {
+          throw new Error('Failed to refresh Microsoft access token');
+        }
+        accessToken = refreshed;
+      }
+
+      // Get current month + next month date range (2 months total)
+      const currentDate = new Date();
+      const firstDayOfCurrentMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+      const lastDayOfNextMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 2, 0, 23, 59, 59);
+
+      // Fetch events from Microsoft Graph API
+      const startDateTime = firstDayOfCurrentMonth.toISOString();
+      const endDateTime = lastDayOfNextMonth.toISOString();
+
+      this.logger.log(`📅 Fetching Microsoft Calendar events from ${startDateTime} to ${endDateTime} (current + next month)`);
+
+      // Use Microsoft Graph API CalendarView endpoint for date range queries
+      const eventsUrl = `https://graph.microsoft.com/v1.0/me/calendarView`;
+
+      // Use axios for better network compatibility
+      const response = await axios.get(eventsUrl, {
+        params: {
+          startDateTime: startDateTime,
+          endDateTime: endDateTime,
+          $orderby: 'start/dateTime'
+        },
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+          'Prefer': 'outlook.timezone="Europe/Paris"'
+        },
+        timeout: 15000, // 15 second timeout
+        family: 4,
+        proxy: false
+      });
+
+      const calendarData = response.data;
+      const microsoftEvents = calendarData.value || [];
+
+      if (microsoftEvents.length === 0) {
+        this.logger.log(`📭 No events found in Microsoft Calendar for user: ${connector.userId}`);
+        return {
+          connectorType: 'microsoft',
+          userId: connector.userId.toString(),
+          status: 'success',
+          message: 'No events found to sync (current + next month)',
+          eventsSynced: 0
+        };
+      }
+
+      this.logger.log(`📊 Found ${microsoftEvents.length} event(s) in Microsoft Calendar`);
+
+      // Parse Microsoft Calendar events to our format
+      const events: any[] = [];
+      for (const msEvent of microsoftEvents) {
+        try {
+          const eventInfo = this.parseMicrosoftCalendarEvent(msEvent);
+          if (eventInfo) {
+            events.push(eventInfo);
+          }
+        } catch (parseError) {
+          this.logger.warn(`⚠️ Error parsing Microsoft event: ${parseError.message}`);
+        }
+      }
+
+      if (events.length === 0) {
+        return {
+          connectorType: 'microsoft',
+          userId: connector.userId.toString(),
+          status: 'success',
+          message: 'No valid events found to sync (current + next month)',
+          eventsSynced: 0
+        };
+      }
+
+      // Save events to database with conflict prevention
+      const syncedEvents = await this.saveEventsToDatabase(events, connector.userId, 'microsoft');
+
+      this.logger.log(`✅ Successfully synced ${syncedEvents} events from Microsoft Calendar`);
+
+      return {
+        connectorType: 'microsoft',
+        userId: connector.userId.toString(),
+        status: 'success',
+        message: `Successfully synced ${syncedEvents} events`,
+        eventsSynced: syncedEvents,
+        eventsData: events
+      };
+
+    } catch (error) {
+      this.logger.error(`❌ Microsoft Calendar sync error for user ${connector.userId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Parse Microsoft Calendar event to our event format
+   */
+  private parseMicrosoftCalendarEvent(msEvent: any): any | null {
+    try {
+      const eventInfo: any = {};
+
+      // Extract event title
+      eventInfo.title = msEvent.subject || 'Untitled Event';
+
+      // Extract event ID
+      eventInfo.uid = msEvent.id;
+
+      // Extract description
+      eventInfo.description = msEvent.bodyPreview || msEvent.body?.content || '';
+
+      // Extract start time and date
+      const start = msEvent.start?.dateTime;
+      const end = msEvent.end?.dateTime;
+      const startTimeZone = msEvent.start?.timeZone || 'Europe/Paris';
+      
+      if (!start) {
+        this.logger.warn('⚠️ Microsoft event missing start time');
+        return null;
+      }
+
+      // Check if all-day event
+      eventInfo.isAllDay = msEvent.isAllDay || false;
+
+      if (eventInfo.isAllDay) {
+        // All-day event - dateTime is midnight in the specified timezone
+        const startDate = new Date(start);
+        eventInfo.startDate = startDate.toISOString().split('T')[0];
+        eventInfo.startTimeFormatted = '00:00';
+        eventInfo.endTimeFormatted = '23:59'; // All-day events end at end of day
+      } else {
+        // Timed event
+        // Microsoft returns time in the format: "2024-11-15T14:00:00.0000000"
+        // The timezone is specified separately in start.timeZone
+        
+        // Parse the datetime string directly (it's already in the correct timezone)
+        const startDateTimeParts = start.split('T');
+        const startDatePart = startDateTimeParts[0]; // YYYY-MM-DD
+        const startTimePart = startDateTimeParts[1].split('.')[0]; // HH:MM:SS
+        
+        const endDateTimeParts = end.split('T');
+        const endTimePart = endDateTimeParts[1].split('.')[0]; // HH:MM:SS
+        
+        eventInfo.startDate = startDatePart;
+        eventInfo.startTimeFormatted = startTimePart.substring(0, 5); // HH:MM
+        eventInfo.endTimeFormatted = endTimePart.substring(0, 5); // HH:MM
+        eventInfo.startTimeLocal = eventInfo.startTimeFormatted;
+        eventInfo.startDateLocal = eventInfo.startDate;
+        eventInfo.timezone = startTimeZone;
+        
+        this.logger.log(`📋 Microsoft event time: ${start} to ${end} (timezone: ${startTimeZone})`);
+      }
+
+      // Log parsed event
+      this.logger.log(`📋 Parsed Microsoft event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted} - ${eventInfo.endTimeFormatted}`);
+
+      return eventInfo;
+
+    } catch (error) {
+      this.logger.warn('⚠️ Error parsing Microsoft Calendar event:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Refresh Microsoft token specifically for sync operations
+   */
+  private async refreshMicrosoftTokenForSync(connector: any): Promise<string | null> {
+    try {
+      const microsoftCreds = connector.connector_creds.microsoft;
+      
+      if (!microsoftCreds?.refreshToken) {
+        throw new Error('Missing Microsoft refresh token');
+      }
+
+      const clientId = process.env.MICROSOFT_CLIENT_ID;
+      const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
+      const tenantId = process.env.MICROSOFT_TENANT_ID;
+
+      if (!clientId || !clientSecret || !tenantId) {
+        throw new Error('Microsoft OAuth credentials are not configured');
+      }
+
+      const refreshToken = microsoftCreds.refreshToken;
+
+      // Exchange refresh token for new access token
+      const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+      
+      const params = new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+        scope: microsoftCreds.scope || 'https://graph.microsoft.com/Calendars.ReadWrite offline_access'
+      });
+
+      // Use axios for better network compatibility
+      const response = await axios.post(tokenUrl, params.toString(), {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        timeout: 10000, // 10 second timeout
+        family: 4,
+        proxy: false
+      });
+
+      const tokenData = response.data;
+
+      if (!tokenData || !tokenData.access_token) {
+        this.logger.error('❌ Microsoft token refresh failed: Invalid response', tokenData);
+        // Mark connector as invalid
+        connector.connector_creds.microsoft.isValid = false;
+        await connector.save();
+        return null;
+      }
+
+      // Update access token in database
+      const newExpiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
+      
+      connector.connector_creds.microsoft.accessToken = tokenData.access_token;
+      connector.connector_creds.microsoft.expiresIn = tokenData.expires_in;
+      connector.connector_creds.microsoft.expiresAt = newExpiresAt;
+      connector.connector_creds.microsoft.isValid = true;
+      
+      // Keep existing refresh token if not provided
+      if (tokenData.refresh_token) {
+        connector.connector_creds.microsoft.refreshToken = tokenData.refresh_token;
+      }
+
+      await connector.save();
+
+      this.logger.log('✅ Microsoft token refreshed successfully for sync');
+      return tokenData.access_token;
+      
+    } catch (error) {
+      this.logger.error('❌ Error refreshing Microsoft token for sync:', error);
+      
+      // Mark connector as invalid if authentication failed
+      if (error.response?.status === 401 || error.response?.status === 400) {
+        try {
+          connector.connector_creds.microsoft.isValid = false;
+          await connector.save();
+          this.logger.warn('⚠️ Marked Microsoft connector as invalid due to auth failure');
+        } catch (saveError) {
+          this.logger.error('❌ Failed to mark connector as invalid:', saveError);
+        }
+      }
+      
+      return null;
+    }
+  }
+
+  /**
    * Save events to database with duplicate prevention
    */
   private async saveEventsToDatabase(events: any[], userId: any, source: string): Promise<number> {
@@ -863,16 +1184,27 @@ export class EventsService {
           this.logger.log(`   🌍 Timezone: ${eventInfo.timezone}`);
           this.logger.log(`   📍 StartTimeLocal: ${eventInfo.startTimeLocal}`);
 
-          // Determine event time - only add 3-hour offset for Orange Calendar (not Google)
+          // Determine event time based on calendar source
           let finalEventTime = eventInfo.startTimeFormatted || '00:00';
+          let finalEventEndTime = eventInfo.endTimeFormatted || null;
+          
           if (source === 'orange') {
             // Orange Calendar needs 3-hour adjustment due to timezone handling quirks
             finalEventTime = this.addHoursToTimeString(eventInfo.startTimeFormatted, 3) || '00:00';
+            if (eventInfo.endTimeFormatted) {
+              finalEventEndTime = this.addHoursToTimeString(eventInfo.endTimeFormatted, 3);
+            }
             this.logger.log(`   🍊 Applied 3-hour Orange Calendar adjustment: ${eventInfo.startTimeFormatted} → ${finalEventTime}`);
           } else if (source === 'google') {
             // Google Calendar times are already correctly converted to Paris timezone
             finalEventTime = eventInfo.startTimeFormatted || '00:00';
-            this.logger.log(`   🔵 Using Google Calendar time as-is (already in Paris timezone): ${finalEventTime}`);
+            finalEventEndTime = eventInfo.endTimeFormatted;
+            this.logger.log(`   🔵 Using Google Calendar time as-is (already in Paris timezone): ${finalEventTime} - ${finalEventEndTime}`);
+          } else if (source === 'microsoft') {
+            // Microsoft Calendar times are already in the correct timezone (specified in API request)
+            finalEventTime = eventInfo.startTimeFormatted || '00:00';
+            finalEventEndTime = eventInfo.endTimeFormatted;
+            this.logger.log(`   🟦 Using Microsoft Calendar time as-is (already in Paris timezone): ${finalEventTime} - ${finalEventEndTime}`);
           }
 
           // Create new event document
@@ -881,6 +1213,7 @@ export class EventsService {
             eventName: eventInfo.title || 'Untitled Event',
             eventDate: new Date(eventInfo.startDate),
             eventTime: finalEventTime,
+            eventEndTime: finalEventEndTime, // Save the end time
             eventDescription: eventInfo.description || '',
             eventType: 'external',
             externalCalendarSource: source,
@@ -892,7 +1225,7 @@ export class EventsService {
           await newEvent.save();
           savedCount++;
 
-          this.logger.log(`✅ Saved event: ${eventInfo.title} on ${eventInfo.startDate} at ${finalEventTime} (${source} calendar)`);
+          this.logger.log(`✅ Saved event: ${eventInfo.title} on ${eventInfo.startDate} at ${finalEventTime} - ${finalEventEndTime || 'N/A'} (${source} calendar)`);
 
         } catch (saveError) {
           this.logger.error(`❌ Error saving event ${eventInfo.title}:`, saveError);
