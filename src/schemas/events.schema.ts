@@ -48,6 +48,12 @@ export class Event extends Document {
 
   @Prop({ 
     trim: true,
+    match: /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/ // HH:MM format validation
+  })
+  eventEndTime?: string; // End time in HH:MM format (optional for all-day events)
+
+  @Prop({ 
+    trim: true,
     maxlength: 1000 
   })
   eventDescription?: string; // Optional description

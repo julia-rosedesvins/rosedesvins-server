@@ -406,12 +406,22 @@ export class UserBookingsService {
 
       // Create corresponding event in events table
       try {
+        // Calculate event end time based on service duration
+        const eventDuration = await this.getServiceDuration(userObjectId, createBookingDto.serviceId);
+        const [hours, minutes] = createBookingDto.bookingTime.split(':').map(Number);
+        const startMinutes = hours * 60 + minutes;
+        const endMinutes = startMinutes + eventDuration;
+        const endHours = Math.floor(endMinutes / 60);
+        const endMins = endMinutes % 60;
+        const eventEndTime = `${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}`;
+
         const eventData = {
           userId: userObjectId, // The wine business owner who receives the booking
           bookingId: savedBooking._id, // Reference to the created booking
           eventName: `Réservation: ${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
           eventDate: parsedDate, // Use the same parsed date
           eventTime: createBookingDto.bookingTime,
+          eventEndTime: eventEndTime, // End time calculated from service duration
           eventDescription: createBookingDto.additionalNotes || `Wine tasting booking for ${createBookingDto.participantsAdults + createBookingDto.participantsEnfants} people`,
           customerEmail: createBookingDto.customerEmail, // Store customer email for easy access
           eventType: 'booking', // This is a booking-related event
@@ -1226,6 +1236,20 @@ export class UserBookingsService {
       }
       if (updateData.bookingTime) {
         eventUpdateFields.eventTime = updateData.bookingTime;
+        
+        // Recalculate event end time when booking time changes
+        const eventDuration = await this.getServiceDuration(
+          updatedBooking.userId, 
+          updatedBooking.serviceId.toString()
+        );
+        const [hours, minutes] = updateData.bookingTime.split(':').map(Number);
+        const startMinutes = hours * 60 + minutes;
+        const endMinutes = startMinutes + eventDuration;
+        const endHours = Math.floor(endMinutes / 60);
+        const endMins = endMinutes % 60;
+        const eventEndTime = `${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}`;
+        
+        eventUpdateFields.eventEndTime = eventEndTime;
       }
       if (isCustomerInfoChanged) {
         eventUpdateFields.eventName = `Réservation: ${updateData.userContactFirstname || existingBooking.userContactFirstname} ${updateData.userContactLastname || existingBooking.userContactLastname}`;
