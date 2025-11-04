@@ -1370,9 +1370,9 @@ export class EventsService {
   }
 
   /*
-   @desc - run cron job to sync events every 6 hours
+   @desc - run cron job to sync events every 1 hour
   */
-  @Cron(CronExpression.EVERY_6_HOURS)
+  @Cron(CronExpression.EVERY_HOUR)
   handleCron() {
     this.logger.log('🕒 Cron job triggered: Syncing calendar events...');
     this.syncEventsFromConnectors()
