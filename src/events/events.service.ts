@@ -86,7 +86,7 @@ export class EventsService {
           userId: userObjectId,
           eventStatus: 'active' // Only return active events
         })
-        .select('eventDate eventTime') // Only select date and time fields
+        .select('eventDate eventTime eventEndTime') // Only select date and time fields
         .sort({ eventDate: 1, eventTime: 1 }) // Sort by date and time ascending
         .lean()
         .exec();
@@ -250,6 +250,36 @@ export class EventsService {
       const dtendMatch = icsContent.match(/DTEND[^:]*:(.*?)(?:\r?\n)/);
       if (dtendMatch) {
         eventInfo.endTime = dtendMatch[1].trim();
+        
+        // Parse end time similar to start time
+        try {
+          const endDateStr = dtendMatch[1].trim();
+          if (endDateStr.includes('T') && !eventInfo.isAllDay) {
+            const endTimePart = endDateStr.split('T')[1].replace(/[Z]/g, '');
+            const endHour = endTimePart.substring(0, 2);
+            const endMinute = endTimePart.substring(2, 4);
+            
+            eventInfo.endTimeFormatted = `${endHour}:${endMinute}`;
+            
+            // Apply same timezone adjustments as start time
+            if (eventInfo.timezone === 'Orange_calendar_adjusted_+5h') {
+              const endHourNum = parseInt(endHour);
+              let adjustedEndHour = endHourNum + 5;
+              
+              // Handle day overflow
+              if (adjustedEndHour >= 24) {
+                adjustedEndHour = adjustedEndHour - 24;
+              }
+              
+              eventInfo.endTimeFormatted = `${adjustedEndHour.toString().padStart(2, '0')}:${endMinute}`;
+              this.logger.log(`🕐 Orange calendar end time adjustment: ${endHour}:${endMinute} → ${eventInfo.endTimeFormatted} (+5 hours)`);
+            }
+          } else if (eventInfo.isAllDay) {
+            eventInfo.endTimeFormatted = '23:59'; // All-day events end at end of day
+          }
+        } catch (parseError) {
+          this.logger.warn('Error parsing end time:', parseError);
+        }
       }
 
       // Extract DESCRIPTION
@@ -688,9 +718,11 @@ export class EventsService {
         const startDate = new Date(start);
         eventInfo.startDate = startDate.toISOString().split('T')[0];
         eventInfo.startTimeFormatted = '00:00';
+        eventInfo.endTimeFormatted = '23:59'; // All-day events end at end of day
       } else {
         // Timed event - parse datetime
         const startDate = new Date(start);
+        const endDate = new Date(end);
         
         // Convert to Paris timezone
         const parisFormatter = new Intl.DateTimeFormat('en-CA', {
@@ -703,21 +735,28 @@ export class EventsService {
           hour12: false
         });
 
-        const parts = parisFormatter.formatToParts(startDate);
-        const partsMap = parts.reduce((acc, part) => {
+        const startParts = parisFormatter.formatToParts(startDate);
+        const startPartsMap = startParts.reduce((acc, part) => {
           acc[part.type] = part.value;
           return acc;
         }, {} as any);
 
-        eventInfo.startDate = `${partsMap.year}-${partsMap.month}-${partsMap.day}`;
-        eventInfo.startTimeFormatted = `${partsMap.hour}:${partsMap.minute}`;
+        const endParts = parisFormatter.formatToParts(endDate);
+        const endPartsMap = endParts.reduce((acc, part) => {
+          acc[part.type] = part.value;
+          return acc;
+        }, {} as any);
+
+        eventInfo.startDate = `${startPartsMap.year}-${startPartsMap.month}-${startPartsMap.day}`;
+        eventInfo.startTimeFormatted = `${startPartsMap.hour}:${startPartsMap.minute}`;
+        eventInfo.endTimeFormatted = `${endPartsMap.hour}:${endPartsMap.minute}`;
         eventInfo.startTimeLocal = eventInfo.startTimeFormatted;
         eventInfo.startDateLocal = eventInfo.startDate;
         eventInfo.timezone = 'Europe/Paris';
       }
 
       // Log parsed event
-      this.logger.log(`📋 Parsed Google event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted}`);
+      this.logger.log(`📋 Parsed Google event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted} - ${eventInfo.endTimeFormatted}`);
 
       return eventInfo;
 
@@ -953,6 +992,7 @@ export class EventsService {
 
       // Extract start time and date
       const start = msEvent.start?.dateTime;
+      const end = msEvent.end?.dateTime;
       const startTimeZone = msEvent.start?.timeZone || 'Europe/Paris';
       
       if (!start) {
@@ -968,27 +1008,32 @@ export class EventsService {
         const startDate = new Date(start);
         eventInfo.startDate = startDate.toISOString().split('T')[0];
         eventInfo.startTimeFormatted = '00:00';
+        eventInfo.endTimeFormatted = '23:59'; // All-day events end at end of day
       } else {
         // Timed event
         // Microsoft returns time in the format: "2024-11-15T14:00:00.0000000"
         // The timezone is specified separately in start.timeZone
         
         // Parse the datetime string directly (it's already in the correct timezone)
-        const dateTimeParts = start.split('T');
-        const datePart = dateTimeParts[0]; // YYYY-MM-DD
-        const timePart = dateTimeParts[1].split('.')[0]; // HH:MM:SS
+        const startDateTimeParts = start.split('T');
+        const startDatePart = startDateTimeParts[0]; // YYYY-MM-DD
+        const startTimePart = startDateTimeParts[1].split('.')[0]; // HH:MM:SS
         
-        eventInfo.startDate = datePart;
-        eventInfo.startTimeFormatted = timePart.substring(0, 5); // HH:MM
+        const endDateTimeParts = end.split('T');
+        const endTimePart = endDateTimeParts[1].split('.')[0]; // HH:MM:SS
+        
+        eventInfo.startDate = startDatePart;
+        eventInfo.startTimeFormatted = startTimePart.substring(0, 5); // HH:MM
+        eventInfo.endTimeFormatted = endTimePart.substring(0, 5); // HH:MM
         eventInfo.startTimeLocal = eventInfo.startTimeFormatted;
         eventInfo.startDateLocal = eventInfo.startDate;
         eventInfo.timezone = startTimeZone;
         
-        this.logger.log(`📋 Microsoft event time: ${start} (timezone: ${startTimeZone})`);
+        this.logger.log(`📋 Microsoft event time: ${start} to ${end} (timezone: ${startTimeZone})`);
       }
 
       // Log parsed event
-      this.logger.log(`📋 Parsed Microsoft event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted}`);
+      this.logger.log(`📋 Parsed Microsoft event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted} - ${eventInfo.endTimeFormatted}`);
 
       return eventInfo;
 
@@ -1141,19 +1186,25 @@ export class EventsService {
 
           // Determine event time based on calendar source
           let finalEventTime = eventInfo.startTimeFormatted || '00:00';
+          let finalEventEndTime = eventInfo.endTimeFormatted || null;
           
           if (source === 'orange') {
             // Orange Calendar needs 3-hour adjustment due to timezone handling quirks
             finalEventTime = this.addHoursToTimeString(eventInfo.startTimeFormatted, 3) || '00:00';
+            if (eventInfo.endTimeFormatted) {
+              finalEventEndTime = this.addHoursToTimeString(eventInfo.endTimeFormatted, 3);
+            }
             this.logger.log(`   🍊 Applied 3-hour Orange Calendar adjustment: ${eventInfo.startTimeFormatted} → ${finalEventTime}`);
           } else if (source === 'google') {
             // Google Calendar times are already correctly converted to Paris timezone
             finalEventTime = eventInfo.startTimeFormatted || '00:00';
-            this.logger.log(`   🔵 Using Google Calendar time as-is (already in Paris timezone): ${finalEventTime}`);
+            finalEventEndTime = eventInfo.endTimeFormatted;
+            this.logger.log(`   🔵 Using Google Calendar time as-is (already in Paris timezone): ${finalEventTime} - ${finalEventEndTime}`);
           } else if (source === 'microsoft') {
             // Microsoft Calendar times are already in the correct timezone (specified in API request)
             finalEventTime = eventInfo.startTimeFormatted || '00:00';
-            this.logger.log(`   🟦 Using Microsoft Calendar time as-is (already in Paris timezone): ${finalEventTime}`);
+            finalEventEndTime = eventInfo.endTimeFormatted;
+            this.logger.log(`   🟦 Using Microsoft Calendar time as-is (already in Paris timezone): ${finalEventTime} - ${finalEventEndTime}`);
           }
 
           // Create new event document
@@ -1162,6 +1213,7 @@ export class EventsService {
             eventName: eventInfo.title || 'Untitled Event',
             eventDate: new Date(eventInfo.startDate),
             eventTime: finalEventTime,
+            eventEndTime: finalEventEndTime, // Save the end time
             eventDescription: eventInfo.description || '',
             eventType: 'external',
             externalCalendarSource: source,
@@ -1173,7 +1225,7 @@ export class EventsService {
           await newEvent.save();
           savedCount++;
 
-          this.logger.log(`✅ Saved event: ${eventInfo.title} on ${eventInfo.startDate} at ${finalEventTime} (${source} calendar)`);
+          this.logger.log(`✅ Saved event: ${eventInfo.title} on ${eventInfo.startDate} at ${finalEventTime} - ${finalEventEndTime || 'N/A'} (${source} calendar)`);
 
         } catch (saveError) {
           this.logger.error(`❌ Error saving event ${eventInfo.title}:`, saveError);
