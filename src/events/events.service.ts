@@ -601,33 +601,14 @@ export class EventsService {
       const firstDayOfCurrentMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
       const lastDayOfNextMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 2, 0, 23, 59, 59);
 
-      // Fetch events from Google Calendar API
-      const timeMin = firstDayOfCurrentMonth.toISOString();
-      const timeMax = lastDayOfNextMonth.toISOString();
+  // Fetch events from Google Calendar API (Paris window converted to ISO)
+  const timeMin = firstDayOfCurrentMonth.toISOString();
+  const timeMax = lastDayOfNextMonth.toISOString();
 
       this.logger.log(`📅 Fetching Google Calendar events from ${timeMin} to ${timeMax} (current + next month)`);
 
-      const eventsUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events`;
-
-      // Use axios instead of fetch for better network compatibility
-      const response = await axios.get(eventsUrl, {
-        params: {
-          timeMin: timeMin,
-          timeMax: timeMax,
-          singleEvents: true,
-          orderBy: 'startTime'
-        },
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/json'
-        },
-        timeout: 15000, // 15 second timeout
-        family: 4,
-        proxy: false
-      });
-
-      const calendarData = response.data;
-      const googleEvents = calendarData.items || [];
+      // Fetch all Google events with pagination to avoid missing events
+  const googleEvents = await this.fetchAllGoogleEvents(accessToken, timeMin, timeMax);
 
       if (googleEvents.length === 0) {
         this.logger.log(`📭 No events found in Google Calendar for user: ${connector.userId}`);
@@ -683,6 +664,48 @@ export class EventsService {
       this.logger.error(`❌ Google Calendar sync error for user ${connector.userId}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Fetch all Google events with pagination (handles nextPageToken)
+   */
+  private async fetchAllGoogleEvents(
+    accessToken: string,
+    timeMin: string,
+    timeMax: string
+  ): Promise<any[]> {
+    const eventsUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events`;
+    let pageToken: string | undefined = undefined;
+    const allEvents: any[] = [];
+
+    do {
+      const response = await axios.get(eventsUrl, {
+        params: {
+          timeMin,
+          timeMax,
+          singleEvents: true,
+          orderBy: 'startTime',
+          maxResults: 2500,
+          pageToken
+        },
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json'
+        },
+        timeout: 15000,
+        family: 4,
+        proxy: false
+      });
+
+      const data = response.data || {};
+      if (Array.isArray(data.items) && data.items.length) {
+        allEvents.push(...data.items);
+      }
+      pageToken = data.nextPageToken;
+    } while (pageToken);
+
+    this.logger.log(`🔵 Google pagination gathered ${allEvents.length} event(s)`);
+    return allEvents;
   }
 
   /**
@@ -889,34 +912,14 @@ export class EventsService {
       const firstDayOfCurrentMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
       const lastDayOfNextMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 2, 0, 23, 59, 59);
 
-      // Fetch events from Microsoft Graph API
-      const startDateTime = firstDayOfCurrentMonth.toISOString();
-      const endDateTime = lastDayOfNextMonth.toISOString();
+  // Build Paris-local window strings for Microsoft Graph (no timezone suffix)
+  const startDateTime = this.formatDateTimeForTimezone(firstDayOfCurrentMonth, 'Europe/Paris', '00:00:00');
+  const endDateTime = this.formatDateTimeForTimezone(lastDayOfNextMonth, 'Europe/Paris', '23:59:59');
 
       this.logger.log(`📅 Fetching Microsoft Calendar events from ${startDateTime} to ${endDateTime} (current + next month)`);
 
-      // Use Microsoft Graph API CalendarView endpoint for date range queries
-      const eventsUrl = `https://graph.microsoft.com/v1.0/me/calendarView`;
-
-      // Use axios for better network compatibility
-      const response = await axios.get(eventsUrl, {
-        params: {
-          startDateTime: startDateTime,
-          endDateTime: endDateTime,
-          $orderby: 'start/dateTime'
-        },
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/json',
-          'Prefer': 'outlook.timezone="Europe/Paris"'
-        },
-        timeout: 15000, // 15 second timeout
-        family: 4,
-        proxy: false
-      });
-
-      const calendarData = response.data;
-      const microsoftEvents = calendarData.value || [];
+      // Fetch all Microsoft events with pagination (@odata.nextLink)
+      const microsoftEvents = await this.fetchAllMicrosoftEvents(accessToken, startDateTime, endDateTime);
 
       if (microsoftEvents.length === 0) {
         this.logger.log(`📭 No events found in Microsoft Calendar for user: ${connector.userId}`);
@@ -972,6 +975,73 @@ export class EventsService {
       this.logger.error(`❌ Microsoft Calendar sync error for user ${connector.userId}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Format date/time for a specific timezone as YYYY-MM-DDTHH:mm:ss (no timezone suffix)
+   * Useful for Microsoft Graph calendarView when using Prefer: outlook.timezone
+   */
+  private formatDateTimeForTimezone(date: Date, timezone: string, time: string): string {
+    try {
+      const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+      const parts = formatter.formatToParts(date);
+      const map = parts.reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {} as any);
+      return `${map.year}-${map.month}-${map.day}T${time}`;
+    } catch {
+      // Fallback to ISO date components if formatter fails
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}T${time}`;
+    }
+  }
+
+  /**
+   * Fetch all Microsoft events with pagination via @odata.nextLink
+   */
+  private async fetchAllMicrosoftEvents(
+    accessToken: string,
+    startDateTime: string,
+    endDateTime: string
+  ): Promise<any[]> {
+    let url: string | null = `https://graph.microsoft.com/v1.0/me/calendarView`;
+    const allEvents: any[] = [];
+
+    while (url) {
+      const response = await axios.get(url, {
+        params: url.includes('calendarView')
+          ? {
+              startDateTime,
+              endDateTime,
+              $orderby: 'start/dateTime',
+              $top: 1000
+            }
+          : undefined, // when following nextLink, params are already embedded
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
+          Prefer: 'outlook.timezone="Europe/Paris"'
+        },
+        timeout: 15000,
+        family: 4,
+        proxy: false
+      });
+
+      const data = response.data || {};
+      const pageEvents = Array.isArray(data.value) ? data.value : [];
+      if (pageEvents.length) allEvents.push(...pageEvents);
+
+      const nextLink = data['@odata.nextLink'] as string | undefined;
+      url = nextLink || null;
+    }
+
+    this.logger.log(`🟦 Microsoft pagination gathered ${allEvents.length} event(s)`);
+    return allEvents;
   }
 
   /**
@@ -1372,7 +1442,7 @@ export class EventsService {
   /*
    @desc - run cron job to sync events every 1 hour
   */
-  @Cron(CronExpression.EVERY_HOUR)
+  @Cron(CronExpression.EVERY_HOUR, { timeZone: 'Europe/Paris' })
   handleCron() {
     this.logger.log('🕒 Cron job triggered: Syncing calendar events...');
     this.syncEventsFromConnectors()
