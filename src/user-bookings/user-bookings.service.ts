@@ -53,6 +53,7 @@ export interface BookingEmailData {
   serviceBannerUrl: string;
   cancelBookingUrl?: string;
   eventName?: string;
+  providerTitle?: string;
 }
 
 /**
@@ -306,6 +307,7 @@ export class UserBookingsService {
           serviceBannerUrl: bookingData.serviceBannerUrl,
           customerEmail: bookingData.customerEmail,
           additionalNotes: bookingData.additionalNotes ?? undefined,
+          providerTitle: bookingData.providerTitle || 'Nouvelle réservation reçue !',
         });
 
         const emailJob = {
@@ -513,6 +515,7 @@ export class UserBookingsService {
             backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
             serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
             cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${savedBooking._id}`,
+            providerTitle: 'Nouvelle réservation reçue !'
           };
 
           // Fix URLs to avoid double slashes

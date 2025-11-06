@@ -489,6 +489,7 @@ export class NotificationsService {
                 serviceBannerUrl: service?.serviceBannerUrl ? `${backendUrl}${service.serviceBannerUrl}` : `${backendUrl}/uploads/default-service-banner.jpg`,
                 customerEmail: booking.customerEmail,
                 additionalNotes: booking.additionalNotes || null,
+                providerTitle: 'Votre réservation approche !'
             };
 
             // Generate email HTML
