@@ -1207,6 +1207,7 @@ export class EventsService {
   private async saveEventsToDatabase(events: any[], userId: any, source: string): Promise<number> {
     try {
       let savedCount = 0;
+      let updatedCount = 0;
 
       for (const eventInfo of events) {
         try {
@@ -1219,8 +1220,59 @@ export class EventsService {
             })
             .exec();
 
+          // Prepare final times based on source before creating/updating
+          let finalEventTime = eventInfo.startTimeFormatted || '00:00';
+          let finalEventEndTime = eventInfo.endTimeFormatted || null;
+          if (source === 'orange') {
+            finalEventTime = this.addHoursToTimeString(eventInfo.startTimeFormatted, 3) || '00:00';
+            if (eventInfo.endTimeFormatted) {
+              finalEventEndTime = this.addHoursToTimeString(eventInfo.endTimeFormatted, 3);
+            }
+          } else if (source === 'google') {
+            finalEventTime = eventInfo.startTimeFormatted || '00:00';
+            finalEventEndTime = eventInfo.endTimeFormatted;
+          } else if (source === 'microsoft') {
+            finalEventTime = eventInfo.startTimeFormatted || '00:00';
+            finalEventEndTime = eventInfo.endTimeFormatted;
+          }
+
           if (existingExternalEvent) {
-            this.logger.log(`⏭️ External event ${eventInfo.title} already exists, skipping...`);
+            // Compute diffs and update if needed (upsert behavior)
+            const updateFields: any = {};
+            const newEventDate = new Date(eventInfo.startDate);
+
+            if (!existingExternalEvent.eventDate || existingExternalEvent.eventDate.toISOString().split('T')[0] !== eventInfo.startDate) {
+              updateFields.eventDate = newEventDate;
+            }
+            if (existingExternalEvent.eventTime !== finalEventTime) {
+              updateFields.eventTime = finalEventTime;
+            }
+            if ((existingExternalEvent as any).eventEndTime !== finalEventEndTime) {
+              updateFields.eventEndTime = finalEventEndTime;
+            }
+            if (existingExternalEvent.eventName !== (eventInfo.title || 'Untitled Event')) {
+              updateFields.eventName = eventInfo.title || 'Untitled Event';
+            }
+            if (existingExternalEvent.eventDescription !== (eventInfo.description || '')) {
+              updateFields.eventDescription = eventInfo.description || '';
+            }
+            // Normalize isAllDay to boolean
+            const incomingAllDay = !!(eventInfo.isAllDay || false);
+            if ((existingExternalEvent as any).isAllDay !== incomingAllDay) {
+              updateFields.isAllDay = incomingAllDay;
+            }
+            // If we ever pass status from providers, honor it. Otherwise keep 'active'.
+            if (eventInfo.status && existingExternalEvent.eventStatus !== eventInfo.status) {
+              updateFields.eventStatus = eventInfo.status;
+            }
+
+            if (Object.keys(updateFields).length > 0) {
+              await this.eventModel.updateOne({ _id: existingExternalEvent._id }, { $set: updateFields }).exec();
+              updatedCount++;
+              this.logger.log(`♻️ Updated external event: ${eventInfo.title} on ${eventInfo.startDate} → ${finalEventTime} - ${finalEventEndTime || 'N/A'} (${source})`);
+            } else {
+              this.logger.log(`⏭️ External event unchanged: ${eventInfo.title} (${source})`);
+            }
             continue;
           }
 
@@ -1241,9 +1293,32 @@ export class EventsService {
             .exec();
 
           if (existingBookingEvent) {
-            this.logger.log(`⚠️ Found existing booking event for same date with similar name, skipping external event: ${eventInfo.title}`);
-            this.logger.log(`   📅 Existing: ${existingBookingEvent.eventName} at ${existingBookingEvent.eventTime}`);
-            this.logger.log(`   🆕 New: ${eventInfo.title} at ${eventInfo.startTimeFormatted}`);
+            // Link and update the booking event instead of creating a duplicate external event
+            const bookingUpdate: any = {
+              externalEventId: eventInfo.uid,
+              externalCalendarSource: source
+            };
+
+            if (existingBookingEvent.eventTime !== finalEventTime) {
+              bookingUpdate.eventTime = finalEventTime;
+            }
+            if ((existingBookingEvent as any).eventEndTime !== finalEventEndTime) {
+              bookingUpdate.eventEndTime = finalEventEndTime;
+            }
+            // If date differs, update
+            const incomingDateStr = new Date(eventInfo.startDate).toISOString().split('T')[0];
+            const existingDateStr = existingBookingEvent.eventDate?.toISOString().split('T')[0];
+            if (existingDateStr !== incomingDateStr) {
+              bookingUpdate.eventDate = new Date(eventInfo.startDate);
+            }
+
+            if (Object.keys(bookingUpdate).length > 0) {
+              await this.eventModel.updateOne({ _id: existingBookingEvent._id }, { $set: bookingUpdate }).exec();
+              updatedCount++;
+              this.logger.log(`🔗 Updated linked booking event with external ID: ${eventInfo.title} → ${finalEventTime} - ${finalEventEndTime || 'N/A'} (${source})`);
+            } else {
+              this.logger.log(`⏭️ Booking event already up-to-date for ${eventInfo.title}`);
+            }
             continue;
           }
 
@@ -1253,27 +1328,11 @@ export class EventsService {
           this.logger.log(`   🕐 Formatted startTime: ${eventInfo.startTimeFormatted}`);
           this.logger.log(`   🌍 Timezone: ${eventInfo.timezone}`);
           this.logger.log(`   📍 StartTimeLocal: ${eventInfo.startTimeLocal}`);
-
-          // Determine event time based on calendar source
-          let finalEventTime = eventInfo.startTimeFormatted || '00:00';
-          let finalEventEndTime = eventInfo.endTimeFormatted || null;
-          
           if (source === 'orange') {
-            // Orange Calendar needs 3-hour adjustment due to timezone handling quirks
-            finalEventTime = this.addHoursToTimeString(eventInfo.startTimeFormatted, 3) || '00:00';
-            if (eventInfo.endTimeFormatted) {
-              finalEventEndTime = this.addHoursToTimeString(eventInfo.endTimeFormatted, 3);
-            }
             this.logger.log(`   🍊 Applied 3-hour Orange Calendar adjustment: ${eventInfo.startTimeFormatted} → ${finalEventTime}`);
           } else if (source === 'google') {
-            // Google Calendar times are already correctly converted to Paris timezone
-            finalEventTime = eventInfo.startTimeFormatted || '00:00';
-            finalEventEndTime = eventInfo.endTimeFormatted;
             this.logger.log(`   🔵 Using Google Calendar time as-is (already in Paris timezone): ${finalEventTime} - ${finalEventEndTime}`);
           } else if (source === 'microsoft') {
-            // Microsoft Calendar times are already in the correct timezone (specified in API request)
-            finalEventTime = eventInfo.startTimeFormatted || '00:00';
-            finalEventEndTime = eventInfo.endTimeFormatted;
             this.logger.log(`   🟦 Using Microsoft Calendar time as-is (already in Paris timezone): ${finalEventTime} - ${finalEventEndTime}`);
           }
 
@@ -1302,7 +1361,10 @@ export class EventsService {
         }
       }
 
-      return savedCount;
+      if (updatedCount > 0) {
+        this.logger.log(`📈 Updated ${updatedCount} existing external event(s)`);
+      }
+      return savedCount + updatedCount;
     } catch (error) {
       this.logger.error('❌ Error in saveEventsToDatabase:', error);
       throw error;
