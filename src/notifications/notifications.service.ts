@@ -232,27 +232,15 @@ export class NotificationsService {
      * Calculate when to send notification based on preference
      */
     private calculateNotificationTime(eventDateTime: Date, notificationBefore: string): Date {
-        const notificationTime = new Date(eventDateTime);
-
-        switch (notificationBefore) {
-            case NOTIFICATION_OPTIONS.ONE_HOUR:
-                notificationTime.setHours(notificationTime.getHours() - 1);
-                break;
-            case NOTIFICATION_OPTIONS.TWO_HOURS:
-                notificationTime.setHours(notificationTime.getHours() - 2);
-                break;
-            case NOTIFICATION_OPTIONS.DAY_BEFORE:
-                notificationTime.setDate(notificationTime.getDate() - 1);
-                break;
-            case NOTIFICATION_OPTIONS.LAST_MINUTE:
-                notificationTime.setMinutes(notificationTime.getMinutes() - 5); // 5 minutes before
-                break;
-            case NOTIFICATION_OPTIONS.NEVER:
-                return new Date(0); // Never send
-            default:
-                notificationTime.setHours(notificationTime.getHours() - 1); // Default to 1 hour
+        // Use unified normalization for all supported values
+        const hours = this.getHoursFromNotificationSetting(notificationBefore);
+        if (hours <= 0) {
+            return new Date(0); // Never send
         }
 
+        const notificationTime = new Date(eventDateTime);
+        const minutesBefore = Math.round(hours * 60);
+        notificationTime.setMinutes(notificationTime.getMinutes() - minutesBefore);
         return notificationTime;
     }
 
@@ -263,23 +251,24 @@ export class NotificationsService {
     private shouldSendNotification(now: Date, notificationTime: Date, eventDateTime: Date): boolean {
         // Don't send if never option or if event has already passed
         if (notificationTime.getTime() === 0 || eventDateTime <= now) {
-            console.log(`❌ Not sending notification: ${notificationTime.getTime() === 0 ? 'Never option' : 'Event has passed'}`);
+            this.logger.debug(`❌ Not sending notification: ${notificationTime.getTime() === 0 ? 'Never option' : 'Event has passed'}`);
             return false;
         }
 
-        // Send if current time is within 30 minutes of notification time
-        const timeDiff = Math.abs(now.getTime() - notificationTime.getTime());
-        const thirtyMinutes = 30 * 60 * 1000; // 30 minutes in milliseconds
-        const shouldSend = timeDiff <= thirtyMinutes && now >= notificationTime;
+        // Edge-triggered window: send only on the first cron run AFTER the threshold
+        const cronIntervalMs = 30 * 60 * 1000; // 30 minutes
+        const previousRun = new Date(now.getTime() - cronIntervalMs);
 
-        console.log(`🔔 Notification timing check (${DEFAULT_TIMEZONE}):`);
-        console.log(`   Current time: ${now.toLocaleString('en-US', { timeZone: DEFAULT_TIMEZONE })}`);
-        console.log(`   Notification time: ${notificationTime.toLocaleString('en-US', { timeZone: DEFAULT_TIMEZONE })}`);
-        console.log(`   Event time: ${eventDateTime.toLocaleString('en-US', { timeZone: DEFAULT_TIMEZONE })}`);
-        console.log(`   Time difference: ${Math.round(timeDiff / 1000 / 60)} minutes`);
-        console.log(`   Should send: ${shouldSend}`);
+        const withinWindow = notificationTime > previousRun && notificationTime <= now;
 
-        return shouldSend;
+        this.logger.debug(`🔔 Notification timing check (${DEFAULT_TIMEZONE}):\n` +
+            `   Prev run: ${previousRun.toLocaleString('en-US', { timeZone: DEFAULT_TIMEZONE })}\n` +
+            `   Now: ${now.toLocaleString('en-US', { timeZone: DEFAULT_TIMEZONE })}\n` +
+            `   Notification at: ${notificationTime.toLocaleString('en-US', { timeZone: DEFAULT_TIMEZONE })}\n` +
+            `   Event at: ${eventDateTime.toLocaleString('en-US', { timeZone: DEFAULT_TIMEZONE })}\n` +
+            `   Within window: ${withinWindow}`);
+
+        return withinWindow;
     }
 
     /**
@@ -500,6 +489,7 @@ export class NotificationsService {
                 serviceBannerUrl: service?.serviceBannerUrl ? `${backendUrl}${service.serviceBannerUrl}` : `${backendUrl}/uploads/default-service-banner.jpg`,
                 customerEmail: booking.customerEmail,
                 additionalNotes: booking.additionalNotes || null,
+                providerTitle: 'Votre réservation approche !'
             };
 
             // Generate email HTML
@@ -630,33 +620,50 @@ export class NotificationsService {
      * Convert notification setting to hours
      */
     private getHoursFromNotificationSetting(setting: string): number {
-        switch (setting) {
+        if (!setting) return 2;
+
+        // Normalize: lowercase, remove spaces/dashes, collapse synonyms
+        const v = setting
+            .toString()
+            .toLowerCase()
+            .trim()
+            .replace(/\s|-/g, '') // remove spaces and dashes
+            .replace(/hours?/, 'hr')
+            .replace(/hour/, 'hr')
+            .replace(/minutes?/, 'min')
+            .replace(/minute/, 'min');
+
+        switch (v) {
+            case '5min':
+            case 'lastminute':
+                return 0.0833; // 5 minutes
             case '15min':
                 return 0.25;
             case '30min':
                 return 0.5;
             case '1hr':
-                return 1;
-            case '2hr':
-                return 2;
-            case '4hr':
-                return 4;
-            case '1day':
-                return 24;
-            case '2day':
-                return 48;
+            case '1h':
             case '1_hour':
                 return 1;
+            case '2hr':
+            case '2h':
             case '2_hours':
                 return 2;
+            case '4hr':
+            case '4h':
+                return 4;
+            case '1day':
+            case 'daybefore':
             case 'day_before':
                 return 24;
-            case 'last_minute':
-                return 0.0833; // 5 minutes
+            case '2day':
+            case '2days':
+                return 48;
             case 'never':
+            case 'off':
                 return 0;
             default:
-                return 2; // Default to 2 hours
+                return 2; // sensible default
         }
     }
 

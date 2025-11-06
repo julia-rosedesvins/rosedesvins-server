@@ -53,6 +53,7 @@ export interface BookingEmailData {
   serviceBannerUrl: string;
   cancelBookingUrl?: string;
   eventName?: string;
+  providerTitle?: string;
 }
 
 /**
@@ -306,6 +307,7 @@ export class UserBookingsService {
           serviceBannerUrl: bookingData.serviceBannerUrl,
           customerEmail: bookingData.customerEmail,
           additionalNotes: bookingData.additionalNotes ?? undefined,
+          providerTitle: bookingData.providerTitle || 'Nouvelle réservation reçue !',
         });
 
         const emailJob = {
@@ -513,6 +515,7 @@ export class UserBookingsService {
             backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
             serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
             cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${savedBooking._id}`,
+            providerTitle: 'Nouvelle réservation reçue !'
           };
 
           // Fix URLs to avoid double slashes
@@ -929,6 +932,16 @@ export class UserBookingsService {
         { $set: { microsoftEventId: createdEvent.id } }
       );
 
+      // Link corresponding booking event in events collection for future sync updates
+      try {
+        await this.eventModel.updateOne(
+          { bookingId: booking._id },
+          { $set: { externalEventId: createdEvent.id, externalCalendarSource: 'microsoft' } }
+        );
+      } catch (linkErr) {
+        console.warn('Could not link booking event with Microsoft externalEventId:', linkErr);
+      }
+
       console.log('✅ Microsoft calendar event created successfully:', createdEvent.id);
 
     } catch (error) {
@@ -1021,6 +1034,16 @@ export class UserBookingsService {
           { _id: booking._id },
           { $set: { googleEventId: eventId } }
         );
+
+        // Link corresponding booking event in events collection for future sync updates
+        try {
+          await this.eventModel.updateOne(
+            { bookingId: booking._id },
+            { $set: { externalEventId: eventId, externalCalendarSource: 'google' } }
+          );
+        } catch (linkErr) {
+          console.warn('Could not link booking event with Google externalEventId:', linkErr);
+        }
 
         console.log('✅ Successfully added booking to Google calendar!');
         console.log('📅 Event details:', {
