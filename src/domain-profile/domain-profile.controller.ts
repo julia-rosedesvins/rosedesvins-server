@@ -446,4 +446,146 @@ export class DomainProfileController {
       throw error;
     }
   }
+
+  @Put('services/:serviceId/booking-settings')
+  @UseGuards(UserGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update service booking restrictions and availability settings' })
+  @ApiBody({
+    description: 'Service booking settings',
+    schema: {
+      type: 'object',
+      properties: {
+        bookingRestrictionActive: { 
+          type: 'boolean',
+          description: 'Enable or disable booking time restrictions'
+        },
+        bookingRestrictionTime: { 
+          type: 'string',
+          enum: ['24h', '48h'],
+          description: 'Minimum advance booking time required'
+        },
+        multipleBookings: { 
+          type: 'boolean',
+          description: 'Allow multiple bookings in the same time slot'
+        },
+        hasCustomAvailability: { 
+          type: 'boolean',
+          description: 'Enable custom date-based availability for this service'
+        },
+        dateAvailability: {
+          type: 'array',
+          description: 'Custom availability configuration for specific dates',
+          items: {
+            type: 'object',
+            properties: {
+              date: { type: 'string', format: 'date', description: 'Date in YYYY-MM-DD format' },
+              enabled: { type: 'boolean', description: 'Whether service is available on this date' },
+              morningEnabled: { type: 'boolean', description: 'Morning time slot availability' },
+              morningFrom: { type: 'string', pattern: '^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', description: 'Morning start time (HH:MM)' },
+              morningTo: { type: 'string', pattern: '^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', description: 'Morning end time (HH:MM)' },
+              afternoonEnabled: { type: 'boolean', description: 'Afternoon time slot availability' },
+              afternoonFrom: { type: 'string', pattern: '^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', description: 'Afternoon start time (HH:MM)' },
+              afternoonTo: { type: 'string', pattern: '^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', description: 'Afternoon end time (HH:MM)' }
+            },
+            required: ['date', 'enabled']
+          }
+        }
+      }
+    }
+  })
+  async updateServiceBookingSettings(
+    @Param('serviceId') serviceId: string,
+    @Body() bookingSettings: {
+      bookingRestrictionActive?: boolean;
+      bookingRestrictionTime?: string;
+      multipleBookings?: boolean;
+      hasCustomAvailability?: boolean;
+      dateAvailability?: Array<{
+        date: string;
+        enabled: boolean;
+        morningEnabled?: boolean;
+        morningFrom?: string;
+        morningTo?: string;
+        afternoonEnabled?: boolean;
+        afternoonFrom?: string;
+        afternoonTo?: string;
+      }>;
+    },
+    @CurrentUser() user: any
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: any;
+  }> {
+    try {
+      const userId = user.sub;
+
+      // Validate booking restriction time if provided
+      if (bookingSettings.bookingRestrictionTime && 
+          !['24h', '48h'].includes(bookingSettings.bookingRestrictionTime)) {
+        throw new HttpException(
+          'Invalid booking restriction time. Must be "24h" or "48h"',
+          HttpStatus.BAD_REQUEST
+        );
+      }
+
+      // Convert date strings to Date objects if dateAvailability is provided
+      const processedBookingSettings: {
+        bookingRestrictionActive?: boolean;
+        bookingRestrictionTime?: string;
+        multipleBookings?: boolean;
+        hasCustomAvailability?: boolean;
+        dateAvailability?: Array<{
+          date: Date;
+          enabled: boolean;
+          morningEnabled: boolean;
+          morningFrom: string;
+          morningTo: string;
+          afternoonEnabled: boolean;
+          afternoonFrom: string;
+          afternoonTo: string;
+        }>;
+      } = {
+        bookingRestrictionActive: bookingSettings.bookingRestrictionActive,
+        bookingRestrictionTime: bookingSettings.bookingRestrictionTime,
+        multipleBookings: bookingSettings.multipleBookings,
+        hasCustomAvailability: bookingSettings.hasCustomAvailability,
+        dateAvailability: bookingSettings.dateAvailability ? 
+          bookingSettings.dateAvailability.map(dateConfig => ({
+            date: new Date(dateConfig.date),
+            enabled: dateConfig.enabled,
+            morningEnabled: dateConfig.morningEnabled ?? false,
+            morningFrom: dateConfig.morningFrom ?? '',
+            morningTo: dateConfig.morningTo ?? '',
+            afternoonEnabled: dateConfig.afternoonEnabled ?? false,
+            afternoonFrom: dateConfig.afternoonFrom ?? '',
+            afternoonTo: dateConfig.afternoonTo ?? ''
+          })) : undefined
+      };
+
+      const result = await this.domainProfileService.updateServiceBookingSettings(
+        userId, 
+        serviceId, 
+        processedBookingSettings
+      );
+
+      return {
+        success: true,
+        message: 'Service booking settings updated successfully',
+        data: result
+      };
+    } catch (error) {
+      console.error('Error updating service booking settings:', error);
+      
+      if (error.message?.includes('not found')) {
+        throw new HttpException(
+          'Service not found or access denied',
+          HttpStatus.NOT_FOUND
+        );
+      }
+      
+      throw error;
+    }
+  }
 }
