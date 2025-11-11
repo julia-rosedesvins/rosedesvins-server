@@ -30,6 +30,46 @@ export class Service {
 
   @Prop({ default: true })
   isActive: boolean;
+
+  @Prop({ default: false })
+  bookingRestrictionActive: boolean;
+
+  @Prop({ 
+    type: String,
+    enum: ['24h', '48h'],
+    default: '24h'
+  })
+  bookingRestrictionTime: string;
+
+  @Prop({ default: false })
+  multipleBookings: boolean;
+
+  @Prop({ default: false })
+  hasCustomAvailability: boolean;
+
+  @Prop({
+    type: [{
+      date: { type: Date, required: true },
+      enabled: { type: Boolean, default: false },
+      morningEnabled: { type: Boolean, default: false },
+      morningFrom: { type: String, default: '' },
+      morningTo: { type: String, default: '' },
+      afternoonEnabled: { type: Boolean, default: false },
+      afternoonFrom: { type: String, default: '' },
+      afternoonTo: { type: String, default: '' }
+    }],
+    default: []
+  })
+  dateAvailability: {
+    date: Date;
+    enabled: boolean;
+    morningEnabled: boolean;
+    morningFrom: string;
+    morningTo: string;
+    afternoonEnabled: boolean;
+    afternoonFrom: string;
+    afternoonTo: string;
+  }[];
 }
 
 export const ServiceSchema = SchemaFactory.createForClass(Service);
