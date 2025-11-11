@@ -242,7 +242,13 @@ export class DomainProfileService {
       numberOfWinesTasted: service.numberOfWinesTasted,
       languagesOffered: service.languagesOffered,
       serviceBannerUrl: service.serviceBannerUrl,
-      isActive: service.isActive
+      isActive: service.isActive,
+      // New booking settings fields
+      bookingRestrictionActive: (service as any).bookingRestrictionActive ?? false,
+      bookingRestrictionTime: (service as any).bookingRestrictionTime ?? '24h',
+      multipleBookings: (service as any).multipleBookings ?? false,
+      hasCustomAvailability: (service as any).hasCustomAvailability ?? false,
+      dateAvailability: (service as any).dateAvailability ?? []
     }));
   }
 
