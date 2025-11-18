@@ -104,7 +104,7 @@ export class WidgetService {
       availability: availability ? {
         weeklyAvailability: availability.weeklyAvailability,
         publicHolidays: availability.publicHolidays,
-        specialDateOverrides: service.dateAvailability ? service.dateAvailability : [],
+        specialDateOverrides: service.dateAvailability && service.hasCustomAvailability ? service.dateAvailability : [],
         timezone: availability.timezone,
         defaultSlotDuration: availability.defaultSlotDuration,
         bufferTime: availability.bufferTime,
