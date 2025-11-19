@@ -142,14 +142,26 @@ export class NotificationsService {
 
             console.log(`Customer Notification Time: ${customerNotificationTime} | Provider Notification Time: ${providerNotificationTime}`);
 
-            // Send customer notification if it's time
-            if (this.shouldSendNotification(now, customerNotificationTime, eventDateTime)) {
+            // Send customer notification if it's time AND not already sent
+            if (!event.customerNotificationSent && this.shouldSendNotification(now, customerNotificationTime, eventDateTime)) {
                 await this.sendCustomerNotification(event, preferences);
+                // Mark as sent
+                await this.eventModel.findByIdAndUpdate(event._id, {
+                    customerNotificationSent: true,
+                    customerNotificationSentAt: new Date()
+                });
+                this.logger.log(`✅ Customer notification sent and marked for event ${event._id}`);
             }
 
-            // Send provider notification if it's time
-            if (this.shouldSendNotification(now, providerNotificationTime, eventDateTime)) {
+            // Send provider notification if it's time AND not already sent
+            if (!event.providerNotificationSent && this.shouldSendNotification(now, providerNotificationTime, eventDateTime)) {
                 await this.sendProviderNotification(event, preferences);
+                // Mark as sent
+                await this.eventModel.findByIdAndUpdate(event._id, {
+                    providerNotificationSent: true,
+                    providerNotificationSentAt: new Date()
+                });
+                this.logger.log(`✅ Provider notification sent and marked for event ${event._id}`);
             }
 
         } catch (error) {

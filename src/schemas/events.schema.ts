@@ -103,6 +103,26 @@ export class Event extends Document {
   })
   isAllDay: boolean; // For all-day events
 
+  @Prop({ 
+    default: false
+  })
+  customerNotificationSent?: boolean; // Track if customer notification was sent
+
+  @Prop({ 
+    type: Date
+  })
+  customerNotificationSentAt?: Date; // When customer notification was sent
+
+  @Prop({ 
+    default: false
+  })
+  providerNotificationSent?: boolean; // Track if provider notification was sent
+
+  @Prop({ 
+    type: Date
+  })
+  providerNotificationSentAt?: Date; // When provider notification was sent
+
   @Prop()
   createdAt?: Date;
 
