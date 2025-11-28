@@ -39,15 +39,15 @@ export class NotificationsService {
     private readonly logger = new Logger(NotificationsService.name);
 
     constructor(
-    @InjectModel(Event.name) private eventModel: Model<Event>,
-    @InjectModel(NotificationPreferences.name) private notificationPreferencesModel: Model<NotificationPreferences>,
-    @InjectModel(User.name) private userModel: Model<User>,
-    @InjectModel(UserBooking.name) private userBookingModel: Model<UserBooking>,
-    @InjectModel(DomainProfile.name) private domainProfileModel: Model<DomainProfile>,
-    @InjectModel(PaymentMethods.name) private paymentMethodsModel: Model<PaymentMethods>,
-    private emailService: EmailService,
-    private templateService: TemplateService,
-  ) {}
+        @InjectModel(Event.name) private eventModel: Model<Event>,
+        @InjectModel(NotificationPreferences.name) private notificationPreferencesModel: Model<NotificationPreferences>,
+        @InjectModel(User.name) private userModel: Model<User>,
+        @InjectModel(UserBooking.name) private userBookingModel: Model<UserBooking>,
+        @InjectModel(DomainProfile.name) private domainProfileModel: Model<DomainProfile>,
+        @InjectModel(PaymentMethods.name) private paymentMethodsModel: Model<PaymentMethods>,
+        private emailService: EmailService,
+        private templateService: TemplateService,
+    ) { }
 
     /**
      * Cron job that runs every 30 minutes to check for upcoming events
@@ -293,18 +293,18 @@ export class NotificationsService {
             const timeUntilEvent = this.getTimeUntilEvent(eventDateTime);
 
             // Format date for display
-            const eventDateFormatted = event.eventDate.toLocaleDateString('fr-FR', { 
-                weekday: 'long', 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
+            const eventDateFormatted = event.eventDate.toLocaleDateString('fr-FR', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
             });
 
             // Get hours before event for notification
             const hoursBeforeEvent = this.getHoursFromNotificationSetting(preferences.customerNotificationBefore);
-            
-            if(hoursBeforeEvent === 0) {
-                return 
+
+            if (hoursBeforeEvent === 0) {
+                return
             }
 
             // Get booking details to access customer information
@@ -322,12 +322,12 @@ export class NotificationsService {
             const provider = event.userId;
             const frontendUrl = 'https://rosedesvins.co';
             const backendUrl = 'https://api.rosedesvins.co';
-            
+
             // Get domain profile for additional details
             const domain = await this.domainProfileModel.findOne({
                 userId: provider._id,
             }).exec();
-  
+
             // Get service details from domain profile
             const service = domain?.services?.find(s =>
                 // @ts-ignore 
@@ -336,7 +336,7 @@ export class NotificationsService {
 
             // Calculate cancel booking URL
             const cancelBookingUrl = `${frontendUrl}/cancel-booking/${booking._id}`;
-            
+
             // Get payment methods for the user
             const paymentMethod = await this.getUserPaymentMethods(provider._id);
 
@@ -396,7 +396,7 @@ export class NotificationsService {
 
         } catch (error) {
             console.error(`❌ Failed to send customer notification email:`, error);
-            
+
             // Fallback to console notification if email fails
             const eventDateTime = this.combineDateTime(event.eventDate, event.eventTime);
             console.log('\n� FALLBACK CUSTOMER NOTIFICATION:');
@@ -416,20 +416,20 @@ export class NotificationsService {
     private async sendProviderNotification(event: any, preferences: any): Promise<void> {
         try {
             const eventDateTime = this.combineDateTime(event.eventDate, event.eventTime);
-            
+
             // Format date for display
-            const eventDateFormatted = event.eventDate.toLocaleDateString('fr-FR', { 
-                weekday: 'long', 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
+            const eventDateFormatted = event.eventDate.toLocaleDateString('fr-FR', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
             });
 
             // Get hours before event for notification
             const hoursBeforeEvent = this.getHoursFromNotificationSetting(preferences.providerNotificationBefore);
 
-            if(hoursBeforeEvent === 0) {
-                return 
+            if (hoursBeforeEvent === 0) {
+                return
             }
 
             // Get booking details to access customer information
@@ -450,14 +450,14 @@ export class NotificationsService {
             // Get additional data for enhanced template (similar to booking confirmation)
             const frontendUrl = 'https://rosedesvins.co';
             const backendUrl = 'https://api.rosedesvins.co';
-            
+
             // Get domain profile for additional details
             const domain = await this.domainProfileModel.findOne({
                 userId: provider._id
             }).exec();
-            
+
             // Get service details from domain profile
-            const service = domain?.services?.find(s => 
+            const service = domain?.services?.find(s =>
                 // @ts-ignore 
                 s._id.toString() === booking.serviceId.toString()
             );
@@ -524,7 +524,7 @@ export class NotificationsService {
 
         } catch (error) {
             console.error(`❌ Failed to send provider notification email:`, error);
-            
+
             // Fallback to console notification if email fails
             const eventDateTime = this.combineDateTime(event.eventDate, event.eventTime);
             console.log('\n🔔 FALLBACK PROVIDER NOTIFICATION:');
@@ -617,7 +617,7 @@ export class NotificationsService {
 
         const methodTranslations: { [key: string]: string } = {
             'bank card': 'Carte bancaire',
-            'checks': 'Chèques', 
+            'checks': 'Chèques',
             'cash': 'Espèces'
         };
 
@@ -639,7 +639,7 @@ export class NotificationsService {
             .toString()
             .toLowerCase()
             .trim()
-            .replace(/\s|-/g, '') // remove spaces and dashes
+            .replace(/\s|-|_/g, '') // remove spaces, dashes, and underscores
             .replace(/hours?/, 'hr')
             .replace(/hour/, 'hr')
             .replace(/minutes?/, 'min')
@@ -846,17 +846,17 @@ export class NotificationsService {
             // Send customer notification email
             try {
                 // Format date for display
-                const eventDateFormatted = mockEvent.eventDate.toLocaleDateString('fr-FR', { 
-                    weekday: 'long', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric' 
+                const eventDateFormatted = mockEvent.eventDate.toLocaleDateString('fr-FR', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
                 });
 
                 // Prepare customer email data with enhanced fields
                 const frontendUrl = 'https://rosedesvins.co';
                 const backendUrl = 'https://api.rosedesvins.co';
-                
+
                 const customerEmailData = {
                     customerName: `${mockEvent.userId.firstName} ${mockEvent.userId.lastName}`,
                     customerEmail: mockEvent.userId.email,
@@ -919,17 +919,17 @@ export class NotificationsService {
             // Send provider notification email
             try {
                 // Format date for display
-                const eventDateFormatted = mockEvent.eventDate.toLocaleDateString('fr-FR', { 
-                    weekday: 'long', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric' 
+                const eventDateFormatted = mockEvent.eventDate.toLocaleDateString('fr-FR', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
                 });
 
                 // Prepare provider email data with enhanced fields
                 const frontendUrl = 'https://rosedesvins.co';
                 const backendUrl = 'https://api.rosedesvins.co';
-                
+
                 const providerEmailData = {
                     providerName: 'Wine Experience Host',
                     providerEmail: email,
