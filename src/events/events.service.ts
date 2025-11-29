@@ -50,7 +50,7 @@ export class EventsService {
         if (event.bookingId && (event.bookingId as any).serviceId && domainProfile) {
           const serviceId = (event.bookingId as any).serviceId.toString();
           const service = domainProfile.services.find(s => (s as any)._id?.toString() === serviceId);
-          
+
           if (service) {
             return {
               ...event,
@@ -98,7 +98,7 @@ export class EventsService {
       // Transform the data to include total participants
       return schedule.map(event => {
         let totalParticipants: number | undefined = undefined;
-        
+
         // If this event has a booking, calculate total participants
         if (event.bookingId && typeof event.bookingId === 'object') {
           const booking = event.bookingId as any;
@@ -272,7 +272,7 @@ export class EventsService {
       const dtendMatch = icsContent.match(/DTEND[^:]*:(.*?)(?:\r?\n)/);
       if (dtendMatch) {
         eventInfo.endTime = dtendMatch[1].trim();
-        
+
         // Parse end time similar to start time
         try {
           const endDateStr = dtendMatch[1].trim();
@@ -280,19 +280,19 @@ export class EventsService {
             const endTimePart = endDateStr.split('T')[1].replace(/[Z]/g, '');
             const endHour = endTimePart.substring(0, 2);
             const endMinute = endTimePart.substring(2, 4);
-            
+
             eventInfo.endTimeFormatted = `${endHour}:${endMinute}`;
-            
+
             // Apply same timezone adjustments as start time
             if (eventInfo.timezone === 'Orange_calendar_adjusted_+5h') {
               const endHourNum = parseInt(endHour);
               let adjustedEndHour = endHourNum + 5;
-              
+
               // Handle day overflow
               if (adjustedEndHour >= 24) {
                 adjustedEndHour = adjustedEndHour - 24;
               }
-              
+
               eventInfo.endTimeFormatted = `${adjustedEndHour.toString().padStart(2, '0')}:${endMinute}`;
               this.logger.log(`🕐 Orange calendar end time adjustment: ${endHour}:${endMinute} → ${eventInfo.endTimeFormatted} (+5 hours)`);
             }
@@ -517,11 +517,15 @@ export class EventsService {
       const currentDate = new Date();
       const currentMonth = currentDate.getMonth() + 1; // JavaScript months are 0-based
       const currentYear = currentDate.getFullYear();
-      
-      // Calculate next month and year (handle year rollover)
+
+      // Calculate next 2 months (handle year rollover)
       const nextMonth = currentDate.getMonth() + 2; // +2 because getMonth() is 0-based, and we want next month
       const nextMonthYear = nextMonth > 12 ? currentYear + 1 : currentYear;
-      const adjustedNextMonth = nextMonth > 12 ? 1 : nextMonth;
+      const adjustedNextMonth = nextMonth > 12 ? nextMonth - 12 : nextMonth;
+
+      const monthAfterNext = currentDate.getMonth() + 3; // +3 for the third month
+      const monthAfterNextYear = monthAfterNext > 12 ? currentYear + 1 : currentYear;
+      const adjustedMonthAfterNext = monthAfterNext > 12 ? monthAfterNext - 12 : monthAfterNext;
 
       for (const icsUrl of icsFiles) {
         try {
@@ -539,15 +543,16 @@ export class EventsService {
             if (icsContent.includes('VEVENT')) {
               const eventInfo = this.extractBasicEventInfo(icsContent);
               if (eventInfo && eventInfo.startDate) {
-                // Filter for current month + next month events (2 months total)
+                // Filter for current month + next 2 months (3 months total)
                 const eventDate = new Date(eventInfo.startDate);
                 const eventMonth = eventDate.getMonth() + 1;
                 const eventYear = eventDate.getFullYear();
-                
+
                 const isCurrentMonth = (eventMonth === currentMonth && eventYear === currentYear);
                 const isNextMonth = (eventMonth === adjustedNextMonth && eventYear === nextMonthYear);
-                
-                if (isCurrentMonth || isNextMonth) {
+                const isMonthAfterNext = (eventMonth === adjustedMonthAfterNext && eventYear === monthAfterNextYear);
+
+                if (isCurrentMonth || isNextMonth || isMonthAfterNext) {
                   events.push(eventInfo);
                 }
               }
@@ -563,7 +568,7 @@ export class EventsService {
           connectorType: 'orange',
           userId: connector.userId.toString(),
           status: 'success',
-          message: 'No events found to sync (current + next month)',
+          message: 'No events found to sync (current + next 2 months)',
           eventsSynced: 0
         };
       }
@@ -604,12 +609,12 @@ export class EventsService {
       const now = new Date();
       const expiresAt = new Date(googleCreds.expiresAt);
       const bufferTime = 5 * 60 * 1000; // 5 minutes
-      
+
       let accessToken = googleCreds.accessToken;
 
       if (now.getTime() > (expiresAt.getTime() - bufferTime)) {
         this.logger.log('🔄 Google token expired, refreshing...');
-        
+
         // Refresh token logic
         const refreshed = await this.refreshGoogleTokenForSync(connector);
         if (!refreshed) {
@@ -618,19 +623,21 @@ export class EventsService {
         accessToken = refreshed;
       }
 
-      // Get current month + next month date range (2 months total)
+      // Get current month + next 2 months date range (3 months total)
       const currentDate = new Date();
       const firstDayOfCurrentMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-      const lastDayOfNextMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 2, 0, 23, 59, 59);
+      const lastDayOfNextMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 3, 0, 23, 59, 59);
 
-  // Fetch events from Google Calendar API (Paris window converted to ISO)
-  const timeMin = firstDayOfCurrentMonth.toISOString();
-  const timeMax = lastDayOfNextMonth.toISOString();
+      // Fetch events from Google Calendar API (Paris window converted to ISO)
+      const timeMin = firstDayOfCurrentMonth.toISOString();
+      const timeMax = lastDayOfNextMonth.toISOString();
 
-      this.logger.log(`📅 Fetching Google Calendar events from ${timeMin} to ${timeMax} (current + next month)`);
+      this.logger.log(`📅 Fetching Google Calendar events (current + next 2 months):`);
+      this.logger.log(`   📆 Date Range: ${firstDayOfCurrentMonth.toLocaleDateString('fr-FR')} to ${lastDayOfNextMonth.toLocaleDateString('fr-FR')}`);
+      this.logger.log(`   🌐 ISO Range: ${timeMin} to ${timeMax}`);
 
       // Fetch all Google events with pagination to avoid missing events
-  const googleEvents = await this.fetchAllGoogleEvents(accessToken, timeMin, timeMax);
+      const googleEvents = await this.fetchAllGoogleEvents(accessToken, timeMin, timeMax);
 
       if (googleEvents.length === 0) {
         this.logger.log(`📭 No events found in Google Calendar for user: ${connector.userId}`);
@@ -638,32 +645,39 @@ export class EventsService {
           connectorType: 'google',
           userId: connector.userId.toString(),
           status: 'success',
-          message: 'No events found to sync (current + next month)',
+          message: 'No events found to sync (current + next 2 months)',
           eventsSynced: 0
         };
       }
 
-      this.logger.log(`📊 Found ${googleEvents.length} event(s) in Google Calendar`);
+      this.logger.log(`📊 Found ${googleEvents.length} raw event(s) in Google Calendar`);
 
       // Parse Google Calendar events to our format
       const events: any[] = [];
       for (const gEvent of googleEvents) {
         try {
-          const eventInfo = this.parseGoogleCalendarEvent(gEvent);
-          if (eventInfo) {
-            events.push(eventInfo);
+          const parsedEvents = this.parseGoogleCalendarEvent(gEvent);
+          if (parsedEvents) {
+            // parseGoogleCalendarEvent now returns an array of events (for multi-day support)
+            const eventsArray = Array.isArray(parsedEvents) ? parsedEvents : [parsedEvents];
+            for (const eventInfo of eventsArray) {
+              events.push(eventInfo);
+              this.logger.log(`✅ Parsed: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted}`);
+            }
           }
         } catch (parseError) {
           this.logger.warn(`⚠️ Error parsing Google event: ${parseError.message}`);
         }
       }
 
+      this.logger.log(`📋 Successfully parsed ${events.length} out of ${googleEvents.length} events`);
+
       if (events.length === 0) {
         return {
           connectorType: 'google',
           userId: connector.userId.toString(),
           status: 'success',
-          message: 'No valid events found to sync (current + next month)',
+          message: 'No valid events found to sync (current + next 2 months)',
           eventsSynced: 0
         };
       }
@@ -733,14 +747,14 @@ export class EventsService {
   /**
    * Parse Google Calendar event to our event format
    */
-  private parseGoogleCalendarEvent(gEvent: any): any | null {
+  private parseGoogleCalendarEvent(gEvent: any): any[] | null {
     try {
       const eventInfo: any = {};
 
       // Extract event title
       eventInfo.title = gEvent.summary || 'Untitled Event';
 
-      // Extract event ID
+      // Extract event ID (base ID for multi-day events)
       eventInfo.uid = gEvent.id;
 
       // Extract description
@@ -759,16 +773,46 @@ export class EventsService {
       eventInfo.isAllDay = !!gEvent.start?.date; // If 'date' is used instead of 'dateTime', it's all-day
 
       if (eventInfo.isAllDay) {
-        // All-day event
+        // All-day event - check if it spans multiple days
         const startDate = new Date(start);
-        eventInfo.startDate = startDate.toISOString().split('T')[0];
-        eventInfo.startTimeFormatted = '00:00';
-        eventInfo.endTimeFormatted = '23:59'; // All-day events end at end of day
+        const endDate = new Date(end);
+        
+        // Calculate number of days (Google Calendar end date is exclusive for all-day events)
+        const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        if (daysDiff > 1) {
+          // Multi-day event - create separate events for each day
+          this.logger.log(`📅 Multi-day event detected: ${eventInfo.title} spans ${daysDiff} days`);
+          const events: any[] = [];
+          
+          for (let i = 0; i < daysDiff; i++) {
+            const currentDate = new Date(startDate);
+            currentDate.setDate(startDate.getDate() + i);
+            
+            const dayEvent = {
+              ...eventInfo,
+              uid: `${eventInfo.uid}_day${i + 1}`, // Unique ID for each day
+              startDate: currentDate.toISOString().split('T')[0],
+              startTimeFormatted: '00:00',
+              endTimeFormatted: '23:59',
+              isAllDay: true
+            };
+            
+            events.push(dayEvent);
+          }
+          
+          return events;
+        } else {
+          // Single day all-day event
+          eventInfo.startDate = startDate.toISOString().split('T')[0];
+          eventInfo.startTimeFormatted = '00:00';
+          eventInfo.endTimeFormatted = '23:59';
+        }
       } else {
         // Timed event - parse datetime
         const startDate = new Date(start);
         const endDate = new Date(end);
-        
+
         // Convert to Paris timezone
         const parisFormatter = new Intl.DateTimeFormat('en-CA', {
           timeZone: 'Europe/Paris',
@@ -803,7 +847,7 @@ export class EventsService {
       // Log parsed event
       this.logger.log(`📋 Parsed Google event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted} - ${eventInfo.endTimeFormatted}`);
 
-      return eventInfo;
+      return [eventInfo]; // Return array for consistency
 
     } catch (error) {
       this.logger.warn('⚠️ Error parsing Google Calendar event:', error);
@@ -817,7 +861,7 @@ export class EventsService {
   private async refreshGoogleTokenForSync(connector: any): Promise<string | null> {
     try {
       const googleCreds = connector.connector_creds.google;
-      
+
       if (!googleCreds?.refreshToken) {
         throw new Error('Missing Google refresh token');
       }
@@ -835,7 +879,7 @@ export class EventsService {
 
       // Exchange refresh token for new access token
       const tokenUrl = 'https://oauth2.googleapis.com/token';
-      
+
       const params = new URLSearchParams({
         client_id: clientId,
         client_secret: clientSecret,
@@ -865,12 +909,12 @@ export class EventsService {
 
       // Update access token in database
       const newExpiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
-      
+
       connector.connector_creds.google.accessToken = tokenData.access_token;
       connector.connector_creds.google.expiresIn = tokenData.expires_in;
       connector.connector_creds.google.expiresAt = newExpiresAt;
       connector.connector_creds.google.isValid = true;
-      
+
       // Keep existing refresh token if not provided
       if (tokenData.refresh_token) {
         connector.connector_creds.google.refreshToken = tokenData.refresh_token;
@@ -880,10 +924,10 @@ export class EventsService {
 
       this.logger.log('✅ Google token refreshed successfully for sync');
       return tokenData.access_token;
-      
+
     } catch (error) {
       this.logger.error('❌ Error refreshing Google token for sync:', error);
-      
+
       // Mark connector as invalid if authentication failed
       if (error.response?.status === 401 || error.response?.status === 400) {
         try {
@@ -894,7 +938,7 @@ export class EventsService {
           this.logger.error('❌ Failed to mark connector as invalid:', saveError);
         }
       }
-      
+
       return null;
     }
   }
@@ -915,12 +959,12 @@ export class EventsService {
       const now = new Date();
       const expiresAt = new Date(microsoftCreds.expiresAt);
       const bufferTime = 5 * 60 * 1000; // 5 minutes
-      
+
       let accessToken = microsoftCreds.accessToken;
 
       if (now.getTime() > (expiresAt.getTime() - bufferTime)) {
         this.logger.log('🔄 Microsoft token expired, refreshing...');
-        
+
         // Refresh token logic
         const refreshed = await this.refreshMicrosoftTokenForSync(connector);
         if (!refreshed) {
@@ -929,16 +973,16 @@ export class EventsService {
         accessToken = refreshed;
       }
 
-      // Get current month + next month date range (2 months total)
+      // Get current month + next 2 months date range (3 months total)
       const currentDate = new Date();
       const firstDayOfCurrentMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-      const lastDayOfNextMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 2, 0, 23, 59, 59);
+      const lastDayOfNextMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 3, 0, 23, 59, 59);
 
-  // Build Paris-local window strings for Microsoft Graph (no timezone suffix)
-  const startDateTime = this.formatDateTimeForTimezone(firstDayOfCurrentMonth, 'Europe/Paris', '00:00:00');
-  const endDateTime = this.formatDateTimeForTimezone(lastDayOfNextMonth, 'Europe/Paris', '23:59:59');
+      // Build Paris-local window strings for Microsoft Graph (no timezone suffix)
+      const startDateTime = this.formatDateTimeForTimezone(firstDayOfCurrentMonth, 'Europe/Paris', '00:00:00');
+      const endDateTime = this.formatDateTimeForTimezone(lastDayOfNextMonth, 'Europe/Paris', '23:59:59');
 
-      this.logger.log(`📅 Fetching Microsoft Calendar events from ${startDateTime} to ${endDateTime} (current + next month)`);
+      this.logger.log(`📅 Fetching Microsoft Calendar events from ${startDateTime} to ${endDateTime} (current + next 2 months)`);
 
       // Fetch all Microsoft events with pagination (@odata.nextLink)
       const microsoftEvents = await this.fetchAllMicrosoftEvents(accessToken, startDateTime, endDateTime);
@@ -949,7 +993,7 @@ export class EventsService {
           connectorType: 'microsoft',
           userId: connector.userId.toString(),
           status: 'success',
-          message: 'No events found to sync (current + next month)',
+          message: 'No events found to sync (current + next 2 months)',
           eventsSynced: 0
         };
       }
@@ -960,9 +1004,11 @@ export class EventsService {
       const events: any[] = [];
       for (const msEvent of microsoftEvents) {
         try {
-          const eventInfo = this.parseMicrosoftCalendarEvent(msEvent);
-          if (eventInfo) {
-            events.push(eventInfo);
+          const parsedEvents = this.parseMicrosoftCalendarEvent(msEvent);
+          if (parsedEvents) {
+            // parseMicrosoftCalendarEvent now returns an array of events (for multi-day support)
+            const eventsArray = Array.isArray(parsedEvents) ? parsedEvents : [parsedEvents];
+            events.push(...eventsArray);
           }
         } catch (parseError) {
           this.logger.warn(`⚠️ Error parsing Microsoft event: ${parseError.message}`);
@@ -974,7 +1020,7 @@ export class EventsService {
           connectorType: 'microsoft',
           userId: connector.userId.toString(),
           status: 'success',
-          message: 'No valid events found to sync (current + next month)',
+          message: 'No valid events found to sync (current + next 2 months)',
           eventsSynced: 0
         };
       }
@@ -1038,11 +1084,11 @@ export class EventsService {
       const response = await axios.get(url, {
         params: url.includes('calendarView')
           ? {
-              startDateTime,
-              endDateTime,
-              $orderby: 'start/dateTime',
-              $top: 1000
-            }
+            startDateTime,
+            endDateTime,
+            $orderby: 'start/dateTime',
+            $top: 1000
+          }
           : undefined, // when following nextLink, params are already embedded
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -1069,14 +1115,14 @@ export class EventsService {
   /**
    * Parse Microsoft Calendar event to our event format
    */
-  private parseMicrosoftCalendarEvent(msEvent: any): any | null {
+  private parseMicrosoftCalendarEvent(msEvent: any): any[] | null {
     try {
       const eventInfo: any = {};
 
       // Extract event title
       eventInfo.title = msEvent.subject || 'Untitled Event';
 
-      // Extract event ID
+      // Extract event ID (base ID for multi-day events)
       eventInfo.uid = msEvent.id;
 
       // Extract description
@@ -1086,7 +1132,7 @@ export class EventsService {
       const start = msEvent.start?.dateTime;
       const end = msEvent.end?.dateTime;
       const startTimeZone = msEvent.start?.timeZone || 'Europe/Paris';
-      
+
       if (!start) {
         this.logger.warn('⚠️ Microsoft event missing start time');
         return null;
@@ -1096,38 +1142,68 @@ export class EventsService {
       eventInfo.isAllDay = msEvent.isAllDay || false;
 
       if (eventInfo.isAllDay) {
-        // All-day event - dateTime is midnight in the specified timezone
+        // All-day event - check if it spans multiple days
         const startDate = new Date(start);
-        eventInfo.startDate = startDate.toISOString().split('T')[0];
-        eventInfo.startTimeFormatted = '00:00';
-        eventInfo.endTimeFormatted = '23:59'; // All-day events end at end of day
+        const endDate = new Date(end);
+        
+        // Calculate number of days
+        const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        if (daysDiff > 1) {
+          // Multi-day event - create separate events for each day
+          this.logger.log(`📅 Multi-day Microsoft event detected: ${eventInfo.title} spans ${daysDiff} days`);
+          const events: any[] = [];
+          
+          for (let i = 0; i < daysDiff; i++) {
+            const currentDate = new Date(startDate);
+            currentDate.setDate(startDate.getDate() + i);
+            
+            const dayEvent = {
+              ...eventInfo,
+              uid: `${eventInfo.uid}_day${i + 1}`, // Unique ID for each day
+              startDate: currentDate.toISOString().split('T')[0],
+              startTimeFormatted: '00:00',
+              endTimeFormatted: '23:59',
+              isAllDay: true
+            };
+            
+            events.push(dayEvent);
+          }
+          
+          return events;
+        } else {
+          // Single day all-day event
+          eventInfo.startDate = startDate.toISOString().split('T')[0];
+          eventInfo.startTimeFormatted = '00:00';
+          eventInfo.endTimeFormatted = '23:59';
+        }
       } else {
         // Timed event
         // Microsoft returns time in the format: "2024-11-15T14:00:00.0000000"
         // The timezone is specified separately in start.timeZone
-        
+
         // Parse the datetime string directly (it's already in the correct timezone)
         const startDateTimeParts = start.split('T');
         const startDatePart = startDateTimeParts[0]; // YYYY-MM-DD
         const startTimePart = startDateTimeParts[1].split('.')[0]; // HH:MM:SS
-        
+
         const endDateTimeParts = end.split('T');
         const endTimePart = endDateTimeParts[1].split('.')[0]; // HH:MM:SS
-        
+
         eventInfo.startDate = startDatePart;
         eventInfo.startTimeFormatted = startTimePart.substring(0, 5); // HH:MM
         eventInfo.endTimeFormatted = endTimePart.substring(0, 5); // HH:MM
         eventInfo.startTimeLocal = eventInfo.startTimeFormatted;
         eventInfo.startDateLocal = eventInfo.startDate;
         eventInfo.timezone = startTimeZone;
-        
+
         this.logger.log(`📋 Microsoft event time: ${start} to ${end} (timezone: ${startTimeZone})`);
       }
 
       // Log parsed event
       this.logger.log(`📋 Parsed Microsoft event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted} - ${eventInfo.endTimeFormatted}`);
 
-      return eventInfo;
+      return [eventInfo]; // Return array for consistency
 
     } catch (error) {
       this.logger.warn('⚠️ Error parsing Microsoft Calendar event:', error);
@@ -1141,7 +1217,7 @@ export class EventsService {
   private async refreshMicrosoftTokenForSync(connector: any): Promise<string | null> {
     try {
       const microsoftCreds = connector.connector_creds.microsoft;
-      
+
       if (!microsoftCreds?.refreshToken) {
         throw new Error('Missing Microsoft refresh token');
       }
@@ -1158,7 +1234,7 @@ export class EventsService {
 
       // Exchange refresh token for new access token
       const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
-      
+
       const params = new URLSearchParams({
         client_id: clientId,
         client_secret: clientSecret,
@@ -1189,12 +1265,12 @@ export class EventsService {
 
       // Update access token in database
       const newExpiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
-      
+
       connector.connector_creds.microsoft.accessToken = tokenData.access_token;
       connector.connector_creds.microsoft.expiresIn = tokenData.expires_in;
       connector.connector_creds.microsoft.expiresAt = newExpiresAt;
       connector.connector_creds.microsoft.isValid = true;
-      
+
       // Keep existing refresh token if not provided
       if (tokenData.refresh_token) {
         connector.connector_creds.microsoft.refreshToken = tokenData.refresh_token;
@@ -1204,10 +1280,10 @@ export class EventsService {
 
       this.logger.log('✅ Microsoft token refreshed successfully for sync');
       return tokenData.access_token;
-      
+
     } catch (error) {
       this.logger.error('❌ Error refreshing Microsoft token for sync:', error);
-      
+
       // Mark connector as invalid if authentication failed
       if (error.response?.status === 401 || error.response?.status === 400) {
         try {
@@ -1218,7 +1294,7 @@ export class EventsService {
           this.logger.error('❌ Failed to mark connector as invalid:', saveError);
         }
       }
-      
+
       return null;
     }
   }
@@ -1230,9 +1306,14 @@ export class EventsService {
     try {
       let savedCount = 0;
       let updatedCount = 0;
+      let skippedCount = 0;
 
+      this.logger.log(`💾 Processing ${events.length} events from ${source} for user ${userId}`);
+      
       for (const eventInfo of events) {
         try {
+          this.logger.log(`🔍 Processing event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted}`);
+          
           // Check if event already exists by external event ID (UID)
           const existingExternalEvent = await this.eventModel
             .findOne({
@@ -1272,8 +1353,17 @@ export class EventsService {
             if ((existingExternalEvent as any).eventEndTime !== finalEventEndTime) {
               updateFields.eventEndTime = finalEventEndTime;
             }
-            if (existingExternalEvent.eventName !== (eventInfo.title || 'Untitled Event')) {
-              updateFields.eventName = eventInfo.title || 'Untitled Event';
+            
+            // Truncate event name if too long (max 200 characters)
+            const maxNameLength = 200;
+            let eventName = eventInfo.title || 'Untitled Event';
+            if (eventName.length > maxNameLength) {
+              eventName = eventName.substring(0, maxNameLength - 3) + '...';
+              this.logger.warn(`⚠️ Event name truncated from ${eventInfo.title.length} to ${maxNameLength} characters`);
+            }
+            
+            if (existingExternalEvent.eventName !== eventName) {
+              updateFields.eventName = eventName;
             }
             if (existingExternalEvent.eventDescription !== (eventInfo.description || '')) {
               updateFields.eventDescription = eventInfo.description || '';
@@ -1291,9 +1381,10 @@ export class EventsService {
             if (Object.keys(updateFields).length > 0) {
               await this.eventModel.updateOne({ _id: existingExternalEvent._id }, { $set: updateFields }).exec();
               updatedCount++;
-              this.logger.log(`♻️ Updated external event: ${eventInfo.title} on ${eventInfo.startDate} → ${finalEventTime} - ${finalEventEndTime || 'N/A'} (${source})`);
+              this.logger.log(`♻️ Updated external event: ${eventInfo.title?.substring(0, 50)}${eventInfo.title?.length > 50 ? '...' : ''} on ${eventInfo.startDate} → ${finalEventTime} - ${finalEventEndTime || 'N/A'} (${source})`);
             } else {
-              this.logger.log(`⏭️ External event unchanged: ${eventInfo.title} (${source})`);
+              skippedCount++;
+              this.logger.log(`⏭️ External event unchanged (skipped): ${eventInfo.title} on ${eventInfo.startDate} (${source})`);
             }
             continue;
           }
@@ -1339,7 +1430,8 @@ export class EventsService {
               updatedCount++;
               this.logger.log(`🔗 Updated linked booking event with external ID: ${eventInfo.title} → ${finalEventTime} - ${finalEventEndTime || 'N/A'} (${source})`);
             } else {
-              this.logger.log(`⏭️ Booking event already up-to-date for ${eventInfo.title}`);
+              skippedCount++;
+              this.logger.log(`⏭️ Booking event already up-to-date (skipped): ${eventInfo.title} on ${eventInfo.startDate}`);
             }
             continue;
           }
@@ -1358,10 +1450,18 @@ export class EventsService {
             this.logger.log(`   🟦 Using Microsoft Calendar time as-is (already in Paris timezone): ${finalEventTime} - ${finalEventEndTime}`);
           }
 
+          // Truncate event name if too long (max 200 characters)
+          const maxNameLength = 200;
+          let eventName = eventInfo.title || 'Untitled Event';
+          if (eventName.length > maxNameLength) {
+            eventName = eventName.substring(0, maxNameLength - 3) + '...';
+            this.logger.warn(`⚠️ Event name truncated from ${eventInfo.title.length} to ${maxNameLength} characters`);
+          }
+
           // Create new event document
           const newEvent = new this.eventModel({
             userId: userId,
-            eventName: eventInfo.title || 'Untitled Event',
+            eventName: eventName,
             eventDate: new Date(eventInfo.startDate),
             eventTime: finalEventTime,
             eventEndTime: finalEventEndTime, // Save the end time
@@ -1383,6 +1483,8 @@ export class EventsService {
         }
       }
 
+      this.logger.log(`📊 Save summary for ${source}: ${savedCount} new, ${updatedCount} updated, ${skippedCount} unchanged`);
+      
       if (updatedCount > 0) {
         this.logger.log(`📈 Updated ${updatedCount} existing external event(s)`);
       }
