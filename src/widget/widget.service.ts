@@ -104,11 +104,13 @@ export class WidgetService {
       availability: availability ? {
         weeklyAvailability: availability.weeklyAvailability,
         publicHolidays: availability.publicHolidays,
-        specialDateOverrides: availability.specialDateOverrides,
+        specialDateOverrides: service.dateAvailability && service.hasCustomAvailability ? service.dateAvailability : [],
         timezone: availability.timezone,
         defaultSlotDuration: availability.defaultSlotDuration,
         bufferTime: availability.bufferTime,
-        isActive: availability.isActive,
+        bookingRestrictionTime: service.bookingRestrictionActive ? service.bookingRestrictionTime : null,
+        multipleBookingsSameSlot: service.multipleBookings,
+        isActive: availability.isActive
       } : {
         weeklyAvailability: null,
         publicHolidays: [],
@@ -116,6 +118,8 @@ export class WidgetService {
         timezone: 'Europe/Paris',
         defaultSlotDuration: 30,
         bufferTime: 0,
+        bookingRestrictionTime: null,
+        multipleBookingsSameSlot: false,
         isActive: false,
       },
       paymentMethods: {

@@ -242,7 +242,13 @@ export class DomainProfileService {
       numberOfWinesTasted: service.numberOfWinesTasted,
       languagesOffered: service.languagesOffered,
       serviceBannerUrl: service.serviceBannerUrl,
-      isActive: service.isActive
+      isActive: service.isActive,
+      // New booking settings fields
+      bookingRestrictionActive: (service as any).bookingRestrictionActive ?? false,
+      bookingRestrictionTime: (service as any).bookingRestrictionTime ?? '24h',
+      multipleBookings: (service as any).multipleBookings ?? false,
+      hasCustomAvailability: (service as any).hasCustomAvailability ?? false,
+      dateAvailability: (service as any).dateAvailability ?? []
     }));
   }
 
@@ -388,6 +394,83 @@ export class DomainProfileService {
     // Toggle the isActive status
     domainProfile.services[serviceIndex].isActive = !domainProfile.services[serviceIndex].isActive;
     
+    await domainProfile.save();
+    
+    const updatedProfile = await this.domainProfileModel
+      .findById(domainProfile._id)
+      .populate('userId', 'firstName lastName email domainName')
+      .exec();
+
+    if (!updatedProfile) {
+      throw new NotFoundException('Failed to retrieve updated domain profile');
+    }
+
+    return updatedProfile;
+  }
+
+  /**
+   * Update service booking settings
+   * @param userId - User ID
+   * @param serviceId - Service ID within the domain profile
+   * @param bookingSettings - Booking restriction and availability settings
+   * @returns Updated domain profile
+   */
+  async updateServiceBookingSettings(
+    userId: string, 
+    serviceId: string, 
+    bookingSettings: {
+      bookingRestrictionActive?: boolean;
+      bookingRestrictionTime?: string;
+      multipleBookings?: boolean;
+      hasCustomAvailability?: boolean;
+      dateAvailability?: Array<{
+        date: Date;
+        enabled: boolean;
+        morningEnabled: boolean;
+        morningFrom: string;
+        morningTo: string;
+        afternoonEnabled: boolean;
+        afternoonFrom: string;
+        afternoonTo: string;
+      }>;
+    }
+  ): Promise<DomainProfile> {
+    const userObjectId = new Types.ObjectId(userId);
+    
+    const domainProfile = await this.domainProfileModel.findOne({ userId: userObjectId });
+    
+    if (!domainProfile) {
+      throw new NotFoundException('Domain profile not found');
+    }
+
+    // Find the service by its _id
+    const serviceIndex = domainProfile.services.findIndex(
+      service => (service as any)._id.toString() === serviceId
+    );
+
+    if (serviceIndex === -1) {
+      throw new NotFoundException('Service not found with the provided ID');
+    }
+
+    // Update only the provided booking settings
+    const service = domainProfile.services[serviceIndex] as any;
+    
+    if (bookingSettings.bookingRestrictionActive !== undefined) {
+      service.bookingRestrictionActive = bookingSettings.bookingRestrictionActive;
+    }
+    if (bookingSettings.bookingRestrictionTime !== undefined) {
+      service.bookingRestrictionTime = bookingSettings.bookingRestrictionTime;
+    }
+    if (bookingSettings.multipleBookings !== undefined) {
+      service.multipleBookings = bookingSettings.multipleBookings;
+    }
+    if (bookingSettings.hasCustomAvailability !== undefined) {
+      service.hasCustomAvailability = bookingSettings.hasCustomAvailability;
+    }
+    if (bookingSettings.dateAvailability !== undefined) {
+      service.dateAvailability = bookingSettings.dateAvailability;
+    }
+
     await domainProfile.save();
     
     const updatedProfile = await this.domainProfileModel
