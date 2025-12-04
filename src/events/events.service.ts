@@ -77,7 +77,7 @@ export class EventsService {
    * @param userId - User ID to get schedule for
    * @returns Promise with user's event dates and times only
    */
-  async getPublicUserSchedule(userId: string): Promise<{ eventDate: Date; eventTime: string; eventEndTime?: string; totalParticipants?: number }[]> {
+  async getPublicUserSchedule(userId: string): Promise<{ eventDate: Date; eventTime: string; eventEndTime?: string; eventType?: string; totalParticipants?: number }[]> {
     try {
       const userObjectId = new Types.ObjectId(userId);
 
@@ -86,7 +86,7 @@ export class EventsService {
           userId: userObjectId,
           eventStatus: 'active' // Only return active events
         })
-        .select('eventDate eventTime eventEndTime bookingId') // Select date, time, and booking reference
+        .select('eventDate eventTime eventEndTime eventType bookingId') // Include eventType to differentiate external events
         .populate({
           path: 'bookingId',
           select: 'participantsAdults participantsEnfants' // Get participant counts from booking
@@ -95,7 +95,7 @@ export class EventsService {
         .lean()
         .exec();
 
-      // Transform the data to include total participants
+      // Transform the data to include total participants and event type
       return schedule.map(event => {
         let totalParticipants: number | undefined = undefined;
 
@@ -111,6 +111,7 @@ export class EventsService {
           eventDate: event.eventDate,
           eventTime: event.eventTime,
           eventEndTime: event.eventEndTime,
+          eventType: event.eventType, // Include eventType to differentiate external events
           totalParticipants
         };
       });
