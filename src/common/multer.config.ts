@@ -5,7 +5,7 @@ import { BadRequestException } from '@nestjs/common';
 
 // Allowed file types for images
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const MAX_FILE_SIZE = 800 * 1024; // 800KB
 
 // Multer configuration for domain profile images
 export const domainProfileImageStorage = diskStorage({
