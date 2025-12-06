@@ -383,7 +383,7 @@ export class NotificationsService {
             // Send email to customer
             const emailJob: EmailJob = {
                 to: customerEmail,
-                subject: `Rappel : Votre expérience œnologique "${service?.name}" dans ${hoursBeforeEvent} heures`,
+                subject: `Rappel : Votre expérience œnotouristique "${service?.name}" dans ${hoursBeforeEvent} heures`,
                 html: emailHtml,
             };
             await this.emailService.sendEmail(emailJob);
