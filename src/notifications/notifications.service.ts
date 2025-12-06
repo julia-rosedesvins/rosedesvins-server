@@ -365,7 +365,7 @@ export class NotificationsService {
                 serviceDescription: service?.description || event.eventDescription,
                 participantsAdults: booking.participantsAdults || 1,
                 participantsChildren: booking.participantsEnfants || 0,
-                selectedLanguage: booking.selectedLanguage || 'Français',
+                selectedLanguage: this.getLanguageInFrench(booking.selectedLanguage),
                 numberOfWinesTasted: service?.numberOfWinesTasted || 3,
                 totalPrice: service?.pricePerPerson ? `${service.pricePerPerson * (booking.participantsAdults + booking.participantsEnfants || 0)}€` : '0€',
                 paymentMethod: paymentMethod,
@@ -491,7 +491,7 @@ export class NotificationsService {
                 serviceDescription: service?.description || event.eventDescription,
                 participantsAdults: booking.participantsAdults || 1,
                 participantsChildren: booking.participantsEnfants || 0,
-                selectedLanguage: booking.selectedLanguage || 'Français',
+                selectedLanguage: this.getLanguageInFrench(booking.selectedLanguage),
                 numberOfWinesTasted: service?.numberOfWinesTasted || 3,
                 totalPrice: service?.pricePerPerson ? `${service.pricePerPerson * (booking.participantsAdults + booking.participantsEnfants || 0)}€` : '0€',
                 paymentMethod: paymentMethod,
@@ -626,6 +626,19 @@ export class NotificationsService {
             .join(', ');
 
         return `Paiement sur place (${translatedMethods})`;
+    }
+
+    /**
+     * Convert language to French display format
+     */
+    private getLanguageInFrench(language: string): string {
+        if (!language) return 'Français'; // Default to Français
+        const lang = language.toLowerCase();
+        if (lang === 'français' || lang === 'french') return 'Français';
+        if (lang === 'anglais' || lang === 'english') return 'Anglais';
+        if (lang === 'español' || lang === 'spanish') return 'Espagnol';
+        if (lang === 'deutsch' || lang === 'german') return 'Allemand';
+        return language; // Return original if no match
     }
 
     /**

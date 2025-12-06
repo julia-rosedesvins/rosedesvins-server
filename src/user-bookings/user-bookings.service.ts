@@ -87,6 +87,7 @@ export class UserBookingsService {
    * @returns Formatted language in French
    */
   private getLanguageInFrench(language: string): string {
+    if (!language) return 'Français'; // Default to Français
     const lang = language.toLowerCase();
     if (lang === 'français' || lang === 'french') return 'Français';
     if (lang === 'anglais' || lang === 'english') return 'Anglais';
