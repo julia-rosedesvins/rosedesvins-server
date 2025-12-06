@@ -612,7 +612,7 @@ export class NotificationsService {
      */
     private formatPaymentMethodsForEmail(methods: string[]): string {
         if (!methods || methods.length === 0) {
-            return 'Paiement sur place (Carte bancaire, Chèques, Espèces)'; // Default fallback
+            return 'Paiement sur place'; // Generic fallback when no methods configured
         }
 
         const methodTranslations: { [key: string]: string } = {
