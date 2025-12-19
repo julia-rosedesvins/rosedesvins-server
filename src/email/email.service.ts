@@ -29,6 +29,12 @@ export interface ContactFormEmailData {
   message?: string;
 }
 
+export interface ResetPasswordEmailData {
+  fullName: string;
+  email: string;
+  resetUrl: string;
+}
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -71,6 +77,20 @@ export class EmailService {
     
     await this.sendEmail(emailJob);
     this.logger.log(`Contact form notification sent to admin from ${formData.email}`);
+  }
+
+  async sendResetPasswordEmail(data: ResetPasswordEmailData): Promise<void> {
+    const emailJob: EmailJob = {
+      to: data.email,
+      subject: 'Réinitialisation de votre mot de passe - Rose des Vins',
+      html: this.templateService.generateResetPasswordEmail({
+        fullName: data.fullName,
+        resetUrl: data.resetUrl,
+      }),
+    };
+
+    await this.sendEmail(emailJob);
+    this.logger.log(`Reset password email sent to ${data.email}`);
   }
 
   async sendEmail(emailData: EmailJob): Promise<boolean> {

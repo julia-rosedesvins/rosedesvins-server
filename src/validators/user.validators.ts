@@ -76,8 +76,33 @@ export const ChangePasswordSchema = z.object({
     ),
 });
 
+export const ForgotPasswordSchema = z.object({
+  email: z
+    .string()
+    .email('Invalid email format')
+    .toLowerCase()
+    .max(255, 'Email must not exceed 255 characters'),
+});
+
+export const ResetPasswordSchema = z.object({
+  token: z
+    .string()
+    .min(1, 'Token is required'),
+  
+  newPassword: z
+    .string()
+    .min(8, 'New password must be at least 8 characters')
+    .max(128, 'New password must not exceed 128 characters')
+    .regex(
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
+      'New password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
+    ),
+});
+
 export type ContactFormDto = z.infer<typeof ContactFormSchema>;
 export type PaginationQueryDto = z.infer<typeof PaginationQuerySchema>;
 export type UserActionDto = z.infer<typeof UserActionSchema>;
 export type UserLoginDto = z.infer<typeof UserLoginSchema>;
 export type ChangePasswordDto = z.infer<typeof ChangePasswordSchema>;
+export type ForgotPasswordDto = z.infer<typeof ForgotPasswordSchema>;
+export type ResetPasswordDto = z.infer<typeof ResetPasswordSchema>;

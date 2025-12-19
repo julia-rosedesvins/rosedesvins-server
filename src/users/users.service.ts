@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ConflictException, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, NotFoundException, BadRequestException, Logger, InternalServerErrorException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { JwtService } from '@nestjs/jwt';
@@ -6,8 +6,9 @@ import * as bcrypt from 'bcryptjs';
 import { User, UserRole, AccountStatus } from '../schemas/user.schema';
 import { Subscription } from '../schemas/subscriptions.schema';
 import { CreateAdminDto, AdminLoginDto } from '../validators/admin.validators';
-import { ContactFormDto, UserActionDto, UserLoginDto, ChangePasswordDto } from '../validators/user.validators';
+import { ContactFormDto, UserActionDto, UserLoginDto, ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from '../validators/user.validators';
 import { EmailService } from '../email/email.service';
+import * as crypto from 'crypto';
 
 export interface AdminLoginResponse {
   user: {
@@ -726,5 +727,72 @@ export class UsersService {
     return {
       message: 'Admin password changed successfully'
     };
+  }
+
+  async forgotPassword(forgotPasswordDto: ForgotPasswordDto): Promise<{ message: string }> {
+    const { email } = forgotPasswordDto;
+    const user = await this.userModel.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      // We return success even if user not found to prevent email enumeration
+      return { message: 'Si un compte existe avec cet email, vous recevrez un lien de réinitialisation.' };
+    }
+
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
+
+    // Save token to user
+    user.resetPasswordToken = resetTokenHash;
+    user.resetPasswordExpires = new Date(Date.now() + 3600000); // 1 hour
+    await user.save();
+
+    // Send email
+    const resetUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
+    
+    try {
+      await this.emailService.sendResetPasswordEmail({
+        fullName: `${user.firstName} ${user.lastName}`,
+        email: user.email,
+        resetUrl,
+      });
+    } catch (error) {
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpires = undefined;
+      await user.save();
+      throw new InternalServerErrorException('Erreur lors de l\'envoi de l\'email');
+    }
+
+    return { message: 'Si un compte existe avec cet email, vous recevrez un lien de réinitialisation.' };
+  }
+
+  async resetPassword(resetPasswordDto: ResetPasswordDto): Promise<{ message: string }> {
+    const { token, newPassword } = resetPasswordDto;
+    const resetTokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+    const user = await this.userModel.findOne({
+      resetPasswordToken: resetTokenHash,
+      resetPasswordExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Le lien de réinitialisation est invalide ou a expiré.');
+    }
+
+    // Hash new password
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    user.password = hashedPassword;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    user.lastPasswordChange = new Date();
+    
+    // If user was pending approval or something, maybe we should check status?
+    // But usually reset password implies they can login now if they are active.
+    
+    await user.save();
+
+    return { message: 'Votre mot de passe a été réinitialisé avec succès.' };
   }
 }

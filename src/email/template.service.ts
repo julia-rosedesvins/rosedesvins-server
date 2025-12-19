@@ -21,6 +21,11 @@ export interface RejectionEmailData {
   domain: string;
 }
 
+export interface ResetPasswordEmailData {
+  fullName: string;
+  resetUrl: string;
+}
+
 export interface ContactFormEmailData {
   fullName: string;
   email: string;
@@ -197,6 +202,29 @@ export class TemplateService {
       ...this.getBaseData(),
       title: 'Bienvenue chez Rose des Vins',
       subtitle: 'Votre compte a été approuvé',
+      content: contentHtml,
+    });
+  }
+
+  generateResetPasswordEmail(data: ResetPasswordEmailData): string {
+    const contentHtml = `
+      <div style="text-align: center;">
+        <h2>Réinitialisation de votre mot de passe</h2>
+        <p>Bonjour ${data.fullName},</p>
+        <p>Vous avez demandé la réinitialisation de votre mot de passe.</p>
+        <p>Cliquez sur le bouton ci-dessous pour définir un nouveau mot de passe :</p>
+        <div style="margin: 30px 0;">
+          <a href="${data.resetUrl}" style="background-color: #3A7B59; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold;">Réinitialiser mon mot de passe</a>
+        </div>
+        <p>Ce lien est valide pendant 1 heure.</p>
+        <p>Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet email.</p>
+      </div>
+    `;
+
+    return this.baseTemplate({
+      ...this.getBaseData(),
+      title: 'Réinitialisation de mot de passe',
+      subtitle: 'Action requise',
       content: contentHtml,
     });
   }

@@ -23,7 +23,11 @@ import {
   UserLoginSchema,
   UserLoginDto,
   ChangePasswordSchema,
-  ChangePasswordDto
+  ChangePasswordDto,
+  ForgotPasswordSchema,
+  ForgotPasswordDto,
+  ResetPasswordSchema,
+  ResetPasswordDto
 } from '../validators/user.validators';
 
 @ApiTags('Admin')
@@ -142,6 +146,55 @@ export class UsersController {
         data: {
           user: loginResult.user,
         },
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Post('forgot-password')
+  @ApiOperation({ summary: 'Request password reset' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        email: { type: 'string', example: 'user@example.com' }
+      },
+      required: ['email']
+    }
+  })
+  @UsePipes(new ZodValidationPipe(ForgotPasswordSchema))
+  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    try {
+      const result = await this.usersService.forgotPassword(forgotPasswordDto);
+      return {
+        success: true,
+        message: result.message,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Post('reset-password')
+  @ApiOperation({ summary: 'Reset password with token' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        token: { type: 'string', example: 'reset-token' },
+        newPassword: { type: 'string', example: 'NewPassword123!' }
+      },
+      required: ['token', 'newPassword']
+    }
+  })
+  @UsePipes(new ZodValidationPipe(ResetPasswordSchema))
+  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+    try {
+      const result = await this.usersService.resetPassword(resetPasswordDto);
+      return {
+        success: true,
+        message: result.message,
       };
     } catch (error) {
       throw error;
