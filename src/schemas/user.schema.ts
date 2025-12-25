@@ -71,35 +71,35 @@ export class User extends Document {
     required: false,
     default: null
   })
-  phoneNumber: string;
+  phoneNumber: string | null;
 
   @Prop({
     type: String,
     required: false,
     default: null
   })
-  address: string;
+  address: string | null;
 
   @Prop({
     type: String,
     required: false,
     default: null
   })
-  codePostal: string;
+  codePostal: string | null;
 
   @Prop({
     type: String,
     required: false,
     default: null
   })
-  city: string;
+  city: string | null;
 
   @Prop({
     type: String,
     required: false,
     default: null
   })
-  siteWeb: string;
+  siteWeb: string | null;
 
   @Prop({
     type: String,
@@ -124,7 +124,7 @@ export class User extends Document {
     type: String,
     default: null
   })
-  loginToken: string;
+  loginToken: string | null;
 
   @Prop({
     type: Date,
@@ -142,7 +142,7 @@ export class User extends Document {
     type: String,
     default: null
   })
-  passwordResetToken: string;
+  passwordResetToken: string | null;
 
   @Prop({
     type: Date,
@@ -160,7 +160,7 @@ export class User extends Document {
     type: String,
     default: null
   })
-  approvedBy: string;
+  approvedBy: string | null;
 
   @Prop({
     type: Date,
@@ -172,7 +172,7 @@ export class User extends Document {
     type: String,
     default: null
   })
-  rejectionReason: string;
+  rejectionReason: string | null;
 
   @Prop({
     type: Date,
@@ -208,7 +208,7 @@ export class User extends Document {
     type: String,
     default: null
   })
-  additionalNotes: string;
+  additionalNotes: string | null;
 
 }
 

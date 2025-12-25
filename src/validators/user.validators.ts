@@ -106,3 +106,41 @@ export type UserLoginDto = z.infer<typeof UserLoginSchema>;
 export type ChangePasswordDto = z.infer<typeof ChangePasswordSchema>;
 export type ForgotPasswordDto = z.infer<typeof ForgotPasswordSchema>;
 export type ResetPasswordDto = z.infer<typeof ResetPasswordSchema>;
+
+export const UpdateUserSchema = z.object({
+  firstName: z
+    .string()
+    .min(2, 'First name must be at least 2 characters')
+    .max(50, 'First name must not exceed 50 characters')
+    .regex(/^[a-zA-ZÀ-ÿ\s'-]+$/, 'First name can only contain letters, spaces, hyphens, and apostrophes')
+    .optional(),
+  
+  lastName: z
+    .string()
+    .min(2, 'Last name must be at least 2 characters')
+    .max(50, 'Last name must not exceed 50 characters')
+    .regex(/^[a-zA-ZÀ-ÿ\s'-]+$/, 'Last name can only contain letters, spaces, hyphens, and apostrophes')
+    .optional(),
+  
+  email: z
+    .string()
+    .email('Invalid email format')
+    .toLowerCase()
+    .max(255, 'Email must not exceed 255 characters')
+    .optional(),
+  
+  domainName: z
+    .string()
+    .min(2, 'Domain name must be at least 2 characters')
+    .max(100, 'Domain name must not exceed 100 characters')
+    .trim()
+    .optional(),
+
+  phoneNumber: z.string().optional().nullable(),
+  address: z.string().optional().nullable(),
+  codePostal: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  siteWeb: z.string().optional().nullable(),
+});
+
+export type UpdateUserDto = z.infer<typeof UpdateUserSchema>;

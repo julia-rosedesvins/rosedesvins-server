@@ -6,7 +6,7 @@ import * as bcrypt from 'bcryptjs';
 import { User, UserRole, AccountStatus } from '../schemas/user.schema';
 import { Subscription } from '../schemas/subscriptions.schema';
 import { CreateAdminDto, AdminLoginDto } from '../validators/admin.validators';
-import { ContactFormDto, UserActionDto, UserLoginDto, ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from '../validators/user.validators';
+import { ContactFormDto, UserActionDto, UserLoginDto, ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto, UpdateUserDto } from '../validators/user.validators';
 import { EmailService } from '../email/email.service';
 import * as crypto from 'crypto';
 
@@ -627,6 +627,35 @@ export class UsersService {
     }
 
     throw new BadRequestException('Invalid action specified');
+  }
+
+  async updateUser(id: string, updateUserDto: UpdateUserDto): Promise<User> {
+    const user = await this.userModel.findById(id);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // If email is being updated, check if it's already taken
+    if (updateUserDto.email && updateUserDto.email !== user.email) {
+      const existingUser = await this.userModel.findOne({ email: updateUserDto.email.toLowerCase() });
+      if (existingUser) {
+        throw new ConflictException('Email already in use');
+      }
+    }
+
+    // Update fields
+    if (updateUserDto.firstName) user.firstName = updateUserDto.firstName;
+    if (updateUserDto.lastName) user.lastName = updateUserDto.lastName;
+    if (updateUserDto.email) user.email = updateUserDto.email.toLowerCase();
+    if (updateUserDto.domainName) user.domainName = updateUserDto.domainName;
+    if (updateUserDto.phoneNumber !== undefined) user.phoneNumber = updateUserDto.phoneNumber;
+    if (updateUserDto.address !== undefined) user.address = updateUserDto.address;
+    if (updateUserDto.codePostal !== undefined) user.codePostal = updateUserDto.codePostal;
+    if (updateUserDto.city !== undefined) user.city = updateUserDto.city;
+    if (updateUserDto.siteWeb !== undefined) user.siteWeb = updateUserDto.siteWeb;
+
+    return await user.save();
   }
 
   async changeUserPassword(changePasswordDto: ChangePasswordDto, userId: string): Promise<{ message: string }> {

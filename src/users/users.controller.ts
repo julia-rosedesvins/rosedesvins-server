@@ -27,7 +27,9 @@ import {
   ForgotPasswordSchema,
   ForgotPasswordDto,
   ResetPasswordSchema,
-  ResetPasswordDto
+  ResetPasswordDto,
+  UpdateUserSchema,
+  UpdateUserDto
 } from '../validators/user.validators';
 
 @ApiTags('Admin')
@@ -393,6 +395,30 @@ export class UsersController {
         message: userActionDto.action === 'approve' 
           ? 'User account approved successfully. Login credentials sent via email.' 
           : 'User account rejected successfully. Notification sent via email.',
+        data: userResponse,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Put('admin/users/:id')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Update user details' })
+  @ApiBearerAuth('admin-token')
+  async updateUser(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(UpdateUserSchema)) updateUserDto: UpdateUserDto,
+  ) {
+    try {
+      const user = await this.usersService.updateUser(id, updateUserDto);
+      
+      // Remove sensitive fields from response
+      const { password, loginToken, ...userResponse } = user.toObject();
+      
+      return {
+        success: true,
+        message: 'User updated successfully',
         data: userResponse,
       };
     } catch (error) {
