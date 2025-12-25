@@ -56,8 +56,8 @@ export class WidgetService {
       (s: any) => s._id.toString() === serviceId
     );
 
-    if (!service || !service.isActive) {
-      throw new NotFoundException('Service not found or is inactive');
+    if (!service) {
+      throw new NotFoundException('Service not found');
     }
 
     // 3. Get availability data (optional)
