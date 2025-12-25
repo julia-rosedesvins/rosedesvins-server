@@ -668,10 +668,7 @@ export class UserBookingsService {
         start: startDate,
         end: endDate,
         summary: eventTitle,
-        organizer: {
-          name: 'ROSEDESVINS APP',
-          email: orangeCreds.username
-        },
+        // organizer removed to prevent calendar invites
         created: new Date(),
         lastModified: new Date()
       });
@@ -872,15 +869,7 @@ export class UserBookingsService {
           contentType: 'html',
           content: this.generateEventDescription(bookingDto)
         },
-        attendees: [
-          {
-            emailAddress: {
-              address: bookingDto.customerEmail,
-              name: `${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`
-            },
-            type: 'required'
-          }
-        ],
+        attendees: [], // Don't send calendar invite to customer
         location: {
           displayName: 'Rose des Vins - Dégustation'
         },
@@ -1014,12 +1003,7 @@ export class UserBookingsService {
         location: 'Rose des Vins - Dégustation',
         startDateTime: startDateTimeStr,
         endDateTime: endDateTimeStr,
-        attendees: [
-          {
-            email: bookingDto.customerEmail,
-            displayName: `${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`
-          }
-        ],
+        attendees: [], // Don't send calendar invite to customer
         timeZone: 'Europe/Paris'
       };
 
@@ -2247,12 +2231,7 @@ export class UserBookingsService {
         location: 'Rose des Vins - Dégustation',
         startDateTime: startDateTimeStr,
         endDateTime: endDateTimeStr,
-        attendees: [
-          {
-            email: newBooking.customerEmail,
-            displayName: `${newBooking.userContactFirstname} ${newBooking.userContactLastname}`
-          }
-        ],
+        attendees: [], // Don't send calendar invite to customer
         timeZone: 'Europe/Paris'
       };
 
