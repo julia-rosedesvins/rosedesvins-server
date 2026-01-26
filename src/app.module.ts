@@ -19,9 +19,10 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { DashboardAnalyticsModule } from './dashboard-analytics/dashboard-analytics.module';
 import { SupportContactModule } from './support-contact/support-contact.module';
 import { WebModule } from './web/web.module';
+import { RegionsModule } from './regions/regions.module';
 
 @Module({
-  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule, NotificationPreferencesModule, PaymentMethodsModule, WidgetModule, UserBookingsModule, EventsModule, NotificationsModule, ScheduleModule.forRoot(), DashboardAnalyticsModule, SupportContactModule, WebModule],
+  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule, NotificationPreferencesModule, PaymentMethodsModule, WidgetModule, UserBookingsModule, EventsModule, NotificationsModule, ScheduleModule.forRoot(), DashboardAnalyticsModule, SupportContactModule, WebModule, RegionsModule],
   controllers: [AppController],
   providers: [AppService],
 })

@@ -2,39 +2,45 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
 
 @Schema({
-  timestamps: true,
+    timestamps: true,
 })
 export class Region extends Document {
-  @Prop({
-    type: String,
-    required: true,
-    index: true,
-  })
-  denom: string;
+    @Prop({
+        type: String,
+        required: true,
+        index: true,
+    })
+    denom: string;
 
-  @Prop({
-    type: Number,
-    required: true,
-  })
-  min_lat: number;
+    @Prop({
+        type: Number,
+        required: true,
+    })
+    min_lat: number;
 
-  @Prop({
-    type: Number,
-    required: true,
-  })
-  min_lon: number;
+    @Prop({
+        type: Number,
+        required: true,
+    })
+    min_lon: number;
 
-  @Prop({
-    type: Number,
-    required: true,
-  })
-  max_lat: number;
+    @Prop({
+        type: Number,
+        required: true,
+    })
+    max_lat: number;
 
-  @Prop({
-    type: Number,
-    required: true,
-  })
-  max_lon: number;
+    @Prop({
+        type: Number,
+        required: true,
+    })
+    max_lon: number;
+
+    @Prop({
+        type: String,
+        default: '',
+    })
+    thumbnailUrl: string;
 }
 
 export const RegionSchema = SchemaFactory.createForClass(Region);
