@@ -38,7 +38,7 @@ export class RegionsService {
                     min_lon: region.min_lon,
                     max_lat: region.max_lat,
                     max_lon: region.max_lon,
-                    thumbnailUrl: region.thumbnailUrl || 'https://id-preview--9823886f-7c2e-49c8-a682-c632b326f15e.lovable.app/assets/loire-valley-new-BsV_99z6.jpg',
+                    thumbnailUrl: region.thumbnailUrl || 'http://localhost:5001/uploads/regions/loire-valley-new-BsV_99z6.jpg',
                 }));
 
             this.logger.log(`Filtered ${filteredRegions.length} relevant regions out of ${regionsData.length} total`);
