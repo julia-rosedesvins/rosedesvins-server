@@ -41,6 +41,20 @@ export class Region extends Document {
         default: '',
     })
     thumbnailUrl: string;
+
+    @Prop({
+        type: Boolean,
+        default: false,
+        index: true,
+    })
+    isParent: boolean;
+
+    @Prop({
+        type: String,
+        default: null,
+        index: true,
+    })
+    parent: string;
 }
 
 export const RegionSchema = SchemaFactory.createForClass(Region);
@@ -48,4 +62,7 @@ export const RegionSchema = SchemaFactory.createForClass(Region);
 // Create indexes for geospatial queries
 RegionSchema.index({ min_lat: 1, min_lon: 1 });
 RegionSchema.index({ max_lat: 1, max_lon: 1 });
+RegionSchema.index({ isParent: 1 });
+RegionSchema.index({ parent: 1 });
+RegionSchema.index({ denom: 'text' });
 RegionSchema.index({ denom: 'text' });

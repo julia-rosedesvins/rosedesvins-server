@@ -16,10 +16,12 @@ export class RegionsController {
   async getAllRegions(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('isParent') isParent?: string,
   ) {
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 10;
-    return this.regionsService.getAllRegions(pageNum, limitNum);
+    const isParentBool = isParent !== undefined ? isParent === 'true' : undefined;
+    return this.regionsService.getAllRegions(pageNum, limitNum, isParentBool);
   }
 
   @Get('search')
