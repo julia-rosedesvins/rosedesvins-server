@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { ConfigService } from '@nestjs/config';
 import { Region } from '../schemas/region.schema';
+import { User } from '../schemas/user.schema';
+import { DomainProfile } from '../schemas/domain-profile.schema';
+import { StaticExperience } from '../schemas/static-experience.schema';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -11,6 +15,10 @@ export class RegionsService {
 
     constructor(
         @InjectModel(Region.name) private regionModel: Model<Region>,
+        @InjectModel(User.name) private userModel: Model<User>,
+        @InjectModel(DomainProfile.name) private domainProfileModel: Model<DomainProfile>,
+        @InjectModel(StaticExperience.name) private staticExperienceModel: Model<StaticExperience>,
+        private configService: ConfigService,
     ) { }
 
     async loadRegionsFromJson(): Promise<{ success: boolean; message: string; count: number; parentCount: number; childCount: number }> {
@@ -155,8 +163,142 @@ export class RegionsService {
         };
     }
 
-    async getRegionByName(denom: string): Promise<Region | null> {
-        return this.regionModel.findOne({ denom }).exec();
+    async getRegionByName(
+        denom: string,
+        page: number = 1,
+        limit: number = 20,
+    ): Promise<{
+        region: Region | null;
+        domains: Array<{
+            domainName: string;
+            domainDescription: string;
+            domainProfilePictureUrl: string | null;
+            producer: 'client' | 'non-client';
+            domainPrice: number | null;
+            siteUrl: string | null;
+        }>;
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+    }> {
+        // Step 1: Find region by name
+        const region = await this.regionModel.findOne({ denom }).exec();
+        
+        if (!region) {
+            return { region: null, domains: [], total: 0, page, limit, totalPages: 0 };
+        }
+
+        this.logger.log(`Found region: ${region.denom} with bounds [${region.min_lat}, ${region.min_lon}] to [${region.max_lat}, ${region.max_lon}]`);
+
+        // Step 2: Find users whose coordinates fall within region bounds
+        const usersInRegion = await this.userModel.find({
+            $and: [
+                { domainLatitude: { $gte: region.min_lat, $lte: region.max_lat, $ne: null } },
+                { domainLongitude: { $gte: region.min_lon, $lte: region.max_lon, $ne: null } },
+            ]
+        }).select('_id domainName siteWeb').exec();
+
+        this.logger.log(`Found ${usersInRegion.length} users in region bounds`);
+
+        const userIds = usersInRegion.map(user => user._id);
+
+        // Step 3: Count total domain profiles and static experiences for pagination
+        const regionBoundsQuery = {
+            $and: [
+                { latitude: { $gte: region.min_lat, $lte: region.max_lat, $ne: null } },
+                { longitude: { $gte: region.min_lon, $lte: region.max_lon, $ne: null } },
+            ]
+        };
+
+        const [totalDomainProfiles, totalStaticExperiences] = await Promise.all([
+            this.domainProfileModel.countDocuments({ userId: { $in: userIds } }).exec(),
+            this.staticExperienceModel.countDocuments(regionBoundsQuery).exec(),
+        ]);
+
+        const totalDomains = totalDomainProfiles + totalStaticExperiences;
+        const totalPages = Math.ceil(totalDomains / limit);
+        const skip = (page - 1) * limit;
+
+        this.logger.log(`Total domains: ${totalDomains} (${totalDomainProfiles} profiles, ${totalStaticExperiences} experiences)`);
+
+        // Step 4: Determine how to split the limit between profiles and experiences
+        // Fetch domain profiles first, then fill remainder with static experiences
+        let domainProfiles: any[] = [];
+        let staticExperiences: any[] = [];
+        let remainingLimit = limit;
+
+        if (skip < totalDomainProfiles) {
+            // Still fetching from domain profiles
+            const profilesLimit = Math.min(remainingLimit, totalDomainProfiles - skip);
+            domainProfiles = await this.domainProfileModel.find({
+                userId: { $in: userIds },
+            })
+            .populate('userId', 'domainName siteWeb')
+            .skip(skip)
+            .limit(profilesLimit)
+            .exec();
+
+            remainingLimit -= domainProfiles.length;
+
+            // If we still have space in the page, fetch static experiences
+            if (remainingLimit > 0) {
+                staticExperiences = await this.staticExperienceModel.find(regionBoundsQuery)
+                    .limit(remainingLimit)
+                    .exec();
+            }
+        } else {
+            // Skip past all domain profiles, fetch only static experiences
+            const experiencesSkip = skip - totalDomainProfiles;
+            staticExperiences = await this.staticExperienceModel.find(regionBoundsQuery)
+                .skip(experiencesSkip)
+                .limit(limit)
+                .exec();
+        }
+
+        this.logger.log(`Fetched ${domainProfiles.length} domain profiles and ${staticExperiences.length} static experiences for page ${page}`);
+
+        // Step 5: Format domain profiles data
+        const backendUrl = this.configService.get<string>('BACKEND_URL') || 'http://localhost:5001';
+        const domainsFromProfiles = domainProfiles.map(profile => {
+            const user = profile.userId as any;
+            const firstActiveService = profile.services.find(s => s.isActive);
+            
+            return {
+                domainName: user?.domainName || 'Unknown Domain',
+                domainDescription: profile.domainDescription,
+                domainProfilePictureUrl: profile.domainProfilePictureUrl 
+                    ? `${backendUrl}/${profile.domainProfilePictureUrl}` 
+                    : null,
+                producer: 'client' as const,
+                domainPrice: firstActiveService?.pricePerPerson || null,
+                siteUrl: null,
+            };
+        });
+
+        // Step 6: Format static experiences data
+        const domainsFromExperiences = staticExperiences.map(exp => ({
+            domainName: exp.name,
+            domainDescription: exp.about || exp.category || '',
+            domainProfilePictureUrl: exp.main_image || null,
+            producer: 'non-client' as const,
+            domainPrice: null,
+            siteUrl: exp.website || null,
+        }));
+
+        // Step 7: Combine both arrays
+        const domains = [...domainsFromProfiles, ...domainsFromExperiences];
+
+        this.logger.log(`Returning page ${page} with ${domains.length} domains (total: ${totalDomains})`);
+
+        return {
+            region,
+            domains,
+            total: totalDomains,
+            page,
+            limit,
+            totalPages,
+        };
     }
 
     async searchRegions(query: string): Promise<Region[]> {
