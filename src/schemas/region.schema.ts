@@ -9,6 +9,7 @@ export class Region extends Document {
         type: String,
         required: true,
         index: true,
+        unique: true,
     })
     denom: string;
 
