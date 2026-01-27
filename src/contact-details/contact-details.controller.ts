@@ -42,7 +42,9 @@ export class ContactDetailsController {
         address: { type: 'string', example: '123 Rue Example' },
         codePostal: { type: 'string', example: '37210' },
         city: { type: 'string', example: 'Vouvray' },
-        siteWeb: { type: 'string', example: 'www.example.com' }
+        siteWeb: { type: 'string', example: 'www.example.com' },
+        domainLatitude: { type: 'number', example: 47.4144, nullable: true },
+        domainLongitude: { type: 'number', example: 0.6930, nullable: true }
       }
     }
   })
