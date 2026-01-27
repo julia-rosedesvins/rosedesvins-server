@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { ConfigService } from '@nestjs/config';
 import { DomainProfile } from '../schemas/domain-profile.schema';
 import { User } from '../schemas/user.schema';
 import { promises as fs } from 'fs';
@@ -32,6 +33,7 @@ export class DomainProfileService {
   constructor(
     @InjectModel(DomainProfile.name) private domainProfileModel: Model<DomainProfile>,
     @InjectModel(User.name) private userModel: Model<User>,
+    private configService: ConfigService,
   ) {}
 
   async createOrUpdateDomainProfile(
@@ -168,6 +170,97 @@ export class DomainProfileService {
       .exec();
 
     return domainProfile;
+  }
+
+  /**
+   * Get domain profile by ID with user location data (Public API)
+   * @param domainId - Domain profile ID
+   * @returns Domain profile with location data
+   */
+  async getPublicDomainProfileById(domainId: string): Promise<{
+    domainProfile: any;
+    location: {
+      domainLatitude: number | null;
+      domainLongitude: number | null;
+      address: string | null;
+      city: string | null;
+      codePostal: string | null;
+    };
+  } | null> {
+    try {
+      const domainObjectId = new Types.ObjectId(domainId);
+      const backendUrl = this.configService.get<string>('BACKEND_URL') || 'http://localhost:5001';
+      
+      // Find domain profile and populate user data
+      const domainProfile = await this.domainProfileModel
+        .findById(domainObjectId)
+        .populate('userId', 'domainName domainLatitude domainLongitude address city codePostal siteWeb')
+        .exec();
+
+      if (!domainProfile) {
+        return null;
+      }
+
+      const user = domainProfile.userId as any;
+
+      // Helper function to build full URL
+      const buildFullUrl = (url: string | undefined | null): string | null => {
+        if (!url) return null;
+        // If URL already starts with http:// or https://, return as is
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          return url;
+        }
+        // Otherwise prepend BACKEND_URL
+        return `${backendUrl}${url.startsWith('/') ? '' : '/'}${url}`;
+      };
+
+      // Map services with full URLs for service banners
+      const servicesWithFullUrls = domainProfile.services.map(service => {
+        const serviceObj = service['_doc'] || service;
+        return {
+          _id: serviceObj._id,
+          name: serviceObj.name,
+          description: serviceObj.description,
+          numberOfPeople: serviceObj.numberOfPeople,
+          pricePerPerson: serviceObj.pricePerPerson,
+          timeOfServiceInMinutes: serviceObj.timeOfServiceInMinutes,
+          numberOfWinesTasted: serviceObj.numberOfWinesTasted,
+          languagesOffered: serviceObj.languagesOffered,
+          serviceBannerUrl: buildFullUrl(serviceObj.serviceBannerUrl),
+          isActive: serviceObj.isActive,
+          bookingRestrictionActive: serviceObj.bookingRestrictionActive,
+          bookingRestrictionTime: serviceObj.bookingRestrictionTime,
+          multipleBookings: serviceObj.multipleBookings,
+          hasCustomAvailability: serviceObj.hasCustomAvailability,
+          dateAvailability: serviceObj.dateAvailability
+        };
+      });
+
+      return {
+        domainProfile: {
+          _id: domainProfile._id,
+          domainDescription: domainProfile.domainDescription,
+          domainProfilePictureUrl: buildFullUrl(domainProfile.domainProfilePictureUrl),
+          domainLogoUrl: buildFullUrl(domainProfile.domainLogoUrl),
+          colorCode: domainProfile.colorCode,
+          services: servicesWithFullUrls,
+          domainName: user?.domainName,
+          siteWeb: user?.siteWeb,
+          createdAt: domainProfile.createdAt,
+          updatedAt: domainProfile.updatedAt
+        },
+        location: {
+          domainLatitude: user?.domainLatitude || null,
+          domainLongitude: user?.domainLongitude || null,
+          address: user?.address || null,
+          city: user?.city || null,
+          codePostal: user?.codePostal || null
+        }
+      };
+    } catch (error) {
+      console.error('Error in getPublicDomainProfileById:', error);
+      return null;
+    }
   }
 
   /**
