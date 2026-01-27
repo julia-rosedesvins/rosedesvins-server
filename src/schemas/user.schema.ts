@@ -102,6 +102,20 @@ export class User extends Document {
   siteWeb: string | null;
 
   @Prop({
+    type: Number,
+    required: false,
+    default: null
+  })
+  domainLatitude: number | null;
+
+  @Prop({
+    type: Number,
+    required: false,
+    default: null
+  })
+  domainLongitude: number | null;
+
+  @Prop({
     type: String,
     enum: AccountStatus,
     default: AccountStatus.PENDING_APPROVAL
