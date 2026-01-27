@@ -176,6 +176,7 @@ export class RegionsService {
             producer: 'client' | 'non-client';
             domainPrice: number | null;
             siteUrl: string | null;
+            location: string | null;
         }>;
         total: number;
         page: number;
@@ -197,7 +198,7 @@ export class RegionsService {
                 { domainLatitude: { $gte: region.min_lat, $lte: region.max_lat, $ne: null } },
                 { domainLongitude: { $gte: region.min_lon, $lte: region.max_lon, $ne: null } },
             ]
-        }).select('_id domainName siteWeb').exec();
+        }).select('_id domainName siteWeb city').exec();
 
         this.logger.log(`Found ${usersInRegion.length} users in region bounds`);
 
@@ -234,7 +235,7 @@ export class RegionsService {
             domainProfiles = await this.domainProfileModel.find({
                 userId: { $in: userIds },
             })
-            .populate('userId', 'domainName siteWeb')
+            .populate('userId', 'domainName siteWeb city')
             .skip(skip)
             .limit(profilesLimit)
             .exec();
@@ -273,6 +274,7 @@ export class RegionsService {
                 producer: 'client' as const,
                 domainPrice: firstActiveService?.pricePerPerson || null,
                 siteUrl: null,
+                location: user?.city || null,
             };
         });
 
@@ -284,6 +286,7 @@ export class RegionsService {
             producer: 'non-client' as const,
             domainPrice: null,
             siteUrl: exp.website || null,
+            location: exp.city || null,
         }));
 
         // Step 7: Combine both arrays
