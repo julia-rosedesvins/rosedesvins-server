@@ -269,7 +269,7 @@ export class RegionsService {
                 domainName: user?.domainName || 'Unknown Domain',
                 domainDescription: profile.domainDescription,
                 domainProfilePictureUrl: profile.domainProfilePictureUrl 
-                    ? `${backendUrl}/${profile.domainProfilePictureUrl}` 
+                    ? `${backendUrl}${profile.domainProfilePictureUrl}` 
                     : null,
                 producer: 'client' as const,
                 domainPrice: firstActiveService?.pricePerPerson || null,
