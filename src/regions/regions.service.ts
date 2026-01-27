@@ -275,6 +275,7 @@ export class RegionsService {
                 domainPrice: firstActiveService?.pricePerPerson || null,
                 siteUrl: null,
                 location: user?.city || null,
+                domainId: profile._id.toString(),
             };
         });
 
@@ -287,6 +288,7 @@ export class RegionsService {
             domainPrice: null,
             siteUrl: exp.website || null,
             location: exp.city || null,
+            domainId: null
         }));
 
         // Step 7: Combine both arrays
