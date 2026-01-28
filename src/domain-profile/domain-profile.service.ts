@@ -635,6 +635,7 @@ export class DomainProfileService {
           isActive: service.isActive,
           domain: {
             domainId: profile._id,
+            userId: user?._id || null,
             domainName: user?.domainName || null,
             domainDescription: profileDoc.domainDescription,
             colorCode: profileDoc.colorCode,

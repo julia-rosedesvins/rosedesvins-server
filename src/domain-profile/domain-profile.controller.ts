@@ -209,6 +209,7 @@ export class DomainProfileController {
                     type: 'object',
                     properties: {
                       domainId: { type: 'string' },
+                      userId: { type: 'string' },
                       domainName: { type: 'string', nullable: true },
                       domainDescription: { type: 'string' },
                       colorCode: { type: 'string' },
