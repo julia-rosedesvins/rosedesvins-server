@@ -239,6 +239,7 @@ export class DomainProfileService {
       return {
         domainProfile: {
           _id: domainProfile._id,
+          userId: domainProfile.userId._id,
           domainDescription: domainProfile.domainDescription,
           domainProfilePictureUrl: buildFullUrl(domainProfile.domainProfilePictureUrl),
           domainLogoUrl: buildFullUrl(domainProfile.domainLogoUrl),
