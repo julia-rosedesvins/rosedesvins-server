@@ -6,6 +6,7 @@ import { NewsletterController } from './newsletter.controller';
 import { NewsletterService } from './newsletter.service';
 import { NewsletterSubscription, NewsletterSubscriptionSchema } from '../schemas/newsletter-subscription.schema';
 import { User, UserSchema } from '../schemas/user.schema';
+import { Subscription, SubscriptionSchema } from '../schemas/subscriptions.schema';
 import { EmailModule } from '../email/email.module';
 
 @Module({
@@ -13,6 +14,7 @@ import { EmailModule } from '../email/email.module';
     MongooseModule.forFeature([
       { name: NewsletterSubscription.name, schema: NewsletterSubscriptionSchema },
       { name: User.name, schema: UserSchema },
+      { name: Subscription.name, schema: SubscriptionSchema },
     ]),
     JwtModule.registerAsync({
       imports: [ConfigModule],

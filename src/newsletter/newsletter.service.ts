@@ -1,9 +1,10 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import { NewsletterSubscription, SubscriptionStatus } from '../schemas/newsletter-subscription.schema';
 import { User, UserRole, AccountStatus } from '../schemas/user.schema';
+import { Subscription } from '../schemas/subscriptions.schema';
 import { EmailService } from '../email/email.service';
 import { SubscribeDto } from './dto/subscribe.dto';
 import { ApproveSubscriptionDto } from './dto/approve-subscription.dto';
@@ -28,9 +29,12 @@ export interface PaginatedSubscriptionsResponse {
 
 @Injectable()
 export class NewsletterService {
+  private readonly logger = new Logger(NewsletterService.name);
+
   constructor(
-    @InjectModel(NewsletterSubscription.name) private subscriptionModel: Model<NewsletterSubscription>,
+    @InjectModel(NewsletterSubscription.name) private newsletterSubscriptionModel: Model<NewsletterSubscription>,
     @InjectModel(User.name) private userModel: Model<User>,
+    @InjectModel(Subscription.name) private subscriptionModel: Model<Subscription>,
     private emailService: EmailService,
   ) {}
 
@@ -38,7 +42,7 @@ export class NewsletterService {
     const { email } = subscribeDto;
 
     // Check if subscription already exists
-    const existing = await this.subscriptionModel.findOne({ 
+    const existing = await this.newsletterSubscriptionModel.findOne({ 
       email: email.toLowerCase() 
     });
 
@@ -69,7 +73,7 @@ export class NewsletterService {
     }
 
     // Create new subscription
-    const subscription = new this.subscriptionModel({
+    const subscription = new this.newsletterSubscriptionModel({
       email: email.toLowerCase(),
       status: SubscriptionStatus.PENDING,
     });
@@ -91,11 +95,11 @@ export class NewsletterService {
     const limit = Math.min(50, Math.max(1, query.limit || 10));
     const skip = (page - 1) * limit;
 
-    const totalSubscriptions = await this.subscriptionModel.countDocuments({
+    const totalSubscriptions = await this.newsletterSubscriptionModel.countDocuments({
       status: SubscriptionStatus.PENDING,
     });
 
-    const subscriptions = await this.subscriptionModel
+    const subscriptions = await this.newsletterSubscriptionModel
       .find({ status: SubscriptionStatus.PENDING })
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -122,11 +126,11 @@ export class NewsletterService {
     const limit = Math.min(50, Math.max(1, query.limit || 10));
     const skip = (page - 1) * limit;
 
-    const totalSubscriptions = await this.subscriptionModel.countDocuments({
+    const totalSubscriptions = await this.newsletterSubscriptionModel.countDocuments({
       status: SubscriptionStatus.APPROVED,
     });
 
-    const subscriptions = await this.subscriptionModel
+    const subscriptions = await this.newsletterSubscriptionModel
       .find({ status: SubscriptionStatus.APPROVED })
       .sort({ approvedAt: -1 })
       .skip(skip)
@@ -153,11 +157,11 @@ export class NewsletterService {
     const limit = Math.min(50, Math.max(1, query.limit || 10));
     const skip = (page - 1) * limit;
 
-    const totalSubscriptions = await this.subscriptionModel.countDocuments({
+    const totalSubscriptions = await this.newsletterSubscriptionModel.countDocuments({
       status: SubscriptionStatus.REJECTED,
     });
 
-    const subscriptions = await this.subscriptionModel
+    const subscriptions = await this.newsletterSubscriptionModel
       .find({ status: SubscriptionStatus.REJECTED })
       .sort({ rejectedAt: -1 })
       .skip(skip)
@@ -186,7 +190,7 @@ export class NewsletterService {
     const { subscriptionId, firstName, lastName, domainName } = approveDto;
 
     // Find subscription
-    const subscription = await this.subscriptionModel.findOne({
+    const subscription = await this.newsletterSubscriptionModel.findOne({
       _id: subscriptionId,
       status: SubscriptionStatus.PENDING,
     });
@@ -226,7 +230,29 @@ export class NewsletterService {
 
     const savedUser = await user.save();
 
-    // Update subscription status
+    // Create default subscription for 1 month
+    try {
+      const currentDate = new Date();
+      const endDate = new Date(currentDate);
+      endDate.setMonth(currentDate.getMonth() + 1); // Add 1 month
+
+      const userSubscription = new this.subscriptionModel({
+        userId: savedUser._id,
+        adminId: new Types.ObjectId(adminId),
+        startDate: currentDate,
+        endDate: endDate,
+        isActive: true,
+        notes: 'Default subscription created on approval',
+      });
+
+      await userSubscription.save();
+      this.logger.log(`Created default 1-month subscription for user ${savedUser.email}`);
+    } catch (subscriptionError) {
+      this.logger.error('Failed to create default subscription:', subscriptionError);
+      // Don't fail the approval process if subscription creation fails
+    }
+
+    // Update newsletter subscription status
     subscription.status = SubscriptionStatus.APPROVED;
     subscription.approvedBy = adminId;
     subscription.approvedAt = new Date();
@@ -254,7 +280,7 @@ export class NewsletterService {
   ): Promise<NewsletterSubscription> {
     const { subscriptionId, rejectionReason } = rejectDto;
 
-    const subscription = await this.subscriptionModel.findOne({
+    const subscription = await this.newsletterSubscriptionModel.findOne({
       _id: subscriptionId,
       status: SubscriptionStatus.PENDING,
     });
