@@ -167,6 +167,7 @@ export class RegionsService {
         denom: string,
         page: number = 1,
         limit: number = 20,
+        searchQuery?: string,
     ): Promise<{
         region: Region | null;
         domains: Array<{
@@ -206,16 +207,47 @@ export class RegionsService {
 
         const userIds = usersInRegion.map(user => user._id);
 
-        // Step 3: Count total domain profiles and static experiences for pagination
-        const regionBoundsQuery = {
-            $and: [
-                { latitude: { $gte: region.min_lat, $lte: region.max_lat, $ne: null } },
-                { longitude: { $gte: region.min_lon, $lte: region.max_lon, $ne: null } },
-            ]
-        };
+        // Step 3: Build search query if provided
+        let domainProfileQuery: any = { userId: { $in: userIds } };
+        let staticExperienceQuery: any = {};
+
+        if (searchQuery) {
+            const searchRegex = { $regex: searchQuery, $options: 'i' };
+            
+            // Add search conditions for domain profiles
+            domainProfileQuery.$or = [
+                { domainName: searchRegex },
+                { domainDescription: searchRegex },
+                { 'services.serviceName': searchRegex },
+                { 'services.serviceDescription': searchRegex },
+            ];
+
+            // When search query is present, search ALL static experiences globally
+            // Don't restrict by region bounds so we can show matching results
+            staticExperienceQuery = {
+                $or: [
+                    { name: searchRegex },
+                    { category: searchRegex },
+                    { address: searchRegex },
+                    { city: searchRegex },
+                    { about: searchRegex },
+                ]
+            };
+        } else {
+            // Without search query, only show static experiences within region bounds
+            staticExperienceQuery = {
+                $and: [
+                    { latitude: { $gte: region.min_lat, $lte: region.max_lat, $ne: null } },
+                    { longitude: { $gte: region.min_lon, $lte: region.max_lon, $ne: null } },
+                ]
+            };
+        }
+
+        // Step 4: Count total domain profiles and static experiences for pagination
+        const regionBoundsQuery = staticExperienceQuery;
 
         const [totalDomainProfiles, totalStaticExperiences] = await Promise.all([
-            this.domainProfileModel.countDocuments({ userId: { $in: userIds } }).exec(),
+            this.domainProfileModel.countDocuments(domainProfileQuery).exec(),
             this.staticExperienceModel.countDocuments(regionBoundsQuery).exec(),
         ]);
 
@@ -225,7 +257,7 @@ export class RegionsService {
 
         this.logger.log(`Total domains: ${totalDomains} (${totalDomainProfiles} profiles, ${totalStaticExperiences} experiences)`);
 
-        // Step 4: Determine how to split the limit between profiles and experiences
+        // Step 5: Determine how to split the limit between profiles and experiences
         // Fetch domain profiles first, then fill remainder with static experiences
         let domainProfiles: any[] = [];
         let staticExperiences: any[] = [];
@@ -234,9 +266,7 @@ export class RegionsService {
         if (skip < totalDomainProfiles) {
             // Still fetching from domain profiles
             const profilesLimit = Math.min(remainingLimit, totalDomainProfiles - skip);
-            domainProfiles = await this.domainProfileModel.find({
-                userId: { $in: userIds },
-            })
+            domainProfiles = await this.domainProfileModel.find(domainProfileQuery)
             .populate('userId', 'domainName siteWeb city domainLatitude domainLongitude')
             .skip(skip)
             .limit(profilesLimit)
@@ -324,24 +354,40 @@ export class RegionsService {
     async unifiedSearch(query: string): Promise<{
         success: boolean;
         data: {
-            type: 'service' | 'domain' | 'region' | 'mixed' | null;
+            type: 'service' | 'domain' | 'region' | 'static-experience' | 'mixed' | null;
             services?: any[];
             domains?: any[];
             regions?: any[];
+            staticExperiences?: any[];
             suggestedRoute?: string;
         };
     }> {
         const backendUrl = this.configService.get<string>('BACKEND_URL') || '';
         const searchQuery = query.trim();
+        const isNumeric = !isNaN(parseFloat(searchQuery));
+        const numericQuery = isNumeric ? parseFloat(searchQuery) : null;
 
-        // Search in services (via domain profiles)
+        // Search in services (via domain profiles) - enhanced search
+        const serviceSearchConditions: any = {
+            'services.isActive': true,
+            $or: [
+                { 'services.name': { $regex: searchQuery, $options: 'i' } },
+                { 'services.description': { $regex: searchQuery, $options: 'i' } },
+                { 'services.languagesOffered': { $in: [new RegExp(searchQuery, 'i')] } }
+            ]
+        };
+
+        // Add price search if query is numeric
+        if (numericQuery !== null) {
+            serviceSearchConditions.$or.push({
+                'services.pricePerPerson': { $gte: numericQuery - 10, $lte: numericQuery + 10 }
+            });
+        }
+
         const domainProfilesWithServices = await this.domainProfileModel
-            .find({
-                'services.name': { $regex: searchQuery, $options: 'i' },
-                'services.isActive': true
-            })
+            .find(serviceSearchConditions)
             .populate('userId', 'domainName domainLatitude domainLongitude address city codePostal region')
-            .limit(20)
+            .limit(30)
             .exec();
 
         const services: any[] = [];
@@ -350,12 +396,23 @@ export class RegionsService {
             const profileDoc = profile.toObject();
             
             for (const service of profileDoc.services as any[]) {
-                if (service.isActive && service.name.toLowerCase().includes(searchQuery.toLowerCase())) {
+                if (!service.isActive) continue;
+
+                const matchesName = service.name.toLowerCase().includes(searchQuery.toLowerCase());
+                const matchesDescription = service.description?.toLowerCase().includes(searchQuery.toLowerCase());
+                const matchesLanguage = service.languagesOffered?.some((lang: string) => 
+                    lang.toLowerCase().includes(searchQuery.toLowerCase())
+                );
+                const matchesPrice = numericQuery !== null && 
+                    Math.abs(service.pricePerPerson - numericQuery) <= 10;
+
+                if (matchesName || matchesDescription || matchesLanguage || matchesPrice) {
                     services.push({
                         serviceId: service._id,
                         serviceName: service.name,
                         serviceDescription: service.description,
                         pricePerPerson: service.pricePerPerson,
+                        languagesOffered: service.languagesOffered,
                         serviceBannerUrl: service.serviceBannerUrl ? `${backendUrl}${service.serviceBannerUrl}` : null,
                         domain: {
                             domainId: profile._id,
@@ -368,6 +425,34 @@ export class RegionsService {
                 }
             }
         }
+
+        // Search in static experiences
+        const staticExperiences = await this.staticExperienceModel
+            .find({
+                $or: [
+                    { name: { $regex: searchQuery, $options: 'i' } },
+                    { category: { $regex: searchQuery, $options: 'i' } },
+                    { address: { $regex: searchQuery, $options: 'i' } },
+                    { city: { $regex: searchQuery, $options: 'i' } },
+                    { about: { $regex: searchQuery, $options: 'i' } }
+                ]
+            })
+            .limit(20)
+            .exec();
+
+        const staticExperienceResults = staticExperiences.map(exp => ({
+            name: exp.name,
+            category: exp.category,
+            address: exp.address,
+            city: exp.city,
+            latitude: exp.latitude,
+            longitude: exp.longitude,
+            rating: exp.rating,
+            website: exp.website,
+            mainImage: exp.main_image,
+            about: exp.about,
+            type: 'static-experience' as const
+        }));
 
         // Search in domains (user's domain names)
         const usersWithDomains = await this.userModel
@@ -422,45 +507,129 @@ export class RegionsService {
         }));
 
         // Determine search type and suggested route
-        let type: 'service' | 'domain' | 'region' | 'mixed' | null = null;
+        let type: 'service' | 'domain' | 'region' | 'static-experience' | 'mixed' | null = null;
         let suggestedRoute = '';
 
-        if (services.length > 0 && domains.length === 0 && regionResults.length === 0) {
-            type = 'service';
-            suggestedRoute = `/experiences?q=${encodeURIComponent(searchQuery)}`;
-        } else if (domains.length > 0 && services.length === 0 && regionResults.length === 0) {
-            type = 'domain';
-            // If single domain, suggest going to specific region page
-            if (domains.length === 1 && domains[0].location.region) {
-                suggestedRoute = `/region/${encodeURIComponent(domains[0].location.region)}`;
-            } else {
-                suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
-            }
-        } else if (regionResults.length > 0 && services.length === 0 && domains.length === 0) {
-            type = 'region';
-            // If single region match, go directly to that region
-            if (regionResults.length === 1) {
-                suggestedRoute = `/region/${encodeURIComponent(regionResults[0].denom)}`;
-            } else {
-                suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
-            }
-        } else if (services.length > 0 || domains.length > 0 || regionResults.length > 0) {
-            type = 'mixed';
-            // Priority: domain > region > service
-            if (domains.length > 0) {
-                if (domains.length === 1 && domains[0].location.region) {
-                    suggestedRoute = `/region/${encodeURIComponent(domains[0].location.region)}`;
-                } else {
-                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
-                }
-            } else if (regionResults.length > 0) {
-                if (regionResults.length === 1) {
-                    suggestedRoute = `/region/${encodeURIComponent(regionResults[0].denom)}`;
-                } else {
-                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
-                }
-            } else {
+        const hasServices = services.length > 0;
+        const hasDomains = domains.length > 0;
+        const hasRegions = regionResults.length > 0;
+        const hasStaticExperiences = staticExperienceResults.length > 0;
+        const totalResults = [hasServices, hasDomains, hasRegions, hasStaticExperiences].filter(Boolean).length;
+
+        if (totalResults === 0) {
+            type = null;
+        } else if (totalResults === 1) {
+            if (hasServices) {
+                type = 'service';
                 suggestedRoute = `/experiences?q=${encodeURIComponent(searchQuery)}`;
+            } else if (hasDomains) {
+                type = 'domain';
+                if (domains.length === 1 && domains[0].location.region) {
+                    suggestedRoute = `/region/${encodeURIComponent(domains[0].location.region)}?q=${encodeURIComponent(searchQuery)}`;
+                } else {
+                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                }
+            } else if (hasRegions) {
+                type = 'region';
+                if (regionResults.length === 1) {
+                    suggestedRoute = `/region/${encodeURIComponent(regionResults[0].denom)}?q=${encodeURIComponent(searchQuery)}`;
+                } else {
+                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                }
+            } else if (hasStaticExperiences) {
+                type = 'static-experience';
+                // Try to find region by coordinates first, then by city name
+                let matchedRegion: any = null;
+                
+                // Get coordinates from static experiences
+                const experiencesWithCoords = staticExperienceResults.filter(exp => exp.latitude && exp.longitude);
+                
+                if (experiencesWithCoords.length > 0) {
+                    // Use the first experience with coordinates to find the region
+                    const exp = experiencesWithCoords[0];
+                    
+                    // Find region that contains these coordinates
+                    matchedRegion = await this.regionModel.findOne({
+                        min_lat: { $lte: exp.latitude },
+                        max_lat: { $gte: exp.latitude },
+                        min_lon: { $lte: exp.longitude },
+                        max_lon: { $gte: exp.longitude }
+                    }).exec();
+                }
+                
+                // If no region found by coordinates, try by city name
+                if (!matchedRegion) {
+                    const cities = staticExperienceResults.map(exp => exp.city).filter(Boolean);
+                    const uniqueCities = [...new Set(cities)];
+                    
+                    if (uniqueCities.length === 1 && uniqueCities[0]) {
+                        matchedRegion = await this.regionModel.findOne({
+                            denom: { $regex: uniqueCities[0], $options: 'i' }
+                        }).exec();
+                    }
+                }
+                
+                if (matchedRegion) {
+                    suggestedRoute = `/region/${encodeURIComponent(matchedRegion.denom)}?q=${encodeURIComponent(searchQuery)}`;
+                } else {
+                    // If still no region found, try to find the nearest parent region
+                    if (experiencesWithCoords.length > 0) {
+                        const exp = experiencesWithCoords[0];
+                        const nearestRegion = await this.regionModel.findOne({
+                            isParent: true
+                        }).sort({
+                            // Simple distance calculation - find closest region center
+                        }).limit(1).exec();
+                        
+                        if (nearestRegion) {
+                            suggestedRoute = `/region/${encodeURIComponent(nearestRegion.denom)}?q=${encodeURIComponent(searchQuery)}`;
+                        } else {
+                            suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                        }
+                    } else {
+                        suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                    }
+                }
+            }
+        } else {
+            type = 'mixed';
+            // Priority: domain > region > service/static-experience
+            if (hasDomains) {
+                if (domains.length === 1 && domains[0].location.region) {
+                    suggestedRoute = `/region/${encodeURIComponent(domains[0].location.region)}?q=${encodeURIComponent(searchQuery)}`;
+                } else {
+                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                }
+            } else if (hasRegions) {
+                if (regionResults.length === 1) {
+                    suggestedRoute = `/region/${encodeURIComponent(regionResults[0].denom)}?q=${encodeURIComponent(searchQuery)}`;
+                } else {
+                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                }
+            } else if (hasStaticExperiences) {
+                // Try to find region by coordinates for static experiences
+                const experiencesWithCoords = staticExperienceResults.filter(exp => exp.latitude && exp.longitude);
+                
+                if (experiencesWithCoords.length > 0) {
+                    const exp = experiencesWithCoords[0];
+                    const matchedRegion = await this.regionModel.findOne({
+                        min_lat: { $lte: exp.latitude },
+                        max_lat: { $gte: exp.latitude },
+                        min_lon: { $lte: exp.longitude },
+                        max_lon: { $gte: exp.longitude }
+                    }).exec();
+                    
+                    if (matchedRegion) {
+                        suggestedRoute = `/region/${encodeURIComponent(matchedRegion.denom)}?q=${encodeURIComponent(searchQuery)}`;
+                    } else {
+                        suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                    }
+                } else {
+                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                }
+            } else {
+                // Services only
+                suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
             }
         }
 
@@ -471,6 +640,7 @@ export class RegionsService {
                 services: services.length > 0 ? services : undefined,
                 domains: domains.length > 0 ? domains : undefined,
                 regions: regionResults.length > 0 ? regionResults : undefined,
+                staticExperiences: staticExperienceResults.length > 0 ? staticExperienceResults : undefined,
                 suggestedRoute
             }
         };

@@ -51,9 +51,10 @@ export class RegionsController {
     @Param('name') name: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('q') searchQuery?: string,
   ) {
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 20;
-    return this.regionsService.getRegionByName(name, pageNum, limitNum);
+    return this.regionsService.getRegionByName(name, pageNum, limitNum, searchQuery);
   }
 }
