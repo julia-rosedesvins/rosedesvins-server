@@ -177,6 +177,8 @@ export class RegionsService {
             domainPrice: number | null;
             siteUrl: string | null;
             location: string | null;
+            latitude: number | null;
+            longitude: number | null;
         }>;
         total: number;
         page: number;
@@ -198,7 +200,7 @@ export class RegionsService {
                 { domainLatitude: { $gte: region.min_lat, $lte: region.max_lat, $ne: null } },
                 { domainLongitude: { $gte: region.min_lon, $lte: region.max_lon, $ne: null } },
             ]
-        }).select('_id domainName siteWeb city').exec();
+        }).select('_id domainName siteWeb city domainLatitude domainLongitude').exec();
 
         this.logger.log(`Found ${usersInRegion.length} users in region bounds`);
 
@@ -235,7 +237,7 @@ export class RegionsService {
             domainProfiles = await this.domainProfileModel.find({
                 userId: { $in: userIds },
             })
-            .populate('userId', 'domainName siteWeb city')
+            .populate('userId', 'domainName siteWeb city domainLatitude domainLongitude')
             .skip(skip)
             .limit(profilesLimit)
             .exec();
@@ -276,6 +278,8 @@ export class RegionsService {
                 siteUrl: null,
                 location: user?.city || null,
                 domainId: profile._id.toString(),
+                latitude: user?.domainLatitude || null,
+                longitude: user?.domainLongitude || null,
             };
         });
 
@@ -288,7 +292,9 @@ export class RegionsService {
             domainPrice: null,
             siteUrl: exp.website || null,
             location: exp.city || null,
-            domainId: null
+            domainId: null,
+            latitude: exp.latitude || null,
+            longitude: exp.longitude || null,
         }));
 
         // Step 7: Combine both arrays
