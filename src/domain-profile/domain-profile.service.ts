@@ -593,4 +593,82 @@ export class DomainProfileService {
       console.warn(`Failed to delete file ${filePath}:`, error.message);
     }
   }
+
+  /**
+   * Get all services with pagination (Public)
+   */
+  async getAllServicesPublic(page: number = 1, limit: number = 10): Promise<{
+    services: any[];
+    pagination: {
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+    };
+  }> {
+    const skip = (page - 1) * limit;
+    const backendUrl = this.configService.get<string>('BACKEND_URL') || '';
+
+    // Get all domain profiles with services
+    const domainProfiles = await this.domainProfileModel
+      .find({ 'services.0': { $exists: true } }) // Only profiles with at least one service
+      .populate('userId', 'firstName lastName email domainName domainLatitude domainLongitude address city codePostal region')
+      .exec();
+
+    // Flatten all services with their domain information
+    const allServices: any[] = [];
+    for (const profile of domainProfiles) {
+      const user = profile.userId as any;
+      const profileDoc = profile.toObject();
+      
+      for (const service of profileDoc.services as any[]) {
+        allServices.push({
+          serviceId: service._id,
+          serviceName: service.name,
+          serviceDescription: service.description,
+          numberOfPeople: service.numberOfPeople,
+          pricePerPerson: service.pricePerPerson,
+          timeOfServiceInMinutes: service.timeOfServiceInMinutes,
+          numberOfWinesTasted: service.numberOfWinesTasted,
+          languagesOffered: service.languagesOffered,
+          serviceBannerUrl: service.serviceBannerUrl ? `${backendUrl}${service.serviceBannerUrl}` : null,
+          isActive: service.isActive,
+          domain: {
+            domainId: profile._id,
+            domainName: user?.domainName || null,
+            domainDescription: profileDoc.domainDescription,
+            colorCode: profileDoc.colorCode,
+            domainProfilePictureUrl: profileDoc.domainProfilePictureUrl ? `${backendUrl}${profileDoc.domainProfilePictureUrl}` : null,
+            domainLogoUrl: profileDoc.domainLogoUrl ? `${backendUrl}${profileDoc.domainLogoUrl}` : null,
+            location: {
+              domainLatitude: user?.domainLatitude || null,
+              domainLongitude: user?.domainLongitude || null,
+              address: user?.address || null,
+              city: user?.city || null,
+              codePostal: user?.codePostal || null,
+              region: user?.region || null,
+            }
+          }
+        });
+      }
+    }
+
+    // Filter only active services
+    const activeServices = allServices.filter(s => s.isActive);
+
+    // Calculate pagination
+    const total = activeServices.length;
+    const totalPages = Math.ceil(total / limit);
+    const paginatedServices = activeServices.slice(skip, skip + limit);
+
+    return {
+      services: paginatedServices,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages
+      }
+    };
+  }
 }

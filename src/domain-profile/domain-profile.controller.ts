@@ -12,6 +12,7 @@ import {
   HttpException,
   UseInterceptors,
   UploadedFiles,
+  Query,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiResponse, ApiOperation, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
@@ -176,8 +177,120 @@ export class DomainProfileController {
     }
   }
 
+  @Get('public/services/all')
+  @ApiOperation({ summary: 'Get all services with pagination (Public)' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Services retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        data: {
+          type: 'object',
+          properties: {
+            services: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  serviceId: { type: 'string' },
+                  serviceName: { type: 'string' },
+                  serviceDescription: { type: 'string' },
+                  numberOfPeople: { type: 'string' },
+                  pricePerPerson: { type: 'number' },
+                  timeOfServiceInMinutes: { type: 'number' },
+                  numberOfWinesTasted: { type: 'number' },
+                  languagesOffered: { type: 'array', items: { type: 'string' } },
+                  serviceBannerUrl: { type: 'string', nullable: true },
+                  isActive: { type: 'boolean' },
+                  domain: {
+                    type: 'object',
+                    properties: {
+                      domainId: { type: 'string' },
+                      domainName: { type: 'string', nullable: true },
+                      domainDescription: { type: 'string' },
+                      colorCode: { type: 'string' },
+                      domainProfilePictureUrl: { type: 'string', nullable: true },
+                      domainLogoUrl: { type: 'string', nullable: true },
+                      location: {
+                        type: 'object',
+                        properties: {
+                          domainLatitude: { type: 'number', nullable: true },
+                          domainLongitude: { type: 'number', nullable: true },
+                          address: { type: 'string', nullable: true },
+                          city: { type: 'string', nullable: true },
+                          codePostal: { type: 'string', nullable: true },
+                          region: { type: 'string', nullable: true }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            pagination: {
+              type: 'object',
+              properties: {
+                total: { type: 'number' },
+                page: { type: 'number' },
+                limit: { type: 'number' },
+                totalPages: { type: 'number' }
+              }
+            }
+          }
+        }
+      }
+    }
+  })
+  async getAllServicesPublic(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: {
+      services: any[];
+      pagination: {
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+      };
+    };
+  }> {
+    try {
+      const pageNum = page ? parseInt(page, 10) : 1;
+      const limitNum = limit ? parseInt(limit, 10) : 10;
+
+      // Validate pagination parameters
+      if (pageNum < 1 || limitNum < 1 || limitNum > 100) {
+        throw new HttpException(
+          'Invalid pagination parameters. Page must be >= 1, limit must be between 1 and 100',
+          HttpStatus.BAD_REQUEST
+        );
+      }
+
+      const result = await this.domainProfileService.getAllServicesPublic(pageNum, limitNum);
+
+      return {
+        success: true,
+        message: 'Services retrieved successfully',
+        data: result
+      };
+    } catch (error) {
+      console.error('Error retrieving services:', error);
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException('Internal server error', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
   @Get('public/:domainId')
   @ApiOperation({ summary: 'Get domain profile by ID with location data (Public)' })
+
   @ApiResponse({ 
     status: 200, 
     description: 'Domain profile retrieved successfully',
