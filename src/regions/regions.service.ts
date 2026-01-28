@@ -320,4 +320,159 @@ export class RegionsService {
             .limit(50)
             .exec();
     }
+
+    async unifiedSearch(query: string): Promise<{
+        success: boolean;
+        data: {
+            type: 'service' | 'domain' | 'region' | 'mixed' | null;
+            services?: any[];
+            domains?: any[];
+            regions?: any[];
+            suggestedRoute?: string;
+        };
+    }> {
+        const backendUrl = this.configService.get<string>('BACKEND_URL') || '';
+        const searchQuery = query.trim();
+
+        // Search in services (via domain profiles)
+        const domainProfilesWithServices = await this.domainProfileModel
+            .find({
+                'services.name': { $regex: searchQuery, $options: 'i' },
+                'services.isActive': true
+            })
+            .populate('userId', 'domainName domainLatitude domainLongitude address city codePostal region')
+            .limit(20)
+            .exec();
+
+        const services: any[] = [];
+        for (const profile of domainProfilesWithServices) {
+            const user = profile.userId as any;
+            const profileDoc = profile.toObject();
+            
+            for (const service of profileDoc.services as any[]) {
+                if (service.isActive && service.name.toLowerCase().includes(searchQuery.toLowerCase())) {
+                    services.push({
+                        serviceId: service._id,
+                        serviceName: service.name,
+                        serviceDescription: service.description,
+                        pricePerPerson: service.pricePerPerson,
+                        serviceBannerUrl: service.serviceBannerUrl ? `${backendUrl}${service.serviceBannerUrl}` : null,
+                        domain: {
+                            domainId: profile._id,
+                            userId: user?._id || null,
+                            domainName: user?.domainName || null,
+                            domainDescription: profileDoc.domainDescription,
+                            colorCode: profileDoc.colorCode,
+                        }
+                    });
+                }
+            }
+        }
+
+        // Search in domains (user's domain names)
+        const usersWithDomains = await this.userModel
+            .find({
+                domainName: { $regex: searchQuery, $options: 'i' }
+            })
+            .limit(20)
+            .exec();
+
+        const domainIds = usersWithDomains.map(user => user._id);
+        const domainProfiles = await this.domainProfileModel
+            .find({ userId: { $in: domainIds } })
+            .populate('userId', 'domainName domainLatitude domainLongitude address city codePostal region')
+            .exec();
+
+        const domains = domainProfiles.map(profile => {
+            const user = profile.userId as any;
+            return {
+                domainId: profile._id,
+                userId: user?._id || null,
+                domainName: user?.domainName || null,
+                domainDescription: profile.domainDescription,
+                colorCode: profile.colorCode,
+                domainProfilePictureUrl: profile.domainProfilePictureUrl ? `${backendUrl}${profile.domainProfilePictureUrl}` : null,
+                domainLogoUrl: profile.domainLogoUrl ? `${backendUrl}${profile.domainLogoUrl}` : null,
+                location: {
+                    latitude: user?.domainLatitude || null,
+                    longitude: user?.domainLongitude || null,
+                    address: user?.address || null,
+                    city: user?.city || null,
+                    region: user?.region || null,
+                }
+            };
+        });
+
+        // Search in regions
+        const regions = await this.regionModel
+            .find({
+                denom: { $regex: searchQuery, $options: 'i' },
+            })
+            .limit(20)
+            .exec();
+
+        const regionResults = regions.map(region => ({
+            denom: region.denom,
+            min_lat: region.min_lat,
+            min_lon: region.min_lon,
+            max_lat: region.max_lat,
+            max_lon: region.max_lon,
+            thumbnailUrl: region.thumbnailUrl ? `${backendUrl}${region.thumbnailUrl}` : null,
+            isParent: region.isParent,
+        }));
+
+        // Determine search type and suggested route
+        let type: 'service' | 'domain' | 'region' | 'mixed' | null = null;
+        let suggestedRoute = '';
+
+        if (services.length > 0 && domains.length === 0 && regionResults.length === 0) {
+            type = 'service';
+            suggestedRoute = `/experiences?q=${encodeURIComponent(searchQuery)}`;
+        } else if (domains.length > 0 && services.length === 0 && regionResults.length === 0) {
+            type = 'domain';
+            // If single domain, suggest going to specific region page
+            if (domains.length === 1 && domains[0].location.region) {
+                suggestedRoute = `/region/${encodeURIComponent(domains[0].location.region)}`;
+            } else {
+                suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+            }
+        } else if (regionResults.length > 0 && services.length === 0 && domains.length === 0) {
+            type = 'region';
+            // If single region match, go directly to that region
+            if (regionResults.length === 1) {
+                suggestedRoute = `/region/${encodeURIComponent(regionResults[0].denom)}`;
+            } else {
+                suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+            }
+        } else if (services.length > 0 || domains.length > 0 || regionResults.length > 0) {
+            type = 'mixed';
+            // Priority: domain > region > service
+            if (domains.length > 0) {
+                if (domains.length === 1 && domains[0].location.region) {
+                    suggestedRoute = `/region/${encodeURIComponent(domains[0].location.region)}`;
+                } else {
+                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                }
+            } else if (regionResults.length > 0) {
+                if (regionResults.length === 1) {
+                    suggestedRoute = `/region/${encodeURIComponent(regionResults[0].denom)}`;
+                } else {
+                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                }
+            } else {
+                suggestedRoute = `/experiences?q=${encodeURIComponent(searchQuery)}`;
+            }
+        }
+
+        return {
+            success: true,
+            data: {
+                type,
+                services: services.length > 0 ? services : undefined,
+                domains: domains.length > 0 ? domains : undefined,
+                regions: regionResults.length > 0 ? regionResults : undefined,
+                suggestedRoute
+            }
+        };
+    }
 }

@@ -32,6 +32,20 @@ export class RegionsController {
     return this.regionsService.searchRegions(query);
   }
 
+  @Get('unified-search')
+  async unifiedSearch(@Query('q') query: string) {
+    if (!query) {
+      return {
+        success: true,
+        data: {
+          type: null,
+          results: []
+        }
+      };
+    }
+    return this.regionsService.unifiedSearch(query);
+  }
+
   @Get(':name')
   async getRegionByName(
     @Param('name') name: string,
