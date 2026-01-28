@@ -22,9 +22,10 @@ import { WebModule } from './web/web.module';
 import { RegionsModule } from './regions/regions.module';
 import { StaticExperiencesModule } from './static-experiences/static-experiences.module';
 import { NewsletterModule } from './newsletter/newsletter.module';
+import { MediaSyncModule } from './media-sync/media-sync.module';
 
 @Module({
-  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule, NotificationPreferencesModule, PaymentMethodsModule, WidgetModule, UserBookingsModule, EventsModule, NotificationsModule, ScheduleModule.forRoot(), DashboardAnalyticsModule, SupportContactModule, WebModule, RegionsModule, StaticExperiencesModule, NewsletterModule],
+  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule, NotificationPreferencesModule, PaymentMethodsModule, WidgetModule, UserBookingsModule, EventsModule, NotificationsModule, ScheduleModule.forRoot(), DashboardAnalyticsModule, SupportContactModule, WebModule, RegionsModule, StaticExperiencesModule, NewsletterModule, MediaSyncModule],
   controllers: [AppController],
   providers: [AppService],
 })
