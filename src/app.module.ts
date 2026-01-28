@@ -21,9 +21,10 @@ import { SupportContactModule } from './support-contact/support-contact.module';
 import { WebModule } from './web/web.module';
 import { RegionsModule } from './regions/regions.module';
 import { StaticExperiencesModule } from './static-experiences/static-experiences.module';
+import { NewsletterModule } from './newsletter/newsletter.module';
 
 @Module({
-  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule, NotificationPreferencesModule, PaymentMethodsModule, WidgetModule, UserBookingsModule, EventsModule, NotificationsModule, ScheduleModule.forRoot(), DashboardAnalyticsModule, SupportContactModule, WebModule, RegionsModule, StaticExperiencesModule],
+  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule, NotificationPreferencesModule, PaymentMethodsModule, WidgetModule, UserBookingsModule, EventsModule, NotificationsModule, ScheduleModule.forRoot(), DashboardAnalyticsModule, SupportContactModule, WebModule, RegionsModule, StaticExperiencesModule, NewsletterModule],
   controllers: [AppController],
   providers: [AppService],
 })
