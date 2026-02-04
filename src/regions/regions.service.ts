@@ -190,6 +190,7 @@ export class RegionsService {
             domainPrice: number | null;
             siteUrl: string | null;
             location: string | null;
+            category: string | null;
             latitude: number | null;
             longitude: number | null;
         }>;
@@ -280,6 +281,7 @@ export class RegionsService {
             const profilesLimit = Math.min(remainingLimit, totalDomainProfiles - skip);
             domainProfiles = await this.domainProfileModel.find(domainProfileQuery)
             .populate('userId', 'domainName siteWeb city domainLatitude domainLongitude')
+            .populate('services.category', 'category_name')
             .skip(skip)
             .limit(profilesLimit)
             .exec();
@@ -289,6 +291,7 @@ export class RegionsService {
             // If we still have space in the page, fetch static experiences
             if (remainingLimit > 0) {
                 staticExperiences = await this.staticExperienceModel.find(regionBoundsQuery)
+                    .populate('category_ref', 'category_name')
                     .limit(remainingLimit)
                     .exec();
             }
@@ -296,6 +299,7 @@ export class RegionsService {
             // Skip past all domain profiles, fetch only static experiences
             const experiencesSkip = skip - totalDomainProfiles;
             staticExperiences = await this.staticExperienceModel.find(regionBoundsQuery)
+                .populate('category_ref', 'category_name')
                 .skip(experiencesSkip)
                 .limit(limit)
                 .exec();
@@ -309,6 +313,13 @@ export class RegionsService {
             const user = profile.userId as any;
             const firstActiveService = profile.services.find(s => s.isActive);
             
+            // Extract category name from populated category field
+            let categoryName: string | null = null;
+            if (firstActiveService?.category) {
+                const categoryObj = firstActiveService.category as any;
+                categoryName = categoryObj.category_name || null;
+            }
+            
             return {
                 domainName: user?.domainName || 'Unknown Domain',
                 domainDescription: profile.domainDescription,
@@ -319,6 +330,7 @@ export class RegionsService {
                 domainPrice: firstActiveService?.pricePerPerson || null,
                 siteUrl: null,
                 location: user?.city || null,
+                category: categoryName,
                 domainId: profile._id.toString(),
                 latitude: user?.domainLatitude || null,
                 longitude: user?.domainLongitude || null,
@@ -326,18 +338,31 @@ export class RegionsService {
         });
 
         // Step 6: Format static experiences data
-        const domainsFromExperiences = staticExperiences.map(exp => ({
-            domainName: exp.name,
-            domainDescription: exp.about || exp.category || '',
-            domainProfilePictureUrl: exp.main_image || null,
-            producer: 'non-client' as const,
-            domainPrice: null,
-            siteUrl: exp.website || null,
-            location: exp.city || null,
-            domainId: null,
-            latitude: exp.latitude || null,
-            longitude: exp.longitude || null,
-        }));
+        const domainsFromExperiences = staticExperiences.map(exp => {
+            // If category_ref is populated, use its category_name, otherwise use the category string field
+            let categoryName: string | null = null;
+            if (exp.category_ref) {
+                const categoryRefObj = exp.category_ref as any;
+                categoryName = categoryRefObj.category_name || null;
+            }
+            if (!categoryName) {
+                categoryName = exp.category || null;
+            }
+            
+            return {
+                domainName: exp.name,
+                domainDescription: exp.about || exp.category || '',
+                domainProfilePictureUrl: exp.main_image || null,
+                producer: 'non-client' as const,
+                domainPrice: null,
+                siteUrl: exp.website || null,
+                location: exp.city || null,
+                category: categoryName,
+                domainId: null,
+                latitude: exp.latitude || null,
+                longitude: exp.longitude || null,
+            };
+        });
 
         // Step 7: Combine both arrays
         const domains = [...domainsFromProfiles, ...domainsFromExperiences];
