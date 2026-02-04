@@ -1,6 +1,7 @@
 export class UpdateStaticExperienceDto {
   name?: string;
   category?: string;
+  category_ref?: string;
   address?: string;
   city?: string;
   latitude?: number;

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Types } from 'mongoose';
 
 @Schema({
   timestamps: true,
@@ -18,6 +18,14 @@ export class StaticExperience extends Document {
     default: null
   })
   category: string | null;
+
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'ExperienceCategory',
+    required: false,
+    default: null
+  })
+  category_ref: Types.ObjectId | null;
 
   @Prop({
     type: String,
