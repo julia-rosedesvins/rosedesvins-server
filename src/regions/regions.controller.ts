@@ -59,6 +59,7 @@ export class RegionsController {
     @Query('minPrice') minPrice?: string,
     @Query('maxPrice') maxPrice?: string,
     @Query('languages') languages?: string,
+    @Query('categories') categories?: string,
   ) {
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 20;
@@ -76,6 +77,9 @@ export class RegionsController {
     }
     if (languages) {
       filters.languages = languages.split(',').map(l => l.trim());
+    }
+    if (categories) {
+      filters.categories = categories.split(',').map(c => c.trim());
     }
     
     return this.regionsService.getRegionByName(name, pageNum, limitNum, searchQuery, filters);

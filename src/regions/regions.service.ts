@@ -179,6 +179,7 @@ export class RegionsService {
             minPrice?: number;
             maxPrice?: number;
             languages?: string[];
+            categories?: string[];
         },
     ): Promise<{
         region: Region | null;
@@ -191,6 +192,7 @@ export class RegionsService {
             siteUrl: string | null;
             location: string | null;
             category: string | null;
+            categoryId: string | null;
             latitude: number | null;
             longitude: number | null;
         }>;
@@ -313,11 +315,13 @@ export class RegionsService {
             const user = profile.userId as any;
             const firstActiveService = profile.services.find(s => s.isActive);
             
-            // Extract category name from populated category field
+            // Extract category ID and name from populated category field
             let categoryName: string | null = null;
+            let categoryId: string | null = null;
             if (firstActiveService?.category) {
                 const categoryObj = firstActiveService.category as any;
                 categoryName = categoryObj.category_name || null;
+                categoryId = categoryObj._id?.toString() || firstActiveService.category.toString();
             }
             
             return {
@@ -331,6 +335,7 @@ export class RegionsService {
                 siteUrl: null,
                 location: user?.city || null,
                 category: categoryName,
+                categoryId: categoryId,
                 domainId: profile._id.toString(),
                 latitude: user?.domainLatitude || null,
                 longitude: user?.domainLongitude || null,
@@ -339,11 +344,14 @@ export class RegionsService {
 
         // Step 6: Format static experiences data
         const domainsFromExperiences = staticExperiences.map(exp => {
-            // If category_ref is populated, use its category_name, otherwise use the category string field
+            // If category_ref is populated, use its category_name and ID, otherwise use the category string field
             let categoryName: string | null = null;
+            let categoryRefId: string | null = null;
+            
             if (exp.category_ref) {
                 const categoryRefObj = exp.category_ref as any;
                 categoryName = categoryRefObj.category_name || null;
+                categoryRefId = categoryRefObj._id?.toString() || exp.category_ref.toString();
             }
             if (!categoryName) {
                 categoryName = exp.category || null;
@@ -358,6 +366,7 @@ export class RegionsService {
                 siteUrl: exp.website || null,
                 location: exp.city || null,
                 category: categoryName,
+                categoryId: categoryRefId,
                 domainId: null,
                 latitude: exp.latitude || null,
                 longitude: exp.longitude || null,
@@ -396,6 +405,7 @@ export class RegionsService {
             minPrice?: number;
             maxPrice?: number;
             languages?: string[];
+            categories?: string[];
         }
     ): Promise<any[]> {
         const dayMapping = {
@@ -408,72 +418,103 @@ export class RegionsService {
             'Dimanche': 'sunday'
         };
 
-        // Filter only client domains (those with profiles)
         const filteredResults: any[] = [];
 
         for (const domain of domains) {
-            // Skip non-client domains if we have filters
-            if (domain.producer !== 'client') {
-                continue;
-            }
+            // Handle client domains (those with profiles)
+            if (domain.producer === 'client') {
+                // Find the corresponding domain profile
+                const profile = domainProfiles.find(p => p._id.toString() === domain.domainId);
+                if (!profile || !profile.services || profile.services.length === 0) {
+                    continue;
+                }
 
-            // Find the corresponding domain profile
-            const profile = domainProfiles.find(p => p._id.toString() === domain.domainId);
-            if (!profile || !profile.services || profile.services.length === 0) {
-                continue;
-            }
+                // Check if any service matches all filters
+                let hasMatchingService = false;
 
-            // Check if any service matches all filters
-            let hasMatchingService = false;
+                for (const service of profile.services) {
+                    if (!service.isActive) continue;
 
-            for (const service of profile.services) {
-                if (!service.isActive) continue;
+                    let matchesFilters = true;
 
+                    // Filter by price
+                    if (filters.maxPrice !== undefined && filters.maxPrice > 0) {
+                        if (service.pricePerPerson > filters.maxPrice) {
+                            matchesFilters = false;
+                        }
+                    }
+                    if (filters.minPrice !== undefined) {
+                        if (service.pricePerPerson < filters.minPrice) {
+                            matchesFilters = false;
+                        }
+                    }
+
+                    // Filter by languages
+                    if (filters.languages && filters.languages.length > 0) {
+                        const hasMatchingLanguage = filters.languages.some(lang => 
+                            service.languagesOffered.includes(lang)
+                        );
+                        if (!hasMatchingLanguage) {
+                            matchesFilters = false;
+                        }
+                    }
+
+                    // Filter by categories - compare category IDs
+                    if (filters.categories && filters.categories.length > 0 && matchesFilters) {
+                        if (service.category) {
+                            // Get the category ID (could be ObjectId or populated object)
+                            const categoryId = typeof service.category === 'object' 
+                                ? service.category._id?.toString() 
+                                : service.category.toString();
+                            if (!filters.categories.includes(categoryId)) {
+                                matchesFilters = false;
+                            }
+                        } else {
+                            // No category assigned, doesn't match filter
+                            matchesFilters = false;
+                        }
+                    }
+
+                    // Filter by availability days
+                    if (filters.days && filters.days.length > 0 && matchesFilters) {
+                        const isAvailableOnDays = await this.checkServiceAvailabilityForDays(
+                            profile.userId._id,
+                            service,
+                            filters.days,
+                            dayMapping
+                        );
+                        if (!isAvailableOnDays) {
+                            matchesFilters = false;
+                        }
+                    }
+
+                    if (matchesFilters) {
+                        hasMatchingService = true;
+                        break;
+                    }
+                }
+
+                if (hasMatchingService) {
+                    filteredResults.push(domain);
+                }
+            } else if (domain.producer === 'non-client') {
+                // Handle non-client domains (static experiences)
+                // Only apply category filter to static experiences
                 let matchesFilters = true;
 
-                // Filter by price
-                if (filters.maxPrice !== undefined && filters.maxPrice > 0) {
-                    if (service.pricePerPerson > filters.maxPrice) {
+                // Filter by categories - check if categoryId exists and matches
+                if (filters.categories && filters.categories.length > 0) {
+                    // If no categoryId (manual category), exclude from filtered results
+                    if (!domain.categoryId) {
                         matchesFilters = false;
-                    }
-                }
-                if (filters.minPrice !== undefined) {
-                    if (service.pricePerPerson < filters.minPrice) {
-                        matchesFilters = false;
-                    }
-                }
-
-                // Filter by languages
-                if (filters.languages && filters.languages.length > 0) {
-                    const hasMatchingLanguage = filters.languages.some(lang => 
-                        service.languagesOffered.includes(lang)
-                    );
-                    if (!hasMatchingLanguage) {
-                        matchesFilters = false;
-                    }
-                }
-
-                // Filter by availability days
-                if (filters.days && filters.days.length > 0 && matchesFilters) {
-                    const isAvailableOnDays = await this.checkServiceAvailabilityForDays(
-                        profile.userId._id,
-                        service,
-                        filters.days,
-                        dayMapping
-                    );
-                    if (!isAvailableOnDays) {
+                    } else if (!filters.categories.includes(domain.categoryId)) {
                         matchesFilters = false;
                     }
                 }
 
                 if (matchesFilters) {
-                    hasMatchingService = true;
-                    break;
+                    filteredResults.push(domain);
                 }
-            }
-
-            if (hasMatchingService) {
-                filteredResults.push(domain);
             }
         }
 
