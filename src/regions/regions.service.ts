@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
@@ -7,6 +7,9 @@ import { User } from '../schemas/user.schema';
 import { DomainProfile } from '../schemas/domain-profile.schema';
 import { StaticExperience } from '../schemas/static-experience.schema';
 import { Availability } from '../schemas/availability.schema';
+import { S3Service } from '../common/services/s3.service';
+import { CreateRegionDto } from './dto/create-region.dto';
+import { UpdateRegionDto } from './dto/update-region.dto';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -21,6 +24,7 @@ export class RegionsService {
         @InjectModel(StaticExperience.name) private staticExperienceModel: Model<StaticExperience>,
         @InjectModel(Availability.name) private availabilityModel: Model<Availability>,
         private configService: ConfigService,
+        private s3Service: S3Service,
     ) { }
 
     async loadRegionsFromJson(): Promise<{ success: boolean; message: string; count: number; parentCount: number; childCount: number }> {
@@ -806,5 +810,163 @@ export class RegionsService {
                 suggestedRoute
             }
         };
+    }
+
+    // Admin CRUD operations
+    async createRegion(createRegionDto: CreateRegionDto): Promise<Region> {
+        try {
+            // Check if region with same name already exists
+            const existingRegion = await this.regionModel.findOne({ denom: createRegionDto.denom }).exec();
+            if (existingRegion) {
+                throw new BadRequestException(`Region with name "${createRegionDto.denom}" already exists`);
+            }
+
+            const region = new this.regionModel(createRegionDto);
+            await region.save();
+            
+            this.logger.log(`Region created: ${region.denom}`);
+            return region;
+        } catch (error) {
+            this.logger.error(`Failed to create region: ${error.message}`);
+            throw error;
+        }
+    }
+
+    async updateRegion(id: string, updateRegionDto: UpdateRegionDto): Promise<Region> {
+        try {
+            // Check if region exists
+            const region = await this.regionModel.findById(id).exec();
+            if (!region) {
+                throw new NotFoundException(`Region with ID "${id}" not found`);
+            }
+
+            // If updating denom, check for duplicates
+            if (updateRegionDto.denom && updateRegionDto.denom !== region.denom) {
+                const existingRegion = await this.regionModel.findOne({ denom: updateRegionDto.denom }).exec();
+                if (existingRegion) {
+                    throw new BadRequestException(`Region with name "${updateRegionDto.denom}" already exists`);
+                }
+            }
+
+            // Update region
+            Object.assign(region, updateRegionDto);
+            await region.save();
+            
+            this.logger.log(`Region updated: ${region.denom}`);
+            return region;
+        } catch (error) {
+            this.logger.error(`Failed to update region: ${error.message}`);
+            throw error;
+        }
+    }
+
+    async deleteRegion(id: string): Promise<{ success: boolean; message: string }> {
+        try {
+            const region = await this.regionModel.findById(id).exec();
+            if (!region) {
+                throw new NotFoundException(`Region with ID "${id}" not found`);
+            }
+
+            // Delete thumbnail from S3 if exists
+            if (region.thumbnailUrl) {
+                try {
+                    const key = this.extractS3KeyFromUrl(region.thumbnailUrl);
+                    await this.s3Service.deleteFile(key);
+                } catch (error) {
+                    this.logger.warn(`Failed to delete thumbnail from S3: ${error.message}`);
+                }
+            }
+
+            await region.deleteOne();
+            
+            this.logger.log(`Region deleted: ${region.denom}`);
+            return {
+                success: true,
+                message: `Region "${region.denom}" deleted successfully`
+            };
+        } catch (error) {
+            this.logger.error(`Failed to delete region: ${error.message}`);
+            throw error;
+        }
+    }
+
+    async uploadRegionThumbnail(id: string, file: Express.Multer.File): Promise<{ success: boolean; thumbnailUrl: string }> {
+        try {
+            const region = await this.regionModel.findById(id).exec();
+            if (!region) {
+                throw new NotFoundException(`Region with ID "${id}" not found`);
+            }
+
+            // Delete old thumbnail if exists
+            if (region.thumbnailUrl) {
+                try {
+                    const oldKey = this.extractS3KeyFromUrl(region.thumbnailUrl);
+                    await this.s3Service.deleteFile(oldKey);
+                } catch (error) {
+                    this.logger.warn(`Failed to delete old thumbnail: ${error.message}`);
+                }
+            }
+
+            // Upload new thumbnail to S3
+            const folder = 'regions/thumbnails';
+            const { url } = await this.s3Service.uploadFile(file, undefined, folder);
+
+            // Update region with new thumbnail URL
+            region.thumbnailUrl = url;
+            await region.save();
+
+            this.logger.log(`Thumbnail uploaded for region: ${region.denom}`);
+            return {
+                success: true,
+                thumbnailUrl: url
+            };
+        } catch (error) {
+            this.logger.error(`Failed to upload thumbnail: ${error.message}`);
+            throw error;
+        }
+    }
+
+    async deleteRegionThumbnail(id: string): Promise<{ success: boolean; message: string }> {
+        try {
+            const region = await this.regionModel.findById(id).exec();
+            if (!region) {
+                throw new NotFoundException(`Region with ID "${id}" not found`);
+            }
+
+            if (!region.thumbnailUrl) {
+                return {
+                    success: true,
+                    message: 'No thumbnail to delete'
+                };
+            }
+
+            // Delete from S3
+            try {
+                const key = this.extractS3KeyFromUrl(region.thumbnailUrl);
+                await this.s3Service.deleteFile(key);
+            } catch (error) {
+                this.logger.warn(`Failed to delete thumbnail from S3: ${error.message}`);
+            }
+
+            // Update region
+            region.thumbnailUrl = '';
+            await region.save();
+
+            this.logger.log(`Thumbnail deleted for region: ${region.denom}`);
+            return {
+                success: true,
+                message: 'Thumbnail deleted successfully'
+            };
+        } catch (error) {
+            this.logger.error(`Failed to delete thumbnail: ${error.message}`);
+            throw error;
+        }
+    }
+
+    private extractS3KeyFromUrl(url: string): string {
+        // Extract S3 key from full URL
+        // Example: https://bucket.s3.region.amazonaws.com/path/to/file.jpg -> path/to/file.jpg
+        const urlParts = url.split('.amazonaws.com/');
+        return urlParts[1] || url;
     }
 }

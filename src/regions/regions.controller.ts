@@ -1,6 +1,9 @@
-import { Controller, Post, Get, Query, Param, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Query, Param, UseGuards, Put, Delete, Body, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { RegionsService } from './regions.service';
 import { AdminGuard } from '../guards/admin.guard';
+import { CreateRegionDto } from './dto/create-region.dto';
+import { UpdateRegionDto } from './dto/update-region.dto';
 
 @Controller('regions')
 export class RegionsController {
@@ -76,5 +79,46 @@ export class RegionsController {
     }
     
     return this.regionsService.getRegionByName(name, pageNum, limitNum, searchQuery, filters);
+  }
+
+  // Admin CRUD endpoints
+  @Post('admin/create')
+  @UseGuards(AdminGuard)
+  async createRegion(@Body() createRegionDto: CreateRegionDto) {
+    return this.regionsService.createRegion(createRegionDto);
+  }
+
+  @Put('admin/:id')
+  @UseGuards(AdminGuard)
+  async updateRegion(
+    @Param('id') id: string,
+    @Body() updateRegionDto: UpdateRegionDto,
+  ) {
+    return this.regionsService.updateRegion(id, updateRegionDto);
+  }
+
+  @Delete('admin/:id')
+  @UseGuards(AdminGuard)
+  async deleteRegion(@Param('id') id: string) {
+    return this.regionsService.deleteRegion(id);
+  }
+
+  @Post('admin/:id/thumbnail')
+  @UseGuards(AdminGuard)
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadThumbnail(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+    return this.regionsService.uploadRegionThumbnail(id, file);
+  }
+
+  @Delete('admin/:id/thumbnail')
+  @UseGuards(AdminGuard)
+  async deleteThumbnail(@Param('id') id: string) {
+    return this.regionsService.deleteRegionThumbnail(id);
   }
 }
