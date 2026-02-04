@@ -1,7 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { StaticExperience } from '../schemas/static-experience.schema';
+import { CreateStaticExperienceDto } from './dto/create-static-experience.dto';
+import { UpdateStaticExperienceDto } from './dto/update-static-experience.dto';
+import { S3Service } from '../common/services/s3.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -11,6 +14,7 @@ export class StaticExperiencesService {
 
   constructor(
     @InjectModel(StaticExperience.name) private staticExperienceModel: Model<StaticExperience>,
+    private readonly s3Service: S3Service,
   ) {}
 
   async loadDataFromJson(): Promise<string[]> {
@@ -96,5 +100,86 @@ export class StaticExperiencesService {
       this.logger.warn('Failed to parse opening hours:', openingHoursString);
       return null;
     }
+  }
+
+  // CRUD Operations
+  async findAll(page: number = 1, limit: number = 10) {
+    const skip = (page - 1) * limit;
+    const [items, total] = await Promise.all([
+      this.staticExperienceModel.find().skip(skip).limit(limit).exec(),
+      this.staticExperienceModel.countDocuments().exec(),
+    ]);
+    return { items, total, page, limit };
+  }
+
+  async findOne(id: string) {
+    const experience = await this.staticExperienceModel.findById(id).exec();
+    if (!experience) {
+      throw new NotFoundException(`Static experience with ID ${id} not found`);
+    }
+    return experience;
+  }
+
+  async create(createDto: CreateStaticExperienceDto) {
+    const newExperience = new this.staticExperienceModel(createDto);
+    return newExperience.save();
+  }
+
+  async update(id: string, updateDto: UpdateStaticExperienceDto) {
+    const updatedExperience = await this.staticExperienceModel
+      .findByIdAndUpdate(id, updateDto, { new: true })
+      .exec();
+    if (!updatedExperience) {
+      throw new NotFoundException(`Static experience with ID ${id} not found`);
+    }
+    return updatedExperience;
+  }
+
+  async remove(id: string) {
+    const experience = await this.staticExperienceModel.findById(id).exec();
+    if (!experience) {
+      throw new NotFoundException(`Static experience with ID ${id} not found`);
+    }
+
+    // Delete main image from S3 if it exists
+    if (experience.main_image) {
+      try {
+        await this.s3Service.deleteFile(experience.main_image);
+      } catch (error) {
+        this.logger.warn(`Failed to delete main image for experience ${id}`, error);
+      }
+    }
+
+    await this.staticExperienceModel.findByIdAndDelete(id).exec();
+    return { message: 'Static experience deleted successfully' };
+  }
+
+  async uploadMainImage(id: string, file: Express.Multer.File): Promise<string> {
+    const experience = await this.findOne(id);
+
+    // Delete old image if exists
+    if (experience.main_image) {
+      try {
+        await this.s3Service.deleteFile(experience.main_image);
+      } catch (error) {
+        this.logger.warn(`Failed to delete old main image for experience ${id}`, error);
+      }
+    }
+
+    // Upload new image
+    const { url: imageUrl } = await this.s3Service.uploadFile(file, undefined, 'static-experiences');
+    await this.staticExperienceModel.findByIdAndUpdate(id, { main_image: imageUrl }).exec();
+    return imageUrl;
+  }
+
+  async deleteMainImage(id: string) {
+    const experience = await this.findOne(id);
+    if (!experience.main_image) {
+      throw new NotFoundException('No main image found for this experience');
+    }
+
+    await this.s3Service.deleteFile(experience.main_image);
+    await this.staticExperienceModel.findByIdAndUpdate(id, { main_image: null }).exec();
+    return { message: 'Main image deleted successfully' };
   }
 }
