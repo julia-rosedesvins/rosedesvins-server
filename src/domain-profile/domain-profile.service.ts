@@ -293,6 +293,7 @@ export class DomainProfileService {
       timeOfServiceInMinutes: serviceData.timeOfServiceInMinutes,
       numberOfWinesTasted: serviceData.numberOfWinesTasted,
       languagesOffered: serviceData.languagesOffered,
+      category: serviceData.category || null,
       serviceBannerUrl: serviceBannerUrl,
       isActive: serviceData.isActive
     };
@@ -335,6 +336,7 @@ export class DomainProfileService {
       timeOfServiceInMinutes: service.timeOfServiceInMinutes,
       numberOfWinesTasted: service.numberOfWinesTasted,
       languagesOffered: service.languagesOffered,
+      category: service.category,
       serviceBannerUrl: service.serviceBannerUrl,
       isActive: service.isActive,
       // New booking settings fields
@@ -409,6 +411,9 @@ export class DomainProfileService {
     }
     if (updateData.languagesOffered !== undefined) {
       mappedUpdateData.languagesOffered = updateData.languagesOffered;
+    }
+    if (updateData.category !== undefined) {
+      mappedUpdateData.category = updateData.category;
     }
     if (serviceBannerUrl !== undefined) {
       mappedUpdateData.serviceBannerUrl = serviceBannerUrl;

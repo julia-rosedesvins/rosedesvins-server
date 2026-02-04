@@ -10,6 +10,13 @@ import { AdminGuard } from '../guards/admin.guard';
 export class ExperienceCategoriesController {
   constructor(private readonly experienceCategoriesService: ExperienceCategoriesService) {}
 
+  @Get('active')
+  @ApiOperation({ summary: 'Get all active experience categories (public)' })
+  async getActiveCategories() {
+    const result = await this.experienceCategoriesService.findAll(1, 1000, true);
+    return result.items;
+  }
+
   @Get('admin')
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Get all experience categories with pagination' })

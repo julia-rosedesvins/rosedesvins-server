@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { User } from './user.schema';
+import { ExperienceCategory } from './experience-category.schema';
 
 @Schema()
 export class Service {
@@ -24,6 +25,13 @@ export class Service {
 
   @Prop({ type: [String], required: true })
   languagesOffered: string[];
+
+  @Prop({ 
+    type: Types.ObjectId, 
+    ref: ExperienceCategory.name,
+    required: false
+  })
+  category: Types.ObjectId;
 
   @Prop({ required: false, trim: true })
   serviceBannerUrl: string;

@@ -411,7 +411,8 @@ export class DomainProfileController {
         timeOfServiceInMinutes: parseInt(serviceData.timeOfServiceInMinutes),
         numberOfWinesTasted: parseInt(serviceData.numberOfWinesTasted),
         isActive: serviceData.isActive === 'true' || serviceData.isActive === true,
-        languagesOffered: this.parseArrayFromFormData(serviceData, 'languagesOffered')
+        languagesOffered: this.parseArrayFromFormData(serviceData, 'languagesOffered'),
+        category: serviceData.category || undefined
       };
 
       const validatedService = ServiceSchema.parse(parsedServiceData);
@@ -524,6 +525,7 @@ export class DomainProfileController {
         pricePerPerson: serviceData.pricePerPerson ? parseFloat(serviceData.pricePerPerson) : undefined,
         timeOfServiceInMinutes: serviceData.timeOfServiceInMinutes ? parseInt(serviceData.timeOfServiceInMinutes) : undefined,
         numberOfWinesTasted: serviceData.numberOfWinesTasted ? parseInt(serviceData.numberOfWinesTasted) : undefined,
+        category: serviceData.category || undefined,
         isActive: serviceData.isActive !== undefined ? (serviceData.isActive === 'true' || serviceData.isActive === true) : undefined,
         languagesOffered: serviceData.languagesOffered || serviceData['languagesOffered[]'] 
           ? this.parseArrayFromFormData(serviceData, 'languagesOffered') 
