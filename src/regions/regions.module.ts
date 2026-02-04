@@ -6,6 +6,7 @@ import { Region, RegionSchema } from '../schemas/region.schema';
 import { User, UserSchema } from '../schemas/user.schema';
 import { DomainProfile, DomainProfileSchema } from '../schemas/domain-profile.schema';
 import { StaticExperience, StaticExperienceSchema } from '../schemas/static-experience.schema';
+import { Availability, AvailabilitySchema } from '../schemas/availability.schema';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { StaticExperience, StaticExperienceSchema } from '../schemas/static-expe
       { name: User.name, schema: UserSchema },
       { name: DomainProfile.name, schema: DomainProfileSchema },
       { name: StaticExperience.name, schema: StaticExperienceSchema },
+      { name: Availability.name, schema: AvailabilitySchema },
     ]),
   ],
   controllers: [RegionsController],

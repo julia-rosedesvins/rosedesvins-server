@@ -52,9 +52,29 @@ export class RegionsController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('q') searchQuery?: string,
+    @Query('days') days?: string,
+    @Query('minPrice') minPrice?: string,
+    @Query('maxPrice') maxPrice?: string,
+    @Query('languages') languages?: string,
   ) {
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 20;
-    return this.regionsService.getRegionByName(name, pageNum, limitNum, searchQuery);
+    
+    // Parse filter parameters
+    const filters: any = {};
+    if (days) {
+      filters.days = days.split(',').map(d => d.trim());
+    }
+    if (minPrice) {
+      filters.minPrice = parseFloat(minPrice);
+    }
+    if (maxPrice) {
+      filters.maxPrice = parseFloat(maxPrice);
+    }
+    if (languages) {
+      filters.languages = languages.split(',').map(l => l.trim());
+    }
+    
+    return this.regionsService.getRegionByName(name, pageNum, limitNum, searchQuery, filters);
   }
 }

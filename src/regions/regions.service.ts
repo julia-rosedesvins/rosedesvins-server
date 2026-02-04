@@ -6,6 +6,7 @@ import { Region } from '../schemas/region.schema';
 import { User } from '../schemas/user.schema';
 import { DomainProfile } from '../schemas/domain-profile.schema';
 import { StaticExperience } from '../schemas/static-experience.schema';
+import { Availability } from '../schemas/availability.schema';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -18,6 +19,7 @@ export class RegionsService {
         @InjectModel(User.name) private userModel: Model<User>,
         @InjectModel(DomainProfile.name) private domainProfileModel: Model<DomainProfile>,
         @InjectModel(StaticExperience.name) private staticExperienceModel: Model<StaticExperience>,
+        @InjectModel(Availability.name) private availabilityModel: Model<Availability>,
         private configService: ConfigService,
     ) { }
 
@@ -168,6 +170,12 @@ export class RegionsService {
         page: number = 1,
         limit: number = 20,
         searchQuery?: string,
+        filters?: {
+            days?: string[];
+            minPrice?: number;
+            maxPrice?: number;
+            languages?: string[];
+        },
     ): Promise<{
         region: Region | null;
         domains: Array<{
@@ -330,16 +338,170 @@ export class RegionsService {
         // Step 7: Combine both arrays
         const domains = [...domainsFromProfiles, ...domainsFromExperiences];
 
-        this.logger.log(`Returning page ${page} with ${domains.length} domains (total: ${totalDomains})`);
+        // Step 8: Apply filters if provided
+        let filteredDomains = domains;
+        if (filters && Object.keys(filters).length > 0) {
+            filteredDomains = await this.filterDomains(domains, domainProfiles, filters);
+        }
+
+        this.logger.log(`Returning page ${page} with ${filteredDomains.length} domains (total: ${totalDomains})`);
 
         return {
             region,
-            domains,
+            domains: filteredDomains,
             total: totalDomains,
             page,
             limit,
             totalPages,
         };
+    }
+
+    /**
+     * Helper method to filter domains based on filter criteria
+     */
+    private async filterDomains(
+        domains: any[],
+        domainProfiles: any[],
+        filters: {
+            days?: string[];
+            minPrice?: number;
+            maxPrice?: number;
+            languages?: string[];
+        }
+    ): Promise<any[]> {
+        const dayMapping = {
+            'Lundi': 'monday',
+            'Mardi': 'tuesday',
+            'Mercredi': 'wednesday',
+            'Jeudi': 'thursday',
+            'Vendredi': 'friday',
+            'Samedi': 'saturday',
+            'Dimanche': 'sunday'
+        };
+
+        // Filter only client domains (those with profiles)
+        const filteredResults: any[] = [];
+
+        for (const domain of domains) {
+            // Skip non-client domains if we have filters
+            if (domain.producer !== 'client') {
+                continue;
+            }
+
+            // Find the corresponding domain profile
+            const profile = domainProfiles.find(p => p._id.toString() === domain.domainId);
+            if (!profile || !profile.services || profile.services.length === 0) {
+                continue;
+            }
+
+            // Check if any service matches all filters
+            let hasMatchingService = false;
+
+            for (const service of profile.services) {
+                if (!service.isActive) continue;
+
+                let matchesFilters = true;
+
+                // Filter by price
+                if (filters.maxPrice !== undefined && filters.maxPrice > 0) {
+                    if (service.pricePerPerson > filters.maxPrice) {
+                        matchesFilters = false;
+                    }
+                }
+                if (filters.minPrice !== undefined) {
+                    if (service.pricePerPerson < filters.minPrice) {
+                        matchesFilters = false;
+                    }
+                }
+
+                // Filter by languages
+                if (filters.languages && filters.languages.length > 0) {
+                    const hasMatchingLanguage = filters.languages.some(lang => 
+                        service.languagesOffered.includes(lang)
+                    );
+                    if (!hasMatchingLanguage) {
+                        matchesFilters = false;
+                    }
+                }
+
+                // Filter by availability days
+                if (filters.days && filters.days.length > 0 && matchesFilters) {
+                    const isAvailableOnDays = await this.checkServiceAvailabilityForDays(
+                        profile.userId._id,
+                        service,
+                        filters.days,
+                        dayMapping
+                    );
+                    if (!isAvailableOnDays) {
+                        matchesFilters = false;
+                    }
+                }
+
+                if (matchesFilters) {
+                    hasMatchingService = true;
+                    break;
+                }
+            }
+
+            if (hasMatchingService) {
+                filteredResults.push(domain);
+            }
+        }
+
+        return filteredResults;
+    }
+
+    /**
+     * Check if a service is available on the specified days
+     */
+    private async checkServiceAvailabilityForDays(
+        userId: any,
+        service: any,
+        days: string[],
+        dayMapping: Record<string, string>
+    ): Promise<boolean> {
+        // If service has custom availability, check dateAvailability array
+        if (service.hasCustomAvailability && service.dateAvailability && service.dateAvailability.length > 0) {
+            // Check if any date in dateAvailability matches the requested days
+            const now = new Date();
+            for (const dateAvail of service.dateAvailability) {
+                const date = new Date(dateAvail.date);
+                // Only check future dates
+                if (date < now) continue;
+
+                const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
+                const dayNames = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+                const frenchDay = dayNames[dayOfWeek];
+
+                if (days.includes(frenchDay) && dateAvail.enabled) {
+                    // Check if there are time slots available
+                    if (dateAvail.morningEnabled || dateAvail.afternoonEnabled) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Otherwise, check the availability schema
+        const availability = await this.availabilityModel.findOne({ userId }).exec();
+        if (!availability || !availability.weeklyAvailability) {
+            // If no availability set, assume available all days
+            return true;
+        }
+
+        // Check if available on any of the requested days
+        for (const frenchDay of days) {
+            const englishDay = dayMapping[frenchDay];
+            if (englishDay && availability.weeklyAvailability[englishDay]) {
+                const dayAvail = availability.weeklyAvailability[englishDay];
+                if (dayAvail.isAvailable && dayAvail.timeSlots && dayAvail.timeSlots.length > 0) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     async searchRegions(query: string): Promise<Region[]> {
