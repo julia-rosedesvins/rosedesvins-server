@@ -37,16 +37,24 @@ export class RegionsController {
 
   @Get('unified-search')
   async unifiedSearch(@Query('q') query: string) {
-    if (!query) {
+    // Ensure query is properly trimmed and validated
+    const trimmedQuery = query?.trim();
+    
+    if (!trimmedQuery || trimmedQuery.length === 0) {
       return {
         success: true,
         data: {
           type: null,
-          results: []
+          services: [],
+          domains: [],
+          regions: [],
+          staticExperiences: [],
+          suggestedRoute: ''
         }
       };
     }
-    return this.regionsService.unifiedSearch(query);
+    
+    return this.regionsService.unifiedSearch(trimmedQuery);
   }
 
   @Get(':name')

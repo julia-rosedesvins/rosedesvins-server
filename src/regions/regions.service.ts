@@ -742,17 +742,36 @@ export class RegionsService {
             suggestedRoute?: string;
         };
     }> {
-        const backendUrl = this.configService.get<string>('BACKEND_URL') || '';
-        const searchQuery = query.trim();
-        const isNumeric = !isNaN(parseFloat(searchQuery));
-        const numericQuery = isNumeric ? parseFloat(searchQuery) : null;
+        try {
+            const backendUrl = this.configService.get<string>('BACKEND_URL') || '';
+            const searchQuery = query.trim();
+            
+            // Return early if query is empty after trimming
+            if (!searchQuery) {
+                return {
+                    success: true,
+                    data: {
+                        type: null,
+                        services: [],
+                        domains: [],
+                        regions: [],
+                        staticExperiences: [],
+                        suggestedRoute: ''
+                    }
+                };
+            }
+            
+            const isNumeric = !isNaN(parseFloat(searchQuery));
+            const numericQuery = isNumeric ? parseFloat(searchQuery) : null;
 
-        // Search in services (via domain profiles) - enhanced search
-        const serviceSearchConditions: any = {
-            'services.isActive': true,
-            $or: [
-                { 'services.name': { $regex: searchQuery, $options: 'i' } },
-                { 'services.description': { $regex: searchQuery, $options: 'i' } },
+            this.logger.log(`Unified search for: "${searchQuery}" (numeric: ${isNumeric})`);
+
+            // Search in services (via domain profiles) - enhanced search
+            const serviceSearchConditions: any = {
+                'services.isActive': true,
+                $or: [
+                    { 'services.name': { $regex: searchQuery, $options: 'i' } },
+                    { 'services.description': { $regex: searchQuery, $options: 'i' } },
                 { 'services.languagesOffered': { $in: [new RegExp(searchQuery, 'i')] } }
             ]
         };
@@ -1013,6 +1032,8 @@ export class RegionsService {
             }
         }
 
+        this.logger.log(`Search results: ${services.length} services, ${domains.length} domains, ${regionResults.length} regions, ${staticExperienceResults.length} static experiences`);
+
         return {
             success: true,
             data: {
@@ -1024,6 +1045,20 @@ export class RegionsService {
                 suggestedRoute
             }
         };
+        } catch (error) {
+            this.logger.error(`Unified search error: ${error.message}`, error.stack);
+            return {
+                success: false,
+                data: {
+                    type: null,
+                    services: [],
+                    domains: [],
+                    regions: [],
+                    staticExperiences: [],
+                    suggestedRoute: ''
+                }
+            };
+        }
     }
 
     // Admin CRUD operations
