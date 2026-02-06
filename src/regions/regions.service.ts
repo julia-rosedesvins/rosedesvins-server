@@ -175,6 +175,7 @@ export class RegionsService {
         limit: number = 20,
         searchQuery?: string,
         filters?: {
+            date?: string;
             days?: string[];
             minPrice?: number;
             maxPrice?: number;
@@ -379,7 +380,7 @@ export class RegionsService {
         // Step 8: Apply filters if provided
         let filteredDomains = domains;
         if (filters && Object.keys(filters).length > 0) {
-            filteredDomains = await this.filterDomains(domains, domainProfiles, filters);
+            filteredDomains = await this.filterDomains(domains, domainProfiles, staticExperiences, filters);
         }
 
         this.logger.log(`Returning page ${page} with ${filteredDomains.length} domains (total: ${totalDomains})`);
@@ -400,7 +401,9 @@ export class RegionsService {
     private async filterDomains(
         domains: any[],
         domainProfiles: any[],
+        staticExperiences: any[],
         filters: {
+            date?: string;
             days?: string[];
             minPrice?: number;
             maxPrice?: number;
@@ -419,6 +422,8 @@ export class RegionsService {
         };
 
         const filteredResults: any[] = [];
+
+        this.logger.log(`Filtering ${domains.length} domains with filters: ${JSON.stringify(filters)}`);
 
         for (const domain of domains) {
             // Handle client domains (those with profiles)
@@ -475,6 +480,18 @@ export class RegionsService {
                         }
                     }
 
+                    // Filter by specific date
+                    if (filters.date && matchesFilters) {
+                        const isAvailableOnDate = await this.checkServiceAvailabilityForDate(
+                            profile.userId._id,
+                            service,
+                            filters.date
+                        );
+                        if (!isAvailableOnDate) {
+                            matchesFilters = false;
+                        }
+                    }
+
                     // Filter by availability days
                     if (filters.days && filters.days.length > 0 && matchesFilters) {
                         const isAvailableOnDays = await this.checkServiceAvailabilityForDays(
@@ -499,7 +516,6 @@ export class RegionsService {
                 }
             } else if (domain.producer === 'non-client') {
                 // Handle non-client domains (static experiences)
-                // Only apply category filter to static experiences
                 let matchesFilters = true;
 
                 // Filter by categories - check if categoryId exists and matches
@@ -508,6 +524,25 @@ export class RegionsService {
                     if (!domain.categoryId) {
                         matchesFilters = false;
                     } else if (!filters.categories.includes(domain.categoryId)) {
+                        matchesFilters = false;
+                    }
+                }
+
+                // Filter by specific date - check opening_hours
+                if (filters.date && matchesFilters) {
+                    const staticExp = staticExperiences.find(exp => 
+                        exp.name === domain.domainName && 
+                        exp.latitude === domain.latitude && 
+                        exp.longitude === domain.longitude
+                    );
+                    
+                    if (staticExp) {
+                        const isOpen = this.checkStaticExperienceOpenOnDate(staticExp, filters.date);
+                        if (!isOpen) {
+                            matchesFilters = false;
+                        }
+                    } else {
+                        // If we can't find the experience, exclude it from filtered results
                         matchesFilters = false;
                     }
                 }
@@ -569,6 +604,119 @@ export class RegionsService {
                     return true;
                 }
             }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if a service is available on a specific date
+     */
+    private async checkServiceAvailabilityForDate(
+        userId: any,
+        service: any,
+        dateString: string
+    ): Promise<boolean> {
+        const targetDate = new Date(dateString);
+        targetDate.setHours(0, 0, 0, 0);
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+
+        this.logger.log(`Checking availability for service '${service.name}' on date ${targetDate.toISOString()}`);
+        this.logger.log(`hasCustomAvailability: ${service.hasCustomAvailability}`);
+
+        // Only check future dates or today
+        if (targetDate < now) {
+            this.logger.log(`Date is in the past, not available`);
+            return false;
+        }
+
+        // If service has custom availability enabled, check dateAvailability array
+        if (service.hasCustomAvailability === true) {
+            this.logger.log(`Using custom availability, checking dateAvailability array (${service.dateAvailability?.length || 0} entries)`);
+            
+            if (!service.dateAvailability || service.dateAvailability.length === 0) {
+                // Custom availability is enabled but no dates configured - not available
+                this.logger.log(`No custom dates configured, not available`);
+                return false;
+            }
+
+            for (const dateAvail of service.dateAvailability) {
+                const availDate = new Date(dateAvail.date);
+                availDate.setHours(0, 0, 0, 0);
+
+                if (availDate.getTime() === targetDate.getTime() && dateAvail.enabled) {
+                    // Check if there are time slots available
+                    if (dateAvail.morningEnabled || dateAvail.afternoonEnabled) {
+                        this.logger.log(`Found matching custom date with enabled slots`);
+                        return true;
+                    }
+                }
+            }
+            this.logger.log(`No matching custom date found`);
+            return false;
+        }
+
+        // If hasCustomAvailability is false, check the availability schema based on day of week
+        this.logger.log(`Using weekly availability schema`);
+        const availability = await this.availabilityModel.findOne({ userId }).exec();
+        if (!availability || !availability.weeklyAvailability) {
+            // If no availability set, assume available all days
+            this.logger.log(`No availability schema found, assuming available`);
+            return true;
+        }
+
+        // Map day of week to availability
+        const dayOfWeek = targetDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
+        const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+        const englishDay = dayNames[dayOfWeek];
+
+        this.logger.log(`Checking ${englishDay} in weekly availability`);
+
+        if (availability.weeklyAvailability[englishDay]) {
+            const dayAvail = availability.weeklyAvailability[englishDay];
+            if (dayAvail.isAvailable && dayAvail.timeSlots && dayAvail.timeSlots.length > 0) {
+                this.logger.log(`Service available on ${englishDay}`);
+                return true;
+            }
+        }
+
+        this.logger.log(`Service not available on ${englishDay}`);
+        return false;
+    }
+
+    /**
+     * Check if a static experience is open on a specific date based on opening_hours
+     */
+    private checkStaticExperienceOpenOnDate(
+        staticExperience: any,
+        dateString: string
+    ): boolean {
+        const targetDate = new Date(dateString);
+        const dayOfWeek = targetDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
+        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const dayName = dayNames[dayOfWeek];
+
+        // If no opening_hours data, assume it's open
+        if (!staticExperience.opening_hours) {
+            return true;
+        }
+
+        // Check if the day exists in opening_hours
+        const hoursForDay = staticExperience.opening_hours.get?.(dayName) || staticExperience.opening_hours[dayName];
+        
+        if (!hoursForDay) {
+            return false; // No hours defined for this day
+        }
+
+        // Check if it's marked as closed
+        if (Array.isArray(hoursForDay) && hoursForDay.length === 1 && hoursForDay[0] === 'Closed') {
+            return false;
+        }
+
+        // If there are any time slots, consider it open
+        if (Array.isArray(hoursForDay) && hoursForDay.length > 0 && hoursForDay[0] !== 'Closed') {
+            return true;
         }
 
         return false;

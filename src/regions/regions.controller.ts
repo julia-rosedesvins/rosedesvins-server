@@ -55,6 +55,7 @@ export class RegionsController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('q') searchQuery?: string,
+    @Query('date') date?: string,
     @Query('days') days?: string,
     @Query('minPrice') minPrice?: string,
     @Query('maxPrice') maxPrice?: string,
@@ -66,6 +67,9 @@ export class RegionsController {
     
     // Parse filter parameters
     const filters: any = {};
+    if (date) {
+      filters.date = date;
+    }
     if (days) {
       filters.days = days.split(',').map(d => d.trim());
     }
