@@ -368,7 +368,7 @@ export class RegionsService {
                 location: exp.city || null,
                 category: categoryName,
                 categoryId: categoryRefId,
-                domainId: null,
+                domainId: exp._id.toString(),
                 latitude: exp.latitude || null,
                 longitude: exp.longitude || null,
             };
