@@ -241,6 +241,8 @@ export class DomainProfileService {
             services: [],
             domainName: staticExperience.domain_name || staticExperience.name,
             siteWeb: staticExperience.website || null,
+            phone: staticExperience.phone || null,
+            openingHours: staticExperience.opening_hours || null,
             createdAt: staticExperience.createdAt,
             updatedAt: staticExperience.updatedAt,
             producer: 'non-client',
