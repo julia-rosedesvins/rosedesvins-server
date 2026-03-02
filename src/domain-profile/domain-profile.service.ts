@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
 import { DomainProfile } from '../schemas/domain-profile.schema';
 import { User } from '../schemas/user.schema';
+import { StaticExperience } from '../schemas/static-experience.schema';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { S3Service } from '../common/services/s3.service';
@@ -34,6 +35,7 @@ export class DomainProfileService {
   constructor(
     @InjectModel(DomainProfile.name) private domainProfileModel: Model<DomainProfile>,
     @InjectModel(User.name) private userModel: Model<User>,
+    @InjectModel(StaticExperience.name) private staticExperienceModel: Model<StaticExperience>,
     private configService: ConfigService,
     private readonly s3Service: S3Service,
   ) {}
@@ -196,6 +198,10 @@ export class DomainProfileService {
     };
   } | null> {
     try {
+      if (!Types.ObjectId.isValid(domainId)) {
+        return null;
+      }
+
       const domainObjectId = new Types.ObjectId(domainId);
       const backendUrl = this.configService.get<string>('BACKEND_URL') || 'http://localhost:5001';
       
@@ -204,12 +210,6 @@ export class DomainProfileService {
         .findById(domainObjectId)
         .populate('userId', 'domainName domainLatitude domainLongitude address city codePostal siteWeb')
         .exec();
-
-      if (!domainProfile) {
-        return null;
-      }
-
-      const user = domainProfile.userId as any;
 
       // Helper function to build full URL
       const buildFullUrl = (url: string | undefined | null): string | null => {
@@ -221,6 +221,42 @@ export class DomainProfileService {
         // Otherwise prepend BACKEND_URL
         return `${backendUrl}${url.startsWith('/') ? '' : '/'}${url}`;
       };
+
+      if (!domainProfile) {
+        // Fallback for non-client domain route: static experience by ID
+        const staticExperience = await this.staticExperienceModel.findById(domainObjectId).exec();
+        if (!staticExperience) {
+          return null;
+        }
+
+        return {
+          domainProfile: {
+            _id: staticExperience._id,
+            userId: '',
+            domainDescription: staticExperience.domain_description || staticExperience.about || staticExperience.category || '',
+            domainProfilePictureUrl: buildFullUrl(staticExperience.domain_profile_pic_url || staticExperience.main_image),
+            domainLogoUrl: buildFullUrl(staticExperience.domain_logo_url),
+            mainImage: buildFullUrl(staticExperience.main_image),
+            colorCode: '#3A7B59',
+            services: [],
+            domainName: staticExperience.domain_name || staticExperience.name,
+            siteWeb: staticExperience.website || null,
+            createdAt: staticExperience.createdAt,
+            updatedAt: staticExperience.updatedAt,
+            producer: 'non-client',
+            staticExperienceId: staticExperience._id,
+          },
+          location: {
+            domainLatitude: staticExperience.latitude || null,
+            domainLongitude: staticExperience.longitude || null,
+            address: staticExperience.address || null,
+            city: staticExperience.city || null,
+            codePostal: null,
+          }
+        };
+      }
+
+      const user = domainProfile.userId as any;
 
       // Map services with full URLs for service banners
       const servicesWithFullUrls = domainProfile.services.map(service => {

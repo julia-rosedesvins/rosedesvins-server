@@ -38,6 +38,17 @@ export class StaticExperiencesController {
     return this.staticExperiencesService.findAll(page, limit);
   }
 
+  @Get('public/:id')
+  @ApiOperation({ summary: 'Get public static experience by ID for experience page' })
+  async getPublicById(@Param('id') id: string) {
+    const data = await this.staticExperiencesService.getPublicExperienceById(id);
+    return {
+      success: true,
+      message: 'Static experience retrieved successfully',
+      data,
+    };
+  }
+
   @Get('admin/:id')
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Get a static experience by ID' })

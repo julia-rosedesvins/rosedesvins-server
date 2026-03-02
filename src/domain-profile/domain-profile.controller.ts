@@ -348,10 +348,13 @@ export class DomainProfileController {
         data: result
       };
     } catch (error) {
-      console.error('Error retrieving public domain profile:', error);
       if (error instanceof HttpException) {
+        if (error.getStatus() !== HttpStatus.NOT_FOUND) {
+          console.error('Error retrieving public domain profile:', error);
+        }
         throw error;
       }
+      console.error('Error retrieving public domain profile:', error);
       throw new HttpException('Internal server error', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }

@@ -188,6 +188,7 @@ export class RegionsService {
             domainName: string;
             domainDescription: string;
             domainProfilePictureUrl: string | null;
+            domainLogoUrl: string | null;
             producer: 'client' | 'non-client';
             domainPrice: number | null;
             siteUrl: string | null;
@@ -331,6 +332,9 @@ export class RegionsService {
                 domainProfilePictureUrl: profile.domainProfilePictureUrl 
                     ? `${backendUrl}${profile.domainProfilePictureUrl}` 
                     : null,
+                domainLogoUrl: profile.domainLogoUrl
+                    ? `${backendUrl}${profile.domainLogoUrl}`
+                    : null,
                 producer: 'client' as const,
                 domainPrice: firstActiveService?.pricePerPerson || null,
                 siteUrl: null,
@@ -359,9 +363,11 @@ export class RegionsService {
             }
             
             return {
-                domainName: exp.name,
-                domainDescription: exp.about || exp.category || '',
-                domainProfilePictureUrl: exp.main_image || null,
+                domainName: exp.domain_name || exp.name,
+                domainDescription: exp.domain_description || exp.about || exp.category || '',
+                domainProfilePictureUrl: exp.domain_profile_pic_url || exp.main_image || null,
+                domainLogoUrl: exp.domain_logo_url || null,
+                mainImage: exp.main_image || null,
                 producer: 'non-client' as const,
                 domainPrice: null,
                 siteUrl: exp.website || null,
@@ -840,6 +846,10 @@ export class RegionsService {
             .exec();
 
         const staticExperienceResults = staticExperiences.map(exp => ({
+            domainName: exp.domain_name || exp.name,
+            domainDescription: exp.domain_description || exp.about || exp.category || '',
+            domainProfilePictureUrl: exp.domain_profile_pic_url || exp.main_image || null,
+            domainLogoUrl: exp.domain_logo_url || null,
             name: exp.name,
             category: exp.category,
             address: exp.address,

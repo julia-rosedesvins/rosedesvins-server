@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { StaticExperience } from '../schemas/static-experience.schema';
 import { CreateStaticExperienceDto } from './dto/create-static-experience.dto';
 import { UpdateStaticExperienceDto } from './dto/update-static-experience.dto';
@@ -100,6 +100,43 @@ export class StaticExperiencesService {
       this.logger.warn('Failed to parse opening hours:', openingHoursString);
       return null;
     }
+  }
+
+  async getPublicExperienceById(id: string) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException(`Static experience with ID ${id} not found`);
+    }
+
+    const experience = await this.staticExperienceModel.findById(id).exec();
+    if (!experience) {
+      throw new NotFoundException(`Static experience with ID ${id} not found`);
+    }
+
+    const buildFullUrl = (url: string | null | undefined): string | null => {
+      if (!url) return null;
+      return url;
+    };
+
+    return {
+      domainProfile: {
+        _id: experience._id,
+        userId: '',
+        domainDescription: experience.domain_description || experience.about || experience.category || '',
+        domainProfilePictureUrl: buildFullUrl(experience.domain_profile_pic_url || experience.main_image),
+        domainLogoUrl: buildFullUrl(experience.domain_logo_url),
+        colorCode: '#3A7B59',
+        services: [],
+        domainName: experience.domain_name || experience.name,
+        siteWeb: experience.website || null,
+      },
+      location: {
+        domainLatitude: experience.latitude || null,
+        domainLongitude: experience.longitude || null,
+        address: experience.address || null,
+        city: experience.city || null,
+        codePostal: null,
+      }
+    };
   }
 
   // CRUD Operations

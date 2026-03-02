@@ -158,6 +158,10 @@ export class StaticExperience extends Document {
     default: null
   })
   url: string | null;
+
+  // Mongoose timestamps (automatically added by { timestamps: true })
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const StaticExperienceSchema = SchemaFactory.createForClass(StaticExperience);

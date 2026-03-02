@@ -4,6 +4,7 @@ import { DomainProfileService } from './domain-profile.service';
 import { DomainProfileController } from './domain-profile.controller';
 import { DomainProfile, DomainProfileSchema } from '../schemas/domain-profile.schema';
 import { User, UserSchema } from '../schemas/user.schema';
+import { StaticExperience, StaticExperienceSchema } from '../schemas/static-experience.schema';
 import { JwtModule } from '@nestjs/jwt';
 import { S3Service } from '../common/services/s3.service';
 
@@ -11,7 +12,8 @@ import { S3Service } from '../common/services/s3.service';
   imports: [
     MongooseModule.forFeature([
       { name: DomainProfile.name, schema: DomainProfileSchema },
-      { name: User.name, schema: UserSchema }
+      { name: User.name, schema: UserSchema },
+      { name: StaticExperience.name, schema: StaticExperienceSchema }
     ]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production',
