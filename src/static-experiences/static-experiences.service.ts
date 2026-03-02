@@ -143,17 +143,19 @@ export class StaticExperiencesService {
   async findAll(page: number = 1, limit: number = 10) {
     const skip = (page - 1) * limit;
     const [items, total] = await Promise.all([
-      this.staticExperienceModel.find().skip(skip).limit(limit).exec(),
+      this.staticExperienceModel.find().skip(skip).limit(limit).lean().exec(),
       this.staticExperienceModel.countDocuments().exec(),
     ]);
+    
     return { items, total, page, limit };
   }
 
   async findOne(id: string) {
-    const experience = await this.staticExperienceModel.findById(id).exec();
+    const experience = await this.staticExperienceModel.findById(id).lean().exec();
     if (!experience) {
       throw new NotFoundException(`Static experience with ID ${id} not found`);
     }
+    
     return experience;
   }
 
