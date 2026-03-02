@@ -86,6 +86,46 @@ export class StaticExperiencesController {
     return { imageUrl };
   }
 
+  @Post('admin/:id/domain-profile-pic')
+  @UseGuards(AdminGuard)
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Upload domain profile picture for a static experience' })
+  async uploadDomainProfilePic(
+    @Param('id') id: string,
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }),
+          new FileTypeValidator({ fileType: /(jpg|jpeg|png|webp)$/ }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    const imageUrl = await this.staticExperiencesService.uploadDomainProfilePic(id, file);
+    return { imageUrl };
+  }
+
+  @Post('admin/:id/domain-logo')
+  @UseGuards(AdminGuard)
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Upload domain logo for a static experience' })
+  async uploadDomainLogo(
+    @Param('id') id: string,
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }),
+          new FileTypeValidator({ fileType: /(jpg|jpeg|png|webp)$/ }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    const imageUrl = await this.staticExperiencesService.uploadDomainLogo(id, file);
+    return { imageUrl };
+  }
+
   @Delete('admin/:id/image')
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Delete main image from a static experience' })

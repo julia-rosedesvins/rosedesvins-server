@@ -144,9 +144,27 @@ export class StaticExperiencesService {
     // Delete main image from S3 if it exists
     if (experience.main_image) {
       try {
-        await this.s3Service.deleteFile(experience.main_image);
+        await this.s3Service.deleteFile(this.extractS3KeyFromUrl(experience.main_image));
       } catch (error) {
         this.logger.warn(`Failed to delete main image for experience ${id}`, error);
+      }
+    }
+
+    // Delete domain profile picture from S3 if it exists
+    if (experience.domain_profile_pic_url) {
+      try {
+        await this.s3Service.deleteFile(this.extractS3KeyFromUrl(experience.domain_profile_pic_url));
+      } catch (error) {
+        this.logger.warn(`Failed to delete domain profile picture for experience ${id}`, error);
+      }
+    }
+
+    // Delete domain logo from S3 if it exists
+    if (experience.domain_logo_url) {
+      try {
+        await this.s3Service.deleteFile(this.extractS3KeyFromUrl(experience.domain_logo_url));
+      } catch (error) {
+        this.logger.warn(`Failed to delete domain logo for experience ${id}`, error);
       }
     }
 
@@ -160,7 +178,7 @@ export class StaticExperiencesService {
     // Delete old image if exists
     if (experience.main_image) {
       try {
-        await this.s3Service.deleteFile(experience.main_image);
+        await this.s3Service.deleteFile(this.extractS3KeyFromUrl(experience.main_image));
       } catch (error) {
         this.logger.warn(`Failed to delete old main image for experience ${id}`, error);
       }
@@ -178,8 +196,45 @@ export class StaticExperiencesService {
       throw new NotFoundException('No main image found for this experience');
     }
 
-    await this.s3Service.deleteFile(experience.main_image);
+    await this.s3Service.deleteFile(this.extractS3KeyFromUrl(experience.main_image));
     await this.staticExperienceModel.findByIdAndUpdate(id, { main_image: null }).exec();
     return { message: 'Main image deleted successfully' };
+  }
+
+  async uploadDomainProfilePic(id: string, file: Express.Multer.File): Promise<string> {
+    const experience = await this.findOne(id);
+
+    if (experience.domain_profile_pic_url) {
+      try {
+        await this.s3Service.deleteFile(this.extractS3KeyFromUrl(experience.domain_profile_pic_url));
+      } catch (error) {
+        this.logger.warn(`Failed to delete old domain profile picture for experience ${id}`, error);
+      }
+    }
+
+    const { url } = await this.s3Service.uploadFile(file, undefined, 'static-experiences/domain-profile-pics');
+    await this.staticExperienceModel.findByIdAndUpdate(id, { domain_profile_pic_url: url }).exec();
+    return url;
+  }
+
+  async uploadDomainLogo(id: string, file: Express.Multer.File): Promise<string> {
+    const experience = await this.findOne(id);
+
+    if (experience.domain_logo_url) {
+      try {
+        await this.s3Service.deleteFile(this.extractS3KeyFromUrl(experience.domain_logo_url));
+      } catch (error) {
+        this.logger.warn(`Failed to delete old domain logo for experience ${id}`, error);
+      }
+    }
+
+    const { url } = await this.s3Service.uploadFile(file, undefined, 'static-experiences/domain-logos');
+    await this.staticExperienceModel.findByIdAndUpdate(id, { domain_logo_url: url }).exec();
+    return url;
+  }
+
+  private extractS3KeyFromUrl(url: string): string {
+    const urlParts = url.split('.amazonaws.com/');
+    return urlParts[1] || url;
   }
 }

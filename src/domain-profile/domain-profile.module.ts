@@ -5,6 +5,7 @@ import { DomainProfileController } from './domain-profile.controller';
 import { DomainProfile, DomainProfileSchema } from '../schemas/domain-profile.schema';
 import { User, UserSchema } from '../schemas/user.schema';
 import { JwtModule } from '@nestjs/jwt';
+import { S3Service } from '../common/services/s3.service';
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { JwtModule } from '@nestjs/jwt';
     }),
   ],
   controllers: [DomainProfileController],
-  providers: [DomainProfileService],
+  providers: [DomainProfileService, S3Service],
   exports: [DomainProfileService]
 })
 export class DomainProfileModule { }

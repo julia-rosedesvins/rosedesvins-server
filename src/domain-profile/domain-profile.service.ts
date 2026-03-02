@@ -6,6 +6,7 @@ import { DomainProfile } from '../schemas/domain-profile.schema';
 import { User } from '../schemas/user.schema';
 import { promises as fs } from 'fs';
 import { join } from 'path';
+import { S3Service } from '../common/services/s3.service';
 
 export interface CreateOrUpdateDomainProfileServiceDto {
   domainName?: string;
@@ -34,6 +35,7 @@ export class DomainProfileService {
     @InjectModel(DomainProfile.name) private domainProfileModel: Model<DomainProfile>,
     @InjectModel(User.name) private userModel: Model<User>,
     private configService: ConfigService,
+    private readonly s3Service: S3Service,
   ) {}
 
   async createOrUpdateDomainProfile(
@@ -72,7 +74,10 @@ export class DomainProfileService {
       if (existingDomainProfile?.domainProfilePictureUrl) {
         await this.deleteFile(existingDomainProfile.domainProfilePictureUrl);
       }
-      domainProfilePictureUrl = `/uploads/domain-profiles/${files.domainProfilePicture[0].filename}`;
+      domainProfilePictureUrl = await this.uploadDomainImageToS3(
+        files.domainProfilePicture[0],
+        'domain-profiles/profile-pictures'
+      );
     }
 
     if (files?.domainLogo?.[0]) {
@@ -80,7 +85,10 @@ export class DomainProfileService {
       if (existingDomainProfile?.domainLogoUrl) {
         await this.deleteFile(existingDomainProfile.domainLogoUrl);
       }
-      domainLogoUrl = `/uploads/domain-profiles/${files.domainLogo[0].filename}`;
+      domainLogoUrl = await this.uploadDomainImageToS3(
+        files.domainLogo[0],
+        'domain-profiles/logos'
+      );
     }
 
     const profileData = {
@@ -590,6 +598,20 @@ export class DomainProfileService {
    */
   private async deleteFile(filePath: string): Promise<void> {
     try {
+      if (!filePath) return;
+
+      // Delete from S3 if it's an S3 URL
+      if (filePath.includes('.amazonaws.com/')) {
+        const key = this.extractS3KeyFromUrl(filePath);
+        await this.s3Service.deleteFile(key);
+        return;
+      }
+
+      // Skip external non-S3 URLs
+      if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+        return;
+      }
+
       // Convert relative URL to absolute file path
       const absolutePath = join(process.cwd(), filePath.replace(/^\//, ''));
       await fs.unlink(absolutePath);
@@ -597,6 +619,27 @@ export class DomainProfileService {
     } catch (error) {
       console.warn(`Failed to delete file ${filePath}:`, error.message);
     }
+  }
+
+  private async uploadDomainImageToS3(file: Express.Multer.File, folder: string): Promise<string> {
+    const buffer = file.buffer ? file.buffer : await fs.readFile(file.path);
+    const { url } = await this.s3Service.uploadFile(buffer, file.originalname, folder);
+
+    // Best effort cleanup for disk storage temp file
+    if (file.path) {
+      try {
+        await fs.unlink(file.path);
+      } catch {
+        // no-op
+      }
+    }
+
+    return url;
+  }
+
+  private extractS3KeyFromUrl(url: string): string {
+    const urlParts = url.split('.amazonaws.com/');
+    return urlParts[1] || url;
   }
 
   /**
@@ -613,6 +656,11 @@ export class DomainProfileService {
   }> {
     const skip = (page - 1) * limit;
     const backendUrl = this.configService.get<string>('BACKEND_URL') || '';
+    const buildFullUrl = (url?: string | null): string | null => {
+      if (!url) return null;
+      if (url.startsWith('http://') || url.startsWith('https://')) return url;
+      return `${backendUrl}${url}`;
+    };
 
     // Get all domain profiles with services
     const domainProfiles = await this.domainProfileModel
@@ -636,7 +684,7 @@ export class DomainProfileService {
           timeOfServiceInMinutes: service.timeOfServiceInMinutes,
           numberOfWinesTasted: service.numberOfWinesTasted,
           languagesOffered: service.languagesOffered,
-          serviceBannerUrl: service.serviceBannerUrl ? `${backendUrl}${service.serviceBannerUrl}` : null,
+          serviceBannerUrl: buildFullUrl(service.serviceBannerUrl),
           isActive: service.isActive,
           domain: {
             domainId: profile._id,
@@ -644,8 +692,8 @@ export class DomainProfileService {
             domainName: user?.domainName || null,
             domainDescription: profileDoc.domainDescription,
             colorCode: profileDoc.colorCode,
-            domainProfilePictureUrl: profileDoc.domainProfilePictureUrl ? `${backendUrl}${profileDoc.domainProfilePictureUrl}` : null,
-            domainLogoUrl: profileDoc.domainLogoUrl ? `${backendUrl}${profileDoc.domainLogoUrl}` : null,
+            domainProfilePictureUrl: buildFullUrl(profileDoc.domainProfilePictureUrl),
+            domainLogoUrl: buildFullUrl(profileDoc.domainLogoUrl),
             location: {
               domainLatitude: user?.domainLatitude || null,
               domainLongitude: user?.domainLongitude || null,

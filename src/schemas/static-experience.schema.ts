@@ -129,6 +129,34 @@ export class StaticExperience extends Document {
     required: false,
     default: null
   })
+  domain_name: string | null;
+
+  @Prop({
+    type: String,
+    required: false,
+    default: null
+  })
+  domain_description: string | null;
+
+  @Prop({
+    type: String,
+    required: false,
+    default: null
+  })
+  domain_profile_pic_url: string | null;
+
+  @Prop({
+    type: String,
+    required: false,
+    default: null
+  })
+  domain_logo_url: string | null;
+
+  @Prop({
+    type: String,
+    required: false,
+    default: null
+  })
   url: string | null;
 }
 

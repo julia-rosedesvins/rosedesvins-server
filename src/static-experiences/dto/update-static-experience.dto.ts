@@ -1,5 +1,9 @@
 export class UpdateStaticExperienceDto {
   name?: string;
+  domain_name?: string;
+  domain_description?: string;
+  domain_profile_pic_url?: string;
+  domain_logo_url?: string;
   category?: string;
   category_ref?: string;
   address?: string;
