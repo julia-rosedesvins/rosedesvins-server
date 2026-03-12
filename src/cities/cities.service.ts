@@ -76,4 +76,73 @@ export class CitiesService {
             throw error;
         }
     }
+
+    async searchCities(query: string): Promise<any> {
+        try {
+            if (!query || query.trim().length < 2) {
+                return {
+                    success: true,
+                    data: [],
+                    message: 'Query too short'
+                };
+            }
+
+            const searchQuery = query.trim();
+            const searchRegex = new RegExp(searchQuery, 'i');
+
+            // Search in nom_standard, nom_sans_accent, and nom_standard_majuscule
+            const cities = await this.cityModel
+                .find({
+                    $or: [
+                        { nom_standard: { $regex: searchRegex } },
+                        { nom_sans_accent: { $regex: searchRegex } },
+                        { nom_standard_majuscule: { $regex: searchRegex } }
+                    ]
+                })
+                .limit(10)
+                .lean()
+                .exec();
+
+            // Calculate relevance scores
+            const scoredCities = cities.map((city: any) => {
+                const searchLower = searchQuery.toLowerCase();
+                const nomStandardLower = city.nom_standard.toLowerCase();
+                const nomSansAccentLower = city.nom_sans_accent.toLowerCase();
+
+                let score = 0;
+                
+                // Exact match gets highest score
+                if (nomStandardLower === searchLower || nomSansAccentLower === searchLower) {
+                    score = 100;
+                } else if (nomStandardLower.startsWith(searchLower) || nomSansAccentLower.startsWith(searchLower)) {
+                    score = 90;
+                } else if (nomStandardLower.includes(searchLower) || nomSansAccentLower.includes(searchLower)) {
+                    const position = Math.min(
+                        nomStandardLower.indexOf(searchLower),
+                        nomSansAccentLower.indexOf(searchLower)
+                    );
+                    score = 50 - position;
+                }
+
+                return {
+                    ...city,
+                    score
+                };
+            });
+
+            // Sort by score descending
+            scoredCities.sort((a, b) => b.score - a.score);
+
+            this.logger.log(`Found ${scoredCities.length} cities matching query: ${query}`);
+
+            return {
+                success: true,
+                data: scoredCities,
+                count: scoredCities.length
+            };
+        } catch (error) {
+            this.logger.error(`Error searching cities: ${error.message}`, error.stack);
+            throw error;
+        }
+    }
 }
