@@ -247,7 +247,8 @@ export class DomainProfileController {
   })
   async getAllServicesPublic(
     @Query('page') page?: string,
-    @Query('limit') limit?: string
+    @Query('limit') limit?: string,
+    @Query('categories') categories?: string
   ): Promise<{
     success: boolean;
     message: string;
@@ -264,6 +265,7 @@ export class DomainProfileController {
     try {
       const pageNum = page ? parseInt(page, 10) : 1;
       const limitNum = limit ? parseInt(limit, 10) : 10;
+      const categoryIds = categories ? categories.split(',') : undefined;
 
       // Validate pagination parameters
       if (pageNum < 1 || limitNum < 1 || limitNum > 100) {
@@ -273,7 +275,7 @@ export class DomainProfileController {
         );
       }
 
-      const result = await this.domainProfileService.getAllServicesPublic(pageNum, limitNum);
+      const result = await this.domainProfileService.getAllServicesPublic(pageNum, limitNum, categoryIds);
 
       return {
         success: true,

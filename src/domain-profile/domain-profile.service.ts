@@ -681,9 +681,9 @@ export class DomainProfileService {
   }
 
   /**
-   * Get all services with pagination (Public)
+   * Get all public services with pagination and optional category filtering
    */
-  async getAllServicesPublic(page: number = 1, limit: number = 10): Promise<{
+  async getAllServicesPublic(page: number = 1, limit: number = 10, categoryIds?: string[]): Promise<{
     services: any[];
     pagination: {
       total: number;
@@ -724,6 +724,7 @@ export class DomainProfileService {
           languagesOffered: service.languagesOffered,
           serviceBannerUrl: buildFullUrl(service.serviceBannerUrl),
           isActive: service.isActive,
+          category: service.category,
           domain: {
             domainId: profile._id,
             userId: user?._id || null,
@@ -746,7 +747,14 @@ export class DomainProfileService {
     }
 
     // Filter only active services
-    const activeServices = allServices.filter(s => s.isActive);
+    let activeServices = allServices.filter(s => s.isActive);
+
+    // Filter by categories if provided
+    if (categoryIds && categoryIds.length > 0) {
+      activeServices = activeServices.filter(s => 
+        s.category && categoryIds.includes(s.category)
+      );
+    }
 
     // Calculate pagination
     const total = activeServices.length;
