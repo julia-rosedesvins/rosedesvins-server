@@ -136,7 +136,7 @@
                                       <img src="https://api.rosedesvins.co/v1/web/image/user" alt="Participants" width="16" height="16" style="display: block;">
                                     </td>
                                     <td style="vertical-align: middle;">
-                                      <span style="color: #444; font-weight: 500; font-size: 12px; line-height: 1.3; white-space: nowrap;">{{participantsAdults}} personne{{#if (gt participantsAdults 1)}}s{{/if}} (adultes)</span>
+                                      <span style="color: #444; font-weight: 500; font-size: 12px; line-height: 1.3; white-space: nowrap;">{{participantsAdults}} adulte{{#if (gt participantsAdults 1)}}s{{/if}}{{#if (gt participantsChildren 0)}} + {{participantsChildren}} enfant{{#if (gt participantsChildren 1)}}s{{/if}}{{/if}}</span>
                                     </td>
                                   </tr>
                                 </table>
