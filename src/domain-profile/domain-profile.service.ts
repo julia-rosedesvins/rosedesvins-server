@@ -286,7 +286,7 @@ export class DomainProfileService {
         domainProfile: {
           _id: domainProfile._id,
           userId: domainProfile.userId._id,
-          domainDescription: domainProfile.domainDescription,
+          domainDescription: domainProfile.domainDescription || '',
           domainProfilePictureUrl: buildFullUrl(domainProfile.domainProfilePictureUrl),
           domainLogoUrl: buildFullUrl(domainProfile.domainLogoUrl),
           colorCode: domainProfile.colorCode,
