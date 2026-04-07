@@ -77,7 +77,7 @@ export class EventsService {
    * @param userId - User ID to get schedule for
    * @returns Promise with user's event dates and times only
    */
-  async getPublicUserSchedule(userId: string): Promise<{ eventDate: Date; eventTime: string; eventEndTime?: string; eventType?: string; totalParticipants?: number }[]> {
+  async getPublicUserSchedule(userId: string): Promise<{ eventDate: Date; eventTime: string; eventEndTime?: string; eventType?: string; totalParticipants?: number; serviceId?: string }[]> {
     try {
       const userObjectId = new Types.ObjectId(userId);
 
@@ -89,22 +89,24 @@ export class EventsService {
         .select('eventDate eventTime eventEndTime eventType bookingId') // Include eventType to differentiate external events
         .populate({
           path: 'bookingId',
-          select: 'participantsAdults participantsEnfants' // Get participant counts from booking
+          select: 'participantsAdults participantsEnfants serviceId' // Get participant counts and serviceId from booking
         })
         .sort({ eventDate: 1, eventTime: 1 }) // Sort by date and time ascending
         .lean()
         .exec();
 
-      // Transform the data to include total participants and event type
+      // Transform the data to include total participants, event type, and serviceId
       return schedule.map(event => {
         let totalParticipants: number | undefined = undefined;
+        let serviceId: string | undefined = undefined;
 
-        // If this event has a booking, calculate total participants
+        // If this event has a booking, calculate total participants and extract serviceId
         if (event.bookingId && typeof event.bookingId === 'object') {
           const booking = event.bookingId as any;
           const adults = booking.participantsAdults || 0;
           const children = booking.participantsEnfants || 0;
           totalParticipants = adults + children;
+          serviceId = booking.serviceId?.toString(); // Extract serviceId from booking
         }
 
         return {
@@ -112,7 +114,8 @@ export class EventsService {
           eventTime: event.eventTime,
           eventEndTime: event.eventEndTime,
           eventType: event.eventType, // Include eventType to differentiate external events
-          totalParticipants
+          totalParticipants,
+          serviceId // Include serviceId to check if bookings are for the same service
         };
       });
     } catch (error) {
