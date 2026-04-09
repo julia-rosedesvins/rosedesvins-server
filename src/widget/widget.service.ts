@@ -124,6 +124,10 @@ export class WidgetService {
       },
       paymentMethods: {
         methods: paymentMethods ? paymentMethods.methods : [],
+        stripeConnect: paymentMethods?.stripeConnect ? {
+          stripeAccountId: paymentMethods.stripeConnect.stripeAccountId,
+          chargesEnabled: paymentMethods.stripeConnect.chargesEnabled,
+        } : null,
       },
       notificationPreferences: notificationPreferences ? {
         bookingAdvanceLimit: notificationPreferences.bookingAdvanceLimit,

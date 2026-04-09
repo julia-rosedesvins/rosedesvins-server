@@ -3,13 +3,20 @@ import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
+import * as express from 'express';
 import * as cookieParser from 'cookie-parser';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { Logger, VersioningType } from '@nestjs/common';
 import { ValidationExceptionFilter } from './filters/validation-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    // Preserve the raw body for Stripe webhook signature verification
+    rawBody: true,
+  });
+
+  // Stripe webhook needs the raw body BEFORE any JSON parsing
+  app.use('/v1/stripe-checkout/webhook', express.raw({ type: 'application/json' }));
 
   const configService = app.get(ConfigService);
 
