@@ -92,12 +92,13 @@ export class PaymentMethodsService {
               connectedAt: new Date(),
               isVerified: false,
             },
-          }
+          },
+          $addToSet: { methods: 'stripe' },
         },
         {
           new: true,
           upsert: true,
-          runValidators: true,
+          runValidators: false,
         }
       ).exec();
 
@@ -145,9 +146,8 @@ export class PaymentMethodsService {
       return await this.paymentMethodsModel.findOneAndUpdate(
         { userId },
         {
-          $set: {
-            stripeConnect: null,
-          }
+          $set: { stripeConnect: null },
+          $pull: { methods: 'stripe' },
         },
         { new: true }
       ).exec();

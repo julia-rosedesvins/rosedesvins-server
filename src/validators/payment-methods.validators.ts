@@ -9,11 +9,12 @@ export const CreateOrUpdatePaymentMethodsSchema = z.object({
       z.enum([
         PAYMENT_METHOD_OPTIONS.BANK_CARD,
         PAYMENT_METHOD_OPTIONS.CHECKS,
-        PAYMENT_METHOD_OPTIONS.CASH
+        PAYMENT_METHOD_OPTIONS.CASH,
+        PAYMENT_METHOD_OPTIONS.STRIPE,
       ] as const)
     )
     .min(0, 'Methods array cannot be empty')
-    .max(3, 'Cannot have more than 3 payment methods')
+    .max(4, 'Cannot have more than 4 payment methods')
     .optional()
     .default([]),
 });
