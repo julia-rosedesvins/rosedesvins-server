@@ -65,4 +65,95 @@ export class PaymentMethodsService {
       throw error;
     }
   }
+
+  /**
+   * Save Stripe Connect account details
+   * @param userId - The user ID
+   * @param stripeAccountId - Stripe connected account ID
+   * @param displayName - Business name from Stripe
+   * @param chargesEnabled - Whether charges are enabled
+   */
+  async saveStripeConnectAccount(
+    userId: string,
+    stripeAccountId: string,
+    displayName?: string,
+    chargesEnabled: boolean = false,
+  ): Promise<PaymentMethodsDocument> {
+    try {
+      const paymentMethods = await this.paymentMethodsModel.findOneAndUpdate(
+        { userId },
+        {
+          $set: {
+            userId,
+            stripeConnect: {
+              stripeAccountId,
+              displayName,
+              chargesEnabled,
+              connectedAt: new Date(),
+              isVerified: false,
+            },
+          }
+        },
+        {
+          new: true,
+          upsert: true,
+          runValidators: true,
+        }
+      ).exec();
+
+      return paymentMethods;
+    } catch (error) {
+      console.error('Error saving Stripe Connect account:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update Stripe Connect account verification status
+   * @param userId - The user ID
+   * @param isVerified - Verification status
+   * @param chargesEnabled - Whether charges are enabled
+   */
+  async updateStripeConnectStatus(
+    userId: string,
+    isVerified: boolean,
+    chargesEnabled: boolean,
+  ): Promise<PaymentMethodsDocument | null> {
+    try {
+      return await this.paymentMethodsModel.findOneAndUpdate(
+        { userId },
+        {
+          $set: {
+            'stripeConnect.isVerified': isVerified,
+            'stripeConnect.chargesEnabled': chargesEnabled,
+          }
+        },
+        { new: true }
+      ).exec();
+    } catch (error) {
+      console.error('Error updating Stripe Connect status:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove Stripe Connect account
+   * @param userId - The user ID
+   */
+  async removeStripeConnectAccount(userId: string): Promise<PaymentMethodsDocument | null> {
+    try {
+      return await this.paymentMethodsModel.findOneAndUpdate(
+        { userId },
+        {
+          $set: {
+            stripeConnect: null,
+          }
+        },
+        { new: true }
+      ).exec();
+    } catch (error) {
+      console.error('Error removing Stripe Connect account:', error);
+      throw error;
+    }
+  }
 }

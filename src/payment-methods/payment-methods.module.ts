@@ -1,12 +1,15 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { JwtModule } from '@nestjs/jwt';
+import { ConfigModule } from '@nestjs/config';
 import { PaymentMethodsService } from './payment-methods.service';
 import { PaymentMethodsController } from './payment-methods.controller';
+import { StripeConnectService } from './stripe-connect.service';
 import { PaymentMethods, PaymentMethodsSchema } from '../schemas/payment-methods.schema';
 
 @Module({
   imports: [
+    ConfigModule,
     MongooseModule.forFeature([
       { name: PaymentMethods.name, schema: PaymentMethodsSchema }
     ]),
@@ -16,7 +19,7 @@ import { PaymentMethods, PaymentMethodsSchema } from '../schemas/payment-methods
     }),
   ],
   controllers: [PaymentMethodsController],
-  providers: [PaymentMethodsService],
-  exports: [PaymentMethodsService], // Export service for use in other modules
+  providers: [PaymentMethodsService, StripeConnectService],
+  exports: [PaymentMethodsService, StripeConnectService],
 })
 export class PaymentMethodsModule {}
