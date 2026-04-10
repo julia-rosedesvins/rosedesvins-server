@@ -66,6 +66,14 @@ export class Transaction extends Document {
   @Prop({ trim: true })
   serviceName?: string;
 
+  /** Last 4 digits of the card used — populated from Stripe on checkout.session.completed */
+  @Prop({ trim: true })
+  cardLast4?: string;
+
+  /** Cardholder name from Stripe billing details */
+  @Prop({ trim: true })
+  cardholderName?: string;
+
   /** Stripe webhook event that last updated this record */
   @Prop({ trim: true })
   lastWebhookEvent?: string;

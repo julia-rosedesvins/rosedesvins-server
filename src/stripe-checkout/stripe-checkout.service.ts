@@ -194,9 +194,39 @@ export class StripeCheckoutService {
 
   private async handleCheckoutCompleted(session: StripeType.Checkout.Session): Promise<void> {
     const bookingId = session.metadata?.bookingId;
+    const vendorUserId = session.metadata?.vendorUserId;
     if (!bookingId) {
       console.warn('checkout.session.completed: missing bookingId in metadata', session.id);
       return;
+    }
+
+    // Expand the session to get payment method details (card last4, cardholder name)
+    let cardLast4: string | undefined;
+    let cardholderName: string | undefined;
+
+    try {
+      // Get vendor stripe account id to pass as stripeAccount
+      let stripeAccountId: string | undefined;
+      if (vendorUserId) {
+        try {
+          stripeAccountId = await this.getVendorStripeAccountId(vendorUserId);
+        } catch (_) { /* ignore if not found */ }
+      }
+
+      const expandedSession = await this.stripe.checkout.sessions.retrieve(
+        session.id,
+        { expand: ['payment_intent.payment_method'] },
+        stripeAccountId ? { stripeAccount: stripeAccountId } : undefined,
+      );
+
+      const pi = expandedSession.payment_intent as StripeType.PaymentIntent | null;
+      const pm = pi?.payment_method as StripeType.PaymentMethod | null;
+      if (pm?.type === 'card' && pm.card) {
+        cardLast4 = pm.card.last4;
+        cardholderName = pm.billing_details?.name || undefined;
+      }
+    } catch (err: any) {
+      console.warn('Could not expand session for card details:', err.message);
     }
 
     // Update transaction
@@ -207,6 +237,8 @@ export class StripeCheckoutService {
           status: 'completed' as TransactionStatus,
           stripePaymentIntentId: session.payment_intent as string | undefined,
           lastWebhookEvent: 'checkout.session.completed',
+          ...(cardLast4 && { cardLast4 }),
+          ...(cardholderName && { cardholderName }),
         },
       },
     );
@@ -216,7 +248,7 @@ export class StripeCheckoutService {
       $set: { bookingStatus: 'confirmed' },
     });
 
-    console.log(`✅ Payment completed for booking ${bookingId}, session ${session.id}`);
+    console.log(`✅ Payment completed for booking ${bookingId}, session ${session.id}${cardLast4 ? ` — card ****${cardLast4}` : ''}`);
   }
 
   private async handleCheckoutExpired(session: StripeType.Checkout.Session): Promise<void> {
