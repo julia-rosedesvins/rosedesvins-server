@@ -23,6 +23,31 @@ export class StripeCheckoutController {
   constructor(private readonly stripeCheckoutService: StripeCheckoutService) {}
 
   /**
+   * Create a Stripe PaymentIntent — for in-app card form (no redirect)
+   * Returns clientSecret consumed by Stripe.js on the client
+   */
+  @Post('payment-intent')
+  @ApiOperation({ summary: 'Create a Stripe PaymentIntent for in-app card form' })
+  async createPaymentIntent(
+    @Body() body: {
+      bookingId: string;
+      vendorUserId: string;
+      amountEur: number;
+      customerEmail?: string;
+      serviceName?: string;
+      participantsAdults?: number;
+      participantsEnfants?: number;
+    },
+  ) {
+    try {
+      const result = await this.stripeCheckoutService.createPaymentIntent(body);
+      return { success: true, message: 'PaymentIntent created', data: result };
+    } catch (error: any) {
+      return { success: false, message: error.message || 'Failed to create PaymentIntent', data: null };
+    }
+  }
+
+  /**
    * Create a Stripe Checkout Session for a booking
    * Called by the checkout page when the customer chooses Stripe payment
    */

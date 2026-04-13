@@ -184,6 +184,9 @@ export class StripeCheckoutService {
       case 'checkout.session.expired':
         await this.handleCheckoutExpired(event.data.object as StripeType.Checkout.Session);
         break;
+      case 'payment_intent.succeeded':
+        await this.handlePaymentIntentSucceeded(event.data.object as StripeType.PaymentIntent);
+        break;
       case 'payment_intent.payment_failed':
         await this.handlePaymentFailed(event.data.object as StripeType.PaymentIntent);
         break;
@@ -303,5 +306,122 @@ export class StripeCheckoutService {
       .sort({ createdAt: -1 })
       .lean()
       .exec();
+  }
+
+  /**
+   * Create a Stripe PaymentIntent on the vendor's connected account.
+   * Returns the clientSecret for use with Stripe.js confirmCardPayment() on the client.
+   */
+  async createPaymentIntent(dto: {
+    bookingId: string;
+    vendorUserId: string;
+    amountEur: number;
+    customerEmail?: string;
+    serviceName?: string;
+    participantsAdults?: number;
+    participantsEnfants?: number;
+  }): Promise<{ clientSecret: string; paymentIntentId: string; stripeAccountId: string }> {
+    const {
+      bookingId,
+      vendorUserId,
+      amountEur,
+      customerEmail,
+      serviceName,
+      participantsAdults = 0,
+      participantsEnfants = 0,
+    } = dto;
+
+    const booking = await this.userBookingModel.findById(bookingId).exec();
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    const stripeAccountId = await this.getVendorStripeAccountId(vendorUserId);
+    const amountCents = Math.round(amountEur * 100);
+    if (amountCents <= 0) throw new BadRequestException('Amount must be greater than 0');
+
+    const paymentIntent = await this.stripe.paymentIntents.create(
+      {
+        amount: amountCents,
+        currency: 'eur',
+        receipt_email: customerEmail || undefined,
+        metadata: {
+          bookingId,
+          vendorUserId,
+          participantsAdults: String(participantsAdults),
+          participantsEnfants: String(participantsEnfants),
+        },
+      },
+      { stripeAccount: stripeAccountId },
+    );
+
+    await this.transactionModel.create({
+      bookingId: new Types.ObjectId(bookingId),
+      vendorUserId: new Types.ObjectId(vendorUserId),
+      stripeAccountId,
+      stripeSessionId: paymentIntent.id, // PI id used as unique identifier
+      stripePaymentIntentId: paymentIntent.id,
+      amount: amountCents,
+      currency: 'eur',
+      status: 'pending' as TransactionStatus,
+      customerEmail,
+      participantsAdults,
+      participantsEnfants,
+      serviceName,
+    });
+
+    await this.userBookingModel.findByIdAndUpdate(bookingId, {
+      $set: { bookingStatus: 'payment_pending' },
+    });
+
+    return {
+      clientSecret: paymentIntent.client_secret!,
+      paymentIntentId: paymentIntent.id,
+      stripeAccountId,
+    };
+  }
+
+  private async handlePaymentIntentSucceeded(paymentIntent: StripeType.PaymentIntent): Promise<void> {
+    const bookingId = paymentIntent.metadata?.bookingId;
+
+    // Look up existing transaction to get stripeAccountId for expansion
+    const tx = await this.transactionModel.findOne({ stripeSessionId: paymentIntent.id }).lean();
+
+    let cardLast4: string | undefined;
+    let cardholderName: string | undefined;
+
+    if (tx?.stripeAccountId) {
+      try {
+        const expanded = await this.stripe.paymentIntents.retrieve(
+          paymentIntent.id,
+          { expand: ['payment_method'] },
+          { stripeAccount: tx.stripeAccountId },
+        );
+        const pm = expanded.payment_method as StripeType.PaymentMethod | null;
+        if (pm && typeof pm === 'object' && pm.type === 'card' && pm.card) {
+          cardLast4 = pm.card.last4;
+          cardholderName = pm.billing_details?.name || undefined;
+        }
+      } catch (err: any) {
+        console.warn('Could not expand PI for card details:', err.message);
+      }
+    }
+
+    await this.transactionModel.findOneAndUpdate(
+      { stripeSessionId: paymentIntent.id },
+      {
+        $set: {
+          status: 'completed' as TransactionStatus,
+          lastWebhookEvent: 'payment_intent.succeeded',
+          ...(cardLast4 && { cardLast4 }),
+          ...(cardholderName && { cardholderName }),
+        },
+      },
+    );
+
+    if (bookingId) {
+      await this.userBookingModel.findByIdAndUpdate(bookingId, {
+        $set: { bookingStatus: 'confirmed' },
+      });
+      console.log(`✅ PaymentIntent succeeded for booking ${bookingId}${cardLast4 ? ` — card ****${cardLast4}` : ''}`);
+    }
   }
 }
