@@ -450,6 +450,8 @@ export class UserBookingsService {
       });
 
       // Send email notifications (non-blocking)
+      // Skip for Stripe payments — confirmation emails are sent after the webhook confirms payment
+      if (createBookingDto.paymentMethod?.method !== 'stripe') {
       setImmediate(async () => {
         try {
           // Get user and domain profile for email data
@@ -533,6 +535,7 @@ export class UserBookingsService {
           // Don't fail the booking creation if email fails
         }
       });
+      } // end: skip emails for stripe
 
       return savedBooking;
     } catch (error) {
@@ -546,6 +549,82 @@ export class UserBookingsService {
       }
 
       throw new InternalServerErrorException('Failed to create booking');
+    }
+  }
+
+  /**
+   * Send confirmation emails for a booking by ID.
+   * Called by StripeCheckoutService after payment_intent.succeeded webhook.
+   */
+  async sendBookingConfirmationEmails(bookingId: string): Promise<void> {
+    try {
+      const booking = await this.userBookingModel.findById(bookingId).lean();
+      if (!booking) {
+        console.warn(`sendBookingConfirmationEmails: booking ${bookingId} not found`);
+        return;
+      }
+
+      const userObjectId = new Types.ObjectId(booking.userId.toString());
+      const user = await this.userModel.findById(userObjectId);
+      const domainProfile = await this.domainProfileModel.findOne({ userId: userObjectId });
+
+      const service = domainProfile?.services?.find(
+        (s) => (s as any)._id?.toString() === booking.serviceId?.toString(),
+      );
+
+      let eventTitle = 'Dégustation de vins';
+      if (service?.name) eventTitle = service.name;
+      else if (domainProfile?.domainDescription) eventTitle = `Dégustation - ${domainProfile.domainDescription}`;
+      else if (user?.firstName && user?.lastName) eventTitle = `Dégustation - ${user.firstName} ${user.lastName}`;
+
+      const formattedPaymentMethods = 'Paiement en ligne par carte bancaire';
+
+      const bookingEmailData: BookingEmailData = {
+        customerName: `${booking.userContactFirstname} ${booking.userContactLastname}`,
+        customerEmail: booking.customerEmail,
+        providerName: user ? `${user.firstName} ${user.lastName}` : 'Rose des Vins',
+        providerEmail: user ? user.email : 'admin@rosedesvins.com',
+        eventTitle,
+        eventDate: new Date(booking.bookingDate).toLocaleDateString('fr-FR'),
+        eventTime: booking.bookingTime,
+        eventTimezone: 'CET',
+        eventDuration: service?.timeOfServiceInMinutes ? `${service.timeOfServiceInMinutes} minutes` : '60 minutes',
+        participantsAdults: booking.participantsAdults,
+        participantsChildren: booking.participantsEnfants || 0,
+        selectedLanguage: this.getLanguageInFrench(booking.selectedLanguage),
+        additionalNotes: booking.additionalNotes,
+        numberOfWinesTasted: (service as any)?.numberOfWinesTasted || 0,
+        domainName: user?.domainName || 'Domaine La Bastide Blanche',
+        domainAddress:
+          user?.address && user?.codePostal && user?.city
+            ? `${user.address} - ${user.codePostal} - ${user.city}`
+            : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+        domainLogoUrl: this.joinUrl(
+          this.configService.get('BACKEND_URL') || 'http://localhost:3000',
+          domainProfile?.domainLogoUrl || '/assets/logo.png',
+        ),
+        serviceName: service?.name || 'Visite de cave et dégustation de vins',
+        serviceDescription: (service as any)?.description || '',
+        totalPrice: (service as any)?.pricePerPerson
+          ? `${(service as any).pricePerPerson * booking.participantsAdults} €`
+          : '0 €',
+        paymentMethod: formattedPaymentMethods,
+        frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
+        appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
+        backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
+        serviceBannerUrl: this.joinUrl(
+          this.configService.get('BACKEND_URL') || 'http://localhost:3000',
+          (service as any)?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
+        ),
+        cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${booking._id}`,
+        providerTitle: 'Nouvelle réservation reçue (paiement en ligne confirmé) !',
+        eventName: `Réservation: ${booking.userContactFirstname} ${booking.userContactLastname}`,
+      };
+
+      await this.sendCustomerBookingEmail(bookingEmailData, 'created');
+      await this.sendProviderBookingEmail(bookingEmailData, 'created');
+    } catch (err) {
+      console.error('sendBookingConfirmationEmails error:', err);
     }
   }
 
@@ -1741,6 +1820,8 @@ export class UserBookingsService {
       console.log('✅ Successfully deleted booking:', bookingId);
 
       // Send cancellation email to customer only
+      // Skip if booking was payment_pending — it was never confirmed, so no cancellation email needed
+      if (booking.bookingStatus !== 'payment_pending') {
       setImmediate(async () => {
         try {
           const user = await this.userModel.findById(booking.userId);
@@ -1805,6 +1886,7 @@ export class UserBookingsService {
           // Don't fail the deletion if email fails
         }
       });
+      } // end: skip cancellation email for payment_pending bookings
 
       return {
         success: true,

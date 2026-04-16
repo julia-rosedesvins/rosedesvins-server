@@ -7,10 +7,12 @@ import { StripeCheckoutController } from './stripe-checkout.controller';
 import { Transaction, TransactionSchema } from '../schemas/transaction.schema';
 import { UserBooking, UserBookingSchema } from '../schemas/user-bookings.schema';
 import { PaymentMethods, PaymentMethodsSchema } from '../schemas/payment-methods.schema';
+import { UserBookingsModule } from '../user-bookings/user-bookings.module';
 
 @Module({
   imports: [
     ConfigModule,
+    UserBookingsModule,
     MongooseModule.forFeature([
       { name: Transaction.name, schema: TransactionSchema },
       { name: UserBooking.name, schema: UserBookingSchema },

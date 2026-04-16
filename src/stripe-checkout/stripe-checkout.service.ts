@@ -9,6 +9,7 @@ import type { Stripe as StripeType } from 'stripe/cjs/stripe.core.js';
 import { Transaction, TransactionStatus } from '../schemas/transaction.schema';
 import { UserBooking } from '../schemas/user-bookings.schema';
 import { PaymentMethods } from '../schemas/payment-methods.schema';
+import { UserBookingsService } from '../user-bookings/user-bookings.service';
 
 export interface CreateCheckoutSessionDto {
   /** The booking _id (already created with status payment_pending) */
@@ -37,6 +38,7 @@ export class StripeCheckoutService {
     @InjectModel(UserBooking.name) private userBookingModel: Model<UserBooking>,
     @InjectModel(PaymentMethods.name) private paymentMethodsModel: Model<PaymentMethods>,
     private configService: ConfigService,
+    private userBookingsService: UserBookingsService,
   ) {
     const secretKey = this.configService.get<string>('STRIPE_SECRET_KEY');
     if (!secretKey) throw new Error('STRIPE_SECRET_KEY is not configured');
@@ -422,6 +424,13 @@ export class StripeCheckoutService {
         $set: { bookingStatus: 'confirmed' },
       });
       console.log(`✅ PaymentIntent succeeded for booking ${bookingId}${cardLast4 ? ` — card ****${cardLast4}` : ''}`);
+
+      // Send confirmation emails now that payment is verified
+      setImmediate(() => {
+        this.userBookingsService.sendBookingConfirmationEmails(bookingId).catch((err) =>
+          console.error('Failed to send post-payment confirmation emails:', err),
+        );
+      });
     }
   }
 }
