@@ -381,6 +381,73 @@ export class StripeCheckoutService {
     };
   }
 
+  /**
+   * Called directly by the client after confirmCardPayment succeeds.
+   * Verifies the PaymentIntent on Stripe, updates DB, sends confirmation emails.
+   * This is the PRIMARY email trigger — webhook is a fallback for Connect accounts.
+   */
+  async confirmPayment(paymentIntentId: string): Promise<{ success: boolean; message: string }> {
+    const tx = await this.transactionModel.findOne({ stripeSessionId: paymentIntentId }).lean();
+    if (!tx) throw new NotFoundException('Transaction not found for this PaymentIntent');
+
+    // Verify with Stripe that the PI actually succeeded
+    let pi: StripeType.PaymentIntent;
+    try {
+      pi = await this.stripe.paymentIntents.retrieve(
+        paymentIntentId,
+        { expand: ['payment_method'] },
+        { stripeAccount: tx.stripeAccountId },
+      );
+    } catch (err: any) {
+      throw new BadRequestException(`Could not retrieve PaymentIntent: ${err.message}`);
+    }
+
+    if (pi.status !== 'succeeded') {
+      throw new BadRequestException(`Payment not succeeded (status: ${pi.status})`);
+    }
+
+    // Idempotent — already processed
+    if (tx.status === 'completed') {
+      return { success: true, message: 'Already confirmed' };
+    }
+
+    let cardLast4: string | undefined;
+    let cardholderName: string | undefined;
+    const pm = pi.payment_method as StripeType.PaymentMethod | null;
+    if (pm && typeof pm === 'object' && pm.type === 'card' && pm.card) {
+      cardLast4 = pm.card.last4;
+      cardholderName = pm.billing_details?.name || undefined;
+    }
+
+    await this.transactionModel.findOneAndUpdate(
+      { stripeSessionId: paymentIntentId },
+      {
+        $set: {
+          status: 'completed' as TransactionStatus,
+          lastWebhookEvent: 'client_confirm',
+          ...(cardLast4 && { cardLast4 }),
+          ...(cardholderName && { cardholderName }),
+        },
+      },
+    );
+
+    const bookingId = pi.metadata?.bookingId || tx.bookingId?.toString();
+    if (bookingId) {
+      await this.userBookingModel.findByIdAndUpdate(bookingId, {
+        $set: { bookingStatus: 'confirmed' },
+      });
+      console.log(`✅ Payment confirmed for booking ${bookingId}${cardLast4 ? ` — card ****${cardLast4}` : ''}`);
+
+      setImmediate(() => {
+        this.userBookingsService.sendBookingConfirmationEmails(bookingId).catch((err) =>
+          console.error('confirmPayment — email error:', err),
+        );
+      });
+    }
+
+    return { success: true, message: 'Payment confirmed and emails queued' };
+  }
+
   private async handlePaymentIntentSucceeded(paymentIntent: StripeType.PaymentIntent): Promise<void> {
     const bookingId = paymentIntent.metadata?.bookingId;
 

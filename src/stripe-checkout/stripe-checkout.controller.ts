@@ -48,6 +48,21 @@ export class StripeCheckoutController {
   }
 
   /**
+   * Called by the client right after confirmCardPayment() succeeds.
+   * Verifies the PI on Stripe, marks booking confirmed, sends emails.
+   */
+  @Post('confirm-payment')
+  @ApiOperation({ summary: 'Confirm payment and trigger booking emails' })
+  async confirmPayment(@Body() body: { paymentIntentId: string }) {
+    try {
+      const result = await this.stripeCheckoutService.confirmPayment(body.paymentIntentId);
+      return { success: true, message: result.message };
+    } catch (error: any) {
+      return { success: false, message: error.message || 'Failed to confirm payment' };
+    }
+  }
+
+  /**
    * Create a Stripe Checkout Session for a booking
    * Called by the checkout page when the customer chooses Stripe payment
    */
