@@ -385,6 +385,7 @@ export class DomainProfileService {
       category: service.category,
       serviceBannerUrl: service.serviceBannerUrl,
       isActive: service.isActive,
+      stripeEnabled: (service as any).stripeEnabled ?? true,
       // New booking settings fields
       bookingRestrictionActive: (service as any).bookingRestrictionActive ?? false,
       bookingRestrictionTime: (service as any).bookingRestrictionTime ?? '24h',
@@ -568,6 +569,7 @@ export class DomainProfileService {
       bookingRestrictionTime?: string;
       multipleBookings?: boolean;
       hasCustomAvailability?: boolean;
+      stripeEnabled?: boolean;
       dateAvailability?: Array<{
         date: Date;
         enabled: boolean;
@@ -614,6 +616,9 @@ export class DomainProfileService {
     }
     if (bookingSettings.dateAvailability !== undefined) {
       service.dateAvailability = bookingSettings.dateAvailability;
+    }
+    if (bookingSettings.stripeEnabled !== undefined) {
+      service.stripeEnabled = bookingSettings.stripeEnabled;
     }
 
     await domainProfile.save();

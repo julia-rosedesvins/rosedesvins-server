@@ -688,6 +688,7 @@ export class DomainProfileController {
       bookingRestrictionTime?: string;
       multipleBookings?: boolean;
       hasCustomAvailability?: boolean;
+      stripeEnabled?: boolean;
       dateAvailability?: Array<{
         date: string;
         enabled: boolean;
@@ -723,6 +724,7 @@ export class DomainProfileController {
         bookingRestrictionTime?: string;
         multipleBookings?: boolean;
         hasCustomAvailability?: boolean;
+        stripeEnabled?: boolean;
         dateAvailability?: Array<{
           date: Date;
           enabled: boolean;
@@ -738,6 +740,7 @@ export class DomainProfileController {
         bookingRestrictionTime: bookingSettings.bookingRestrictionTime,
         multipleBookings: bookingSettings.multipleBookings,
         hasCustomAvailability: bookingSettings.hasCustomAvailability,
+        ...(bookingSettings.stripeEnabled !== undefined && { stripeEnabled: bookingSettings.stripeEnabled }),
         dateAvailability: bookingSettings.dateAvailability ? 
           bookingSettings.dateAvailability.map(dateConfig => ({
             date: new Date(dateConfig.date),

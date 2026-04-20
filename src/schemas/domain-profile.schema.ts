@@ -39,6 +39,9 @@ export class Service {
   @Prop({ default: true })
   isActive: boolean;
 
+  @Prop({ default: true })
+  stripeEnabled: boolean;
+
   @Prop({ default: false })
   bookingRestrictionActive: boolean;
 
