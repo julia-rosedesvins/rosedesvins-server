@@ -108,12 +108,26 @@ export class UserBookingsService {
 
     const methodTranslations: { [key: string]: string } = {
       'bank card': 'Carte bancaire',
+      'bank_card': 'Carte bancaire',
       'checks': 'Chèques',
-      'cash': 'Espèces'
+      'cash': 'Espèces',
+      'cash_on_onsite': 'Espèces',
     };
 
-    const translatedMethods = methods
-      .map(method => methodTranslations[method] || method)
+    // Separate stripe from on-site methods
+    const hasStripe = methods.some(m => m.toLowerCase() === 'stripe');
+    const onSiteMethods = methods.filter(m => m.toLowerCase() !== 'stripe');
+
+    if (hasStripe && onSiteMethods.length === 0) {
+      return 'Paiement en ligne par carte bancaire';
+    }
+
+    if (onSiteMethods.length === 0) {
+      return 'Paiement sur place';
+    }
+
+    const translatedMethods = onSiteMethods
+      .map(method => methodTranslations[method.toLowerCase()] || method)
       .join(', ');
 
     return `Paiement sur place (${translatedMethods})`;
@@ -136,10 +150,10 @@ export class UserBookingsService {
       }
 
       // Default fallback if no payment methods found
-      return 'Paiement sur place (Carte bancaire, Chèques, Espèces)';
+      return 'Paiement sur place';
     } catch (error) {
       console.warn('Could not fetch payment methods for user:', userId, error);
-      return 'Paiement sur place (Carte bancaire, Chèques, Espèces)';
+      return 'Paiement sur place';
     }
   }
 
@@ -617,7 +631,7 @@ export class UserBookingsService {
           (service as any)?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
         ),
         cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${booking._id}`,
-        providerTitle: 'Nouvelle réservation reçue (paiement en ligne confirmé) !',
+        providerTitle: 'Nouvelle réservation reçue !',
         eventName: `Réservation: ${booking.userContactFirstname} ${booking.userContactLastname}`,
       };
 
