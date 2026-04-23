@@ -285,45 +285,73 @@ export class UserBookingsService {
   /**
    * Send booking notification email to service provider using existing templates
    */
-  private async sendProviderBookingEmail(bookingData: BookingEmailData, type: 'created'): Promise<void> {
+  private async sendProviderBookingEmail(bookingData: BookingEmailData, type: 'created' | 'cancelled'): Promise<void> {
     setImmediate(async () => {
       try {
         const subject = this.getEmailSubject(type, 'provider');
 
-        // Use the existing provider notification template
-        const emailHtml = this.templateService.generateProviderNotificationEmail({
-          providerName: bookingData.providerName,
-          providerEmail: bookingData.providerEmail,
-          customerName: bookingData.customerName,
-          eventTitle: bookingData.eventTitle,
-          eventDate: bookingData.eventDate,
-          eventTime: bookingData.eventTime,
-          eventTimezone: bookingData.eventTimezone,
-          eventDuration: bookingData.eventDuration,
-          eventDescription: this.formatEventDescription(bookingData, type),
-          hoursBeforeEvent: 0, // Immediate notification
-          eventName: bookingData.eventName,
+        let emailHtml: string;
 
-          // Enhanced fields for booking-style template
-          domainName: bookingData.domainName,
-          domainAddress: '', // Domain profile doesn't have address field
-          domainLogoUrl: bookingData.domainLogoUrl,
-          serviceName: bookingData.serviceName,
-          serviceDescription: bookingData.serviceDescription,
-          participantsAdults: bookingData.participantsAdults || 1,
-          participantsChildren: bookingData.participantsChildren || 0,
-          selectedLanguage: bookingData.selectedLanguage || 'Français',
-          numberOfWinesTasted: bookingData.numberOfWinesTasted || 3,
-          totalPrice: bookingData.totalPrice,
-          paymentMethod: bookingData.paymentMethod,
-          frontendUrl: bookingData.frontendUrl,
-          appLogoUrl: bookingData.appLogoUrl,
-          backendUrl: bookingData.backendUrl,
-          serviceBannerUrl: bookingData.serviceBannerUrl,
-          customerEmail: bookingData.customerEmail,
-          additionalNotes: bookingData.additionalNotes ?? undefined,
-          providerTitle: bookingData.providerTitle || 'Nouvelle réservation reçue !',
-        });
+        if (type === 'cancelled') {
+          emailHtml = this.templateService.generateProviderCancellationEmail({
+            providerName: bookingData.providerName,
+            providerEmail: bookingData.providerEmail,
+            customerName: bookingData.customerName,
+            customerEmail: bookingData.customerEmail,
+            eventTitle: bookingData.eventTitle,
+            eventDate: bookingData.eventDate,
+            eventTime: bookingData.eventTime,
+            eventTimezone: bookingData.eventTimezone,
+            eventDuration: bookingData.eventDuration,
+            domainName: bookingData.domainName,
+            domainLogoUrl: bookingData.domainLogoUrl,
+            serviceName: bookingData.serviceName,
+            serviceDescription: bookingData.serviceDescription,
+            participantsAdults: bookingData.participantsAdults || 1,
+            participantsChildren: bookingData.participantsChildren || 0,
+            selectedLanguage: bookingData.selectedLanguage || 'Français',
+            numberOfWinesTasted: bookingData.numberOfWinesTasted || 0,
+            totalPrice: bookingData.totalPrice,
+            paymentMethod: bookingData.paymentMethod,
+            appLogoUrl: bookingData.appLogoUrl,
+            backendUrl: bookingData.backendUrl,
+            serviceBannerUrl: bookingData.serviceBannerUrl,
+            additionalNotes: bookingData.additionalNotes ?? undefined,
+          });
+        } else {
+          // Use the existing provider notification template
+          emailHtml = this.templateService.generateProviderNotificationEmail({
+            providerName: bookingData.providerName,
+            providerEmail: bookingData.providerEmail,
+            customerName: bookingData.customerName,
+            eventTitle: bookingData.eventTitle,
+            eventDate: bookingData.eventDate,
+            eventTime: bookingData.eventTime,
+            eventTimezone: bookingData.eventTimezone,
+            eventDuration: bookingData.eventDuration,
+            eventDescription: this.formatEventDescription(bookingData, type),
+            hoursBeforeEvent: 0,
+            eventName: bookingData.eventName,
+            domainName: bookingData.domainName,
+            domainAddress: '',
+            domainLogoUrl: bookingData.domainLogoUrl,
+            serviceName: bookingData.serviceName,
+            serviceDescription: bookingData.serviceDescription,
+            participantsAdults: bookingData.participantsAdults || 1,
+            participantsChildren: bookingData.participantsChildren || 0,
+            selectedLanguage: bookingData.selectedLanguage || 'Français',
+            numberOfWinesTasted: bookingData.numberOfWinesTasted || 3,
+            totalPrice: bookingData.totalPrice,
+            paymentMethod: bookingData.paymentMethod,
+            frontendUrl: bookingData.frontendUrl,
+            appLogoUrl: bookingData.appLogoUrl,
+            backendUrl: bookingData.backendUrl,
+            serviceBannerUrl: bookingData.serviceBannerUrl,
+            customerEmail: bookingData.customerEmail,
+            additionalNotes: bookingData.additionalNotes ?? undefined,
+            providerTitle: bookingData.providerTitle || 'Nouvelle réservation reçue !',
+          });
+        }
 
         const emailJob = {
           to: bookingData.providerEmail,
@@ -1893,8 +1921,9 @@ export class UserBookingsService {
           bookingEmailData.domainLogoUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', domainProfile?.domainLogoUrl || '/assets/logo.png');
           bookingEmailData.serviceBannerUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', service?.serviceBannerUrl || '/uploads/default-service-banner.jpg');
 
-          // Send cancellation notification to customer only
+          // Send cancellation notification to customer and provider
           await this.sendCustomerBookingEmail(bookingEmailData, 'cancelled');
+          await this.sendProviderBookingEmail(bookingEmailData, 'cancelled');
         } catch (emailError) {
           console.error('Failed to send cancellation email:', emailError);
           // Don't fail the deletion if email fails

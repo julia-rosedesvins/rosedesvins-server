@@ -101,6 +101,7 @@ export interface ProviderNotificationEmailData {
 
 export interface BookingEmailTemplateData {
   customerName: string;
+  customerEmail?: string;
   eventTitle: string;
   eventDate: string;
   eventTime: string;
@@ -110,18 +111,23 @@ export interface BookingEmailTemplateData {
   participantsChildren: number;
   selectedLanguage: string;
   additionalNotes?: string;
+  numberOfWinesTasted?: number;
+  // Provider fields (used in provider-facing emails)
+  providerName?: string;
+  providerEmail?: string;
   // Enhanced template fields
   domainName: string;
-  domainAddress: string;
+  domainAddress?: string;
   domainLogoUrl: string;
   serviceName: string;
   serviceDescription: string;
   totalPrice: string;
   paymentMethod: string;
-  frontendUrl: string;
+  frontendUrl?: string;
   appLogoUrl: string;
   backendUrl: string;
   serviceBannerUrl: string;
+  cancelBookingUrl?: string;
 }
 
 @Injectable()
@@ -281,5 +287,10 @@ export class TemplateService {
     const bookingCancellationTemplate = this.loadTemplate('booking-cancellation');
     
     return bookingCancellationTemplate(data);
+  }
+
+  generateProviderCancellationEmail(data: BookingEmailTemplateData): string {
+    const providerCancellationTemplate = this.loadTemplate('provider-cancellation');
+    return providerCancellationTemplate(data);
   }
 }
