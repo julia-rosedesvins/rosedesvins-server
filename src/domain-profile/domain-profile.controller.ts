@@ -711,7 +711,7 @@ export class DomainProfileController {
 
       // Validate booking restriction time if provided
       if (bookingSettings.bookingRestrictionTime && 
-          !['24h', '48h'].includes(bookingSettings.bookingRestrictionTime)) {
+          !['4h', '24h', '48h', '72h', '7d', '10d'].includes(bookingSettings.bookingRestrictionTime)) {
         throw new HttpException(
           'Invalid booking restriction time. Must be "24h" or "48h"',
           HttpStatus.BAD_REQUEST
