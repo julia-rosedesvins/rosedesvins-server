@@ -124,6 +124,7 @@ export class WidgetService {
       },
       paymentMethods: {
         methods: paymentMethods ? paymentMethods.methods : [],
+        cancellationPolicy: paymentMethods?.cancellationPolicy ?? null,
         stripeConnect: (paymentMethods?.stripeConnect && service.stripeEnabled !== false) ? {
           stripeAccountId: paymentMethods.stripeConnect.stripeAccountId,
           chargesEnabled: paymentMethods.stripeConnect.chargesEnabled,

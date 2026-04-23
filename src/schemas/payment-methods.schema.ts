@@ -38,6 +38,10 @@ export class PaymentMethods {
   })
   methods: PaymentMethodOption[];
 
+  // Cancellation / refund policy (shown to customers during Stripe checkout)
+  @Prop({ type: String, default: null })
+  cancellationPolicy?: string | null;
+
   // Stripe Connect integration
   @Prop({ type: Object, default: null })
   stripeConnect?: StripeConnectAccount | null;
