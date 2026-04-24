@@ -776,4 +776,20 @@ export class DomainProfileService {
       }
     };
   }
+
+  /**
+   * Migration: set stripeEnabled = false on every service sub-document
+   * that does not yet have the field defined in the database.
+   */
+  async backfillStripeEnabled(): Promise<{ matched: number; modified: number }> {
+    const result = await (this.domainProfileModel as any).updateMany(
+      { 'services.stripeEnabled': { $exists: false } },
+      { $set: { 'services.$[elem].stripeEnabled': false } },
+      { arrayFilters: [{ 'elem.stripeEnabled': { $exists: false } }], multi: true },
+    );
+    return {
+      matched: result.matchedCount ?? result.n ?? 0,
+      modified: result.modifiedCount ?? result.nModified ?? 0,
+    };
+  }
 }

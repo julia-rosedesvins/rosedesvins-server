@@ -778,4 +778,11 @@ export class DomainProfileController {
       throw error;
     }
   }
+
+  @Post('admin/migrate-stripe-enabled')
+  @ApiOperation({ summary: 'Backfill stripeEnabled=false on all service sub-documents missing the field' })
+  @ApiResponse({ status: 201, description: 'Returns matched and modified document counts' })
+  async backfillStripeEnabled() {
+    return this.domainProfileService.backfillStripeEnabled();
+  }
 }
