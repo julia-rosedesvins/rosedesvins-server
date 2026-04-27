@@ -789,16 +789,42 @@ export class RegionsService {
             });
         }
 
-        const domainProfilesWithServices = await this.domainProfileModel
-            .find(serviceSearchConditions)
-            .populate('userId', 'domainName domainLatitude domainLongitude address city codePostal region')
-            .limit(30)
-            .exec();
+        // Run all independent queries in parallel for maximum speed
+        const [domainProfilesWithServices, staticExperiences, usersWithDomains, regions] = await Promise.all([
+            this.domainProfileModel
+                .find(serviceSearchConditions)
+                .populate('userId', 'domainName domainLatitude domainLongitude address city codePostal region')
+                .limit(10)
+                .lean()
+                .exec(),
+            this.staticExperienceModel
+                .find({
+                    $or: [
+                        { name: { $regex: searchQuery, $options: 'i' } },
+                        { category: { $regex: searchQuery, $options: 'i' } },
+                        { city: { $regex: searchQuery, $options: 'i' } },
+                    ]
+                })
+                .limit(10)
+                .lean()
+                .exec(),
+            this.userModel
+                .find({ domainName: { $regex: searchQuery, $options: 'i' } })
+                .select('_id domainName domainLatitude domainLongitude address city codePostal region')
+                .limit(10)
+                .lean()
+                .exec(),
+            this.regionModel
+                .find({ denom: { $regex: searchQuery, $options: 'i' } })
+                .limit(10)
+                .lean()
+                .exec(),
+        ]);
 
         const services: any[] = [];
         for (const profile of domainProfilesWithServices) {
             const user = profile.userId as any;
-            const profileDoc = profile.toObject();
+            const profileDoc = profile as any;
             
             for (const service of profileDoc.services as any[]) {
                 if (!service.isActive) continue;
@@ -831,21 +857,7 @@ export class RegionsService {
             }
         }
 
-        // Search in static experiences
-        const staticExperiences = await this.staticExperienceModel
-            .find({
-                $or: [
-                    { name: { $regex: searchQuery, $options: 'i' } },
-                    { category: { $regex: searchQuery, $options: 'i' } },
-                    { address: { $regex: searchQuery, $options: 'i' } },
-                    { city: { $regex: searchQuery, $options: 'i' } },
-                    { about: { $regex: searchQuery, $options: 'i' } }
-                ]
-            })
-            .limit(20)
-            .exec();
-
-        const staticExperienceResults = staticExperiences.map(exp => ({
+        const staticExperienceResults = (staticExperiences as any[]).map(exp => ({
             domainName: exp.domain_name || exp.name,
             domainDescription: exp.domain_description || exp.about || exp.category || '',
             domainProfilePictureUrl: exp.domain_profile_pic_url || exp.main_image || null,
@@ -863,21 +875,17 @@ export class RegionsService {
             type: 'static-experience' as const
         }));
 
-        // Search in domains (user's domain names)
-        const usersWithDomains = await this.userModel
-            .find({
-                domainName: { $regex: searchQuery, $options: 'i' }
-            })
-            .limit(20)
-            .exec();
+        // Domain profiles query (depends on usersWithDomains result from parallel block)
+        const domainIds = (usersWithDomains as any[]).map(user => user._id);
+        const domainProfiles = domainIds.length > 0
+            ? await this.domainProfileModel
+                .find({ userId: { $in: domainIds } })
+                .populate('userId', 'domainName domainLatitude domainLongitude address city codePostal region')
+                .lean()
+                .exec()
+            : [];
 
-        const domainIds = usersWithDomains.map(user => user._id);
-        const domainProfiles = await this.domainProfileModel
-            .find({ userId: { $in: domainIds } })
-            .populate('userId', 'domainName domainLatitude domainLongitude address city codePostal region')
-            .exec();
-
-        const domains = domainProfiles.map(profile => {
+        const domains = (domainProfiles as any[]).map(profile => {
             const user = profile.userId as any;
             return {
                 domainId: profile._id,
@@ -897,15 +905,7 @@ export class RegionsService {
             };
         });
 
-        // Search in regions
-        const regions = await this.regionModel
-            .find({
-                denom: { $regex: searchQuery, $options: 'i' },
-            })
-            .limit(20)
-            .exec();
-
-        const regionResults = regions.map(region => ({
+        const regionResults = (regions as any[]).map(region => ({
             denom: region.denom,
             min_lat: region.min_lat,
             min_lon: region.min_lon,

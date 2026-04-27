@@ -56,3 +56,9 @@ export class City extends Document {
 }
 
 export const CitySchema = SchemaFactory.createForClass(City);
+
+// Compound index for fast prefix/contains search on city names
+CitySchema.index({ nom_standard: 1 });
+CitySchema.index({ nom_standard_majuscule: 1 });
+// Text index for full-text search fallback
+CitySchema.index({ nom_standard: 'text', nom_sans_accent: 'text' });
