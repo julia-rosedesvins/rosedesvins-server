@@ -426,6 +426,30 @@ export class UserBookingsService {
       const userObjectId = new Types.ObjectId(createBookingDto.userId);
       const serviceObjectId = new Types.ObjectId(createBookingDto.serviceId);
 
+      // Language enforcement for simultaneous bookings
+      if (createBookingDto.selectedLanguage) {
+        const existingBookings = await this.userBookingModel
+          .find({
+            userId: userObjectId,
+            serviceId: serviceObjectId,
+            bookingDate: createBookingDto.bookingDate,
+            bookingTime: createBookingDto.bookingTime,
+            bookingStatus: { $ne: 'cancelled' },
+          })
+          .select('selectedLanguage')
+          .lean()
+          .exec();
+
+        if (existingBookings.length > 0) {
+          const existingLanguage = (existingBookings[0] as any).selectedLanguage;
+          if (existingLanguage && existingLanguage !== createBookingDto.selectedLanguage) {
+            throw new BadRequestException(
+              `Ce créneau est déjà réservé en ${existingLanguage}. Veuillez sélectionner la même langue.`
+            );
+          }
+        }
+      }
+
       // Create booking data with proper field mapping
       const parsedDate = createBookingDto.bookingDate;
 
