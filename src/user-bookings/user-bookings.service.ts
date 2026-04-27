@@ -199,6 +199,11 @@ export class UserBookingsService {
   private joinUrl(baseUrl: string, path: string): string {
     if (!baseUrl || !path) return baseUrl || path || '';
 
+    // If path is already an absolute URL, return it as-is
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return path;
+    }
+
     // Remove trailing slash from base URL and leading slash from path
     const cleanBase = baseUrl.replace(/\/+$/, '');
     const cleanPath = path.replace(/^\/+/, '');
