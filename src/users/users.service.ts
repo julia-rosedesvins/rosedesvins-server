@@ -824,4 +824,21 @@ export class UsersService {
 
     return { message: 'Votre mot de passe a été réinitialisé avec succès.' };
   }
+
+  async deleteUser(id: string): Promise<{ message: string }> {
+    const user = await this.userModel.findById(id);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Delete associated subscription(s)
+    await this.subscriptionModel.deleteMany({ userId: user._id });
+
+    // Delete the user
+    await this.userModel.findByIdAndDelete(id);
+
+    this.logger.log(`Admin deleted user ${user.email} (${id}) and their subscriptions`);
+
+    return { message: 'User and associated subscriptions deleted successfully' };
+  }
 }
