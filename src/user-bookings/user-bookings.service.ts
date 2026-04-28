@@ -42,6 +42,7 @@ export interface BookingEmailData {
   // Enhanced template fields
   domainName: string;
   domainAddress: string;
+  domainPhone: string;
   domainLogoUrl: string;
   serviceName: string;
   serviceDescription: string;
@@ -246,6 +247,7 @@ export class UserBookingsService {
           numberOfWinesTasted: bookingData.numberOfWinesTasted,
           domainName: bookingData.domainName,
           domainAddress: bookingData.domainAddress,
+          domainPhone: bookingData.domainPhone,
           domainLogoUrl: bookingData.domainLogoUrl,
           serviceName: bookingData.serviceName,
           serviceDescription: bookingData.serviceDescription,
@@ -555,6 +557,7 @@ export class UserBookingsService {
             domainAddress: user?.address && user?.codePostal && user?.city
               ? `${user.address} - ${user.codePostal} - ${user.city}`
               : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+            domainPhone: user?.phoneNumber || '',
             domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
@@ -646,6 +649,7 @@ export class UserBookingsService {
           user?.address && user?.codePostal && user?.city
             ? `${user.address} - ${user.codePostal} - ${user.city}`
             : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+        domainPhone: user?.phoneNumber || '',
         domainLogoUrl: this.joinUrl(
           this.configService.get('BACKEND_URL') || 'http://localhost:3000',
           domainProfile?.domainLogoUrl || '/assets/logo.png',
@@ -1471,6 +1475,7 @@ export class UserBookingsService {
             domainAddress: user?.address && user?.codePostal && user?.city
               ? `${user.address} - ${user.codePostal} - ${user.city}`
               : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+            domainPhone: user?.phoneNumber || '',
             domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
@@ -1910,6 +1915,7 @@ export class UserBookingsService {
             domainAddress: user?.address && user?.codePostal && user?.city
               ? `${user.address} - ${user.codePostal} - ${user.city}`
               : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+            domainPhone: user?.phoneNumber || '',
             domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
