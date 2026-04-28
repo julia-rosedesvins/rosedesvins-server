@@ -30,6 +30,29 @@ export class S3Service {
   }
 
   /**
+   * Upload a buffer directly to a specific S3 key (overwrites if exists)
+   */
+  async uploadFileByKey(key: string, buffer: Buffer, contentType: string): Promise<{ url: string; key: string }> {
+    try {
+      const command = new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: key,
+        Body: buffer,
+        ContentType: contentType,
+      });
+
+      await this.s3Client.send(command);
+
+      const url = `https://${this.bucketName}.s3.${this.configService.get<string>('AWS_REGION')}.amazonaws.com/${key}`;
+      this.logger.log(`File uploaded by key: ${key}`);
+      return { url, key };
+    } catch (error) {
+      this.logger.error(`Failed to upload file to S3: ${error.message}`, error.stack);
+      throw new Error(`Failed to upload file to S3: ${error.message}`);
+    }
+  }
+
+  /**
    * Upload a file to S3
    * @param file - The file buffer or stream
    * @param fileName - Optional custom file name, generates UUID if not provided

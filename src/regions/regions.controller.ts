@@ -137,4 +137,10 @@ export class RegionsController {
   async deleteThumbnail(@Param('id') id: string) {
     return this.regionsService.deleteRegionThumbnail(id);
   }
+
+  @Post('admin/convert-thumbnails-to-webp')
+  // @UseGuards(AdminGuard)
+  async convertThumbnailsToWebp() {
+    return this.regionsService.convertThumbnailsToWebp();
+  }
 }
