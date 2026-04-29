@@ -178,6 +178,32 @@ export class EmailService {
     this.logger.log(`Rejection email sent to ${email}`);
   }
 
+  async sendSubscriptionExpiryWarning(data: {
+    userFullName: string;
+    userEmail: string;
+    domainName: string;
+    expiryDate: Date;
+  }): Promise<void> {
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@rosedesvins.com';
+    const formattedDate = data.expiryDate.toLocaleDateString('fr-FR', {
+      day: '2-digit', month: 'long', year: 'numeric',
+    });
+
+    const emailJob: EmailJob = {
+      to: adminEmail,
+      subject: `⚠️ Abonnement expirant dans 7 jours - ${data.userFullName}`,
+      html: this.templateService.generateSubscriptionExpiryWarningEmail({
+        userFullName: data.userFullName,
+        userEmail: data.userEmail,
+        domainName: data.domainName,
+        expiryDate: formattedDate,
+      }),
+    };
+
+    await this.sendEmail(emailJob);
+    this.logger.log(`Subscription expiry warning sent to admin for user ${data.userEmail}`);
+  }
+
   async sendEmail(emailData: EmailJob): Promise<boolean> {
     try {
       const mailgunOptions = {

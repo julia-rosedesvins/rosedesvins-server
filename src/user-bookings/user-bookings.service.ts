@@ -42,6 +42,7 @@ export interface BookingEmailData {
   // Enhanced template fields
   domainName: string;
   domainAddress: string;
+  domainPhone: string;
   domainLogoUrl: string;
   serviceName: string;
   serviceDescription: string;
@@ -246,6 +247,7 @@ export class UserBookingsService {
           numberOfWinesTasted: bookingData.numberOfWinesTasted,
           domainName: bookingData.domainName,
           domainAddress: bookingData.domainAddress,
+          domainPhone: bookingData.domainPhone,
           domainLogoUrl: bookingData.domainLogoUrl,
           serviceName: bookingData.serviceName,
           serviceDescription: bookingData.serviceDescription,
@@ -492,7 +494,7 @@ export class UserBookingsService {
         const eventData = {
           userId: userObjectId, // The wine business owner who receives the booking
           bookingId: savedBooking._id, // Reference to the created booking
-          eventName: `Réservation: ${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
+          eventName: `Réservation : ${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
           eventDate: parsedDate, // Use the same parsed date
           eventTime: createBookingDto.bookingTime,
           eventEndTime: eventEndTime, // End time calculated from service duration
@@ -573,12 +575,13 @@ export class UserBookingsService {
             selectedLanguage: this.getLanguageInFrench(createBookingDto.selectedLanguage),
             additionalNotes: createBookingDto.additionalNotes,
             numberOfWinesTasted: service?.numberOfWinesTasted || 0,
-            eventName: `Réservation: ${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
+            eventName: `Réservation : ${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
             // Enhanced template data
             domainName: user?.domainName || 'Domaine La Bastide Blanche',
             domainAddress: user?.address && user?.codePostal && user?.city
               ? `${user.address} - ${user.codePostal} - ${user.city}`
               : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+            domainPhone: user?.phoneNumber || '',
             domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
@@ -670,6 +673,7 @@ export class UserBookingsService {
           user?.address && user?.codePostal && user?.city
             ? `${user.address} - ${user.codePostal} - ${user.city}`
             : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+        domainPhone: user?.phoneNumber || '',
         domainLogoUrl: this.joinUrl(
           this.configService.get('BACKEND_URL') || 'http://localhost:3000',
           domainProfile?.domainLogoUrl || '/assets/logo.png',
@@ -689,7 +693,7 @@ export class UserBookingsService {
         ),
         cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${booking._id}`,
         providerTitle: 'Nouvelle réservation reçue !',
-        eventName: `Réservation: ${booking.userContactFirstname} ${booking.userContactLastname}`,
+        eventName: `Réservation : ${booking.userContactFirstname} ${booking.userContactLastname}`,
       };
 
       await this.sendCustomerBookingEmail(bookingEmailData, 'created');
@@ -810,7 +814,7 @@ export class UserBookingsService {
       const endDate = new Date(startDate.getTime() + (eventDuration * 60 * 1000));
 
       // Create iCal event for the booking
-      const eventTitle = `Réservation: ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
+      const eventTitle = `Réservation : ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
       const eventUid = uuidv4();
 
       const icalCalendar = ical({ name: 'ROSEDESVINS APP' });
@@ -996,7 +1000,7 @@ export class UserBookingsService {
       const endDateTimeStr = `${bookingDateStr}T${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}:00`;
 
       // Create Microsoft Graph API event
-      const eventTitle = `Réservation: ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
+      const eventTitle = `Réservation : ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
 
       console.log('🕐 Event timing:', {
         startDateTime: startDateTimeStr,
@@ -1137,7 +1141,7 @@ export class UserBookingsService {
       const endDateTimeStr = `${bookingDateStr}T${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}:00`;
 
       // Create event title
-      const eventTitle = `Réservation: ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
+      const eventTitle = `Réservation : ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
 
       console.log('🕐 Event timing:', {
         startDateTime: startDateTimeStr,
@@ -1410,7 +1414,7 @@ export class UserBookingsService {
         eventUpdateFields.eventEndTime = eventEndTime;
       }
       if (isCustomerInfoChanged) {
-        eventUpdateFields.eventName = `Réservation: ${updateData.userContactFirstname || existingBooking.userContactFirstname} ${updateData.userContactLastname || existingBooking.userContactLastname}`;
+        eventUpdateFields.eventName = `Réservation : ${updateData.userContactFirstname || existingBooking.userContactFirstname} ${updateData.userContactLastname || existingBooking.userContactLastname}`;
       }
       if (updateData.additionalNotes) {
         eventUpdateFields.eventDescription = updateData.additionalNotes;
@@ -1495,6 +1499,7 @@ export class UserBookingsService {
             domainAddress: user?.address && user?.codePostal && user?.city
               ? `${user.address} - ${user.codePostal} - ${user.city}`
               : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+            domainPhone: user?.phoneNumber || '',
             domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
@@ -1733,7 +1738,7 @@ export class UserBookingsService {
       const endMins = endMinutes % 60;
       const endDateTimeStr = `${bookingDateStr}T${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}:00`;
 
-      const eventTitle = `Réservation: ${newBooking.userContactFirstname} ${newBooking.userContactLastname}`;
+      const eventTitle = `Réservation : ${newBooking.userContactFirstname} ${newBooking.userContactLastname}`;
 
       console.log('📋 Updating Microsoft event:', {
         eventId: newBooking.microsoftEventId,
@@ -1934,6 +1939,7 @@ export class UserBookingsService {
             domainAddress: user?.address && user?.codePostal && user?.city
               ? `${user.address} - ${user.codePostal} - ${user.city}`
               : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+            domainPhone: user?.phoneNumber || '',
             domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
@@ -2097,7 +2103,7 @@ export class UserBookingsService {
         if (propfindResponse.ok) {
           const responseText = await propfindResponse.text();
           // Use the same title format as when creating the event (Réservation: not Booking:)
-          const expectedEventTitle = `Réservation: ${booking.userContactFirstname} ${booking.userContactLastname}`;
+          const expectedEventTitle = `Réservation : ${booking.userContactFirstname} ${booking.userContactLastname}`;
 
           console.log('📋 Looking for event with title:', expectedEventTitle);
           console.log('📄 PROPFIND response length:', responseText.length);
@@ -2362,7 +2368,7 @@ export class UserBookingsService {
       const endMins = endMinutes % 60;
       const endDateTimeStr = `${bookingDateStr}T${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}:00`;
 
-      const eventTitle = `Réservation: ${newBooking.userContactFirstname} ${newBooking.userContactLastname}`;
+      const eventTitle = `Réservation : ${newBooking.userContactFirstname} ${newBooking.userContactLastname}`;
 
       // Prepare event data for Google Calendar API
       const eventData = {

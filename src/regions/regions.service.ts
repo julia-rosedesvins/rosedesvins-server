@@ -12,6 +12,8 @@ import { CreateRegionDto } from './dto/create-region.dto';
 import { UpdateRegionDto } from './dto/update-region.dto';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as sharp from 'sharp';
+import axios from 'axios';
 
 @Injectable()
 export class RegionsService {
@@ -1223,9 +1225,126 @@ export class RegionsService {
     }
 
     private extractS3KeyFromUrl(url: string): string {
-        // Extract S3 key from full URL
-        // Example: https://bucket.s3.region.amazonaws.com/path/to/file.jpg -> path/to/file.jpg
-        const urlParts = url.split('.amazonaws.com/');
-        return urlParts[1] || url;
+        // Format 1: https://bucket.s3.region.amazonaws.com/key
+        // Format 2: https://s3.region.amazonaws.com/bucket/key
+        // Format 3: https://bucket.s3.amazonaws.com/key
+        try {
+            const parsed = new URL(url);
+            const host = parsed.hostname; // e.g. rosedesvins.s3.us-east-1.amazonaws.com
+            const pathname = parsed.pathname; // e.g. /regions/file.jpg
+
+            if (host.includes('.amazonaws.com')) {
+                // Path-style: s3.region.amazonaws.com/bucket/key
+                if (host.startsWith('s3.')) {
+                    // Remove leading /bucket/ from pathname
+                    const parts = pathname.split('/').filter(Boolean);
+                    return parts.slice(1).join('/');
+                }
+                // Virtual-hosted-style: bucket.s3.region.amazonaws.com/key
+                return pathname.startsWith('/') ? pathname.slice(1) : pathname;
+            }
+        } catch (_) {
+            // fall through
+        }
+        // Fallback: split on .amazonaws.com/
+        const parts = url.split('.amazonaws.com/');
+        return parts.length > 1 ? parts[1] : url;
+    }
+
+    async convertThumbnailsToWebp(): Promise<{
+        success: boolean;
+        total: number;
+        compressed: number;
+        skipped: number;
+        failed: number;
+        results: Array<{ denom: string; status: string; originalKB?: number; compressedKB?: number; url?: string; error?: string }>;
+    }> {
+        const results: Array<{ denom: string; status: string; originalKB?: number; compressedKB?: number; url?: string; error?: string }> = [];
+        let compressed = 0;
+        let skipped = 0;
+        let failed = 0;
+
+        const regions = await this.regionModel.find({ thumbnailUrl: { $ne: '' } }).exec();
+        this.logger.log(`Starting compression for ${regions.length} regions with thumbnails`);
+
+        for (const region of regions) {
+            const url = region.thumbnailUrl;
+
+            try {
+                // Download original image
+                this.logger.log(`Downloading: ${region.denom} — ${url}`);
+                const response = await axios.get(url, { responseType: 'arraybuffer', timeout: 30000 });
+                const originalBuffer = Buffer.from(response.data);
+                const originalSize = originalBuffer.byteLength;
+
+                // Detect format from Content-Type or URL
+                const contentType: string = response.headers['content-type'] || '';
+                const isJpeg = contentType.includes('jpeg') || /\.(jpg|jpeg)$/i.test(url);
+                const isPng  = contentType.includes('png')  || /\.png$/i.test(url);
+
+                // Compress: resize to max 1200px wide, keep aspect ratio, quality 80
+                let compressedBuffer: Buffer;
+                let outputMime: string;
+
+                if (isPng) {
+                    compressedBuffer = await sharp(originalBuffer)
+                        .resize({ width: 1200, withoutEnlargement: true })
+                        .png({ compressionLevel: 9, quality: 80 })
+                        .toBuffer();
+                    outputMime = 'image/png';
+                } else {
+                    // Default: JPEG (covers jpg, jpeg, unknown)
+                    compressedBuffer = await sharp(originalBuffer)
+                        .resize({ width: 1200, withoutEnlargement: true })
+                        .jpeg({ quality: 80, progressive: true })
+                        .toBuffer();
+                    outputMime = 'image/jpeg';
+                }
+
+                const newSize = compressedBuffer.byteLength;
+                const originalKB = Math.round(originalSize / 1024);
+                const compressedKB = Math.round(newSize / 1024);
+                this.logger.log(`${region.denom}: ${originalKB}KB → ${compressedKB}KB`);
+
+                // If compressed size is not meaningfully smaller, skip overwrite
+                if (newSize >= originalSize * 0.95) {
+                    this.logger.log(`Skipping ${region.denom} — no significant size reduction`);
+                    results.push({ denom: region.denom, status: 'skipped', originalKB, compressedKB, url });
+                    skipped++;
+                    continue;
+                }
+
+                // Build new key with timestamp in filename, keep same folder
+                const oldKey = this.extractS3KeyFromUrl(url);
+                this.logger.log(`Old S3 key to delete: "${oldKey}"`);
+                const folder = oldKey.includes('/') ? oldKey.substring(0, oldKey.lastIndexOf('/')) : '';
+                const ext = isPng ? 'png' : 'jpg';
+                const timestamp = Date.now();
+                const newFileName = `region_thumbnail_${timestamp}.${ext}`;
+                const newKey = folder ? `${folder}/${newFileName}` : newFileName;
+
+                // Upload compressed file under new timestamped key
+                const { url: newUrl } = await this.s3Service.uploadFileByKey(newKey, compressedBuffer, outputMime);
+
+                // Delete old file from S3
+                this.logger.log(`Deleting old S3 key: "${oldKey}"`);
+                await this.s3Service.deleteFile(oldKey);
+                this.logger.log(`Deleted old S3 key: "${oldKey}"`);
+
+                // Update DB record with new URL
+                region.thumbnailUrl = newUrl;
+                await region.save();
+
+                results.push({ denom: region.denom, status: 'compressed', originalKB, compressedKB, url: newUrl });
+                compressed++;
+            } catch (error) {
+                this.logger.error(`Failed to compress thumbnail for ${region.denom}: ${error.message}`);
+                results.push({ denom: region.denom, status: 'failed', url, error: error.message });
+                failed++;
+            }
+        }
+
+        this.logger.log(`Compression complete — compressed: ${compressed}, skipped: ${skipped}, failed: ${failed}`);
+        return { success: true, total: regions.length, compressed, skipped, failed, results };
     }
 }

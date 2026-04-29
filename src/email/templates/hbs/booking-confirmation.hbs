@@ -177,7 +177,7 @@
                                                                         <td width="20" valign="top">
                                                                             <img src="https://api.rosedesvins.co/v1/web/image/euro-currency-symbol" alt="Payment" width="16" height="16" style="display: block;">
                                                                         </td>
-                                                                        <td style="color: #666; font-size: 11px; padding-left: 8px; line-height: 1.3;">
+                                                                        <td style="color: #444; font-size: 12px; font-weight: 500; padding-left: 8px; line-height: 1.3;">
                                                                             {{paymentMethod}}
                                                                         </td>
                                                                     </tr>
@@ -187,7 +187,7 @@
                                                     </table>
                                                     
                                                     <!-- Price -->
-                                                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top: 1px solid #e0e0e0; padding-top: 15px; margin-top: 20px;">
+                                                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top: 1px solid #e0e0e0; padding-top: 15px; margin-top: 20px; margin-bottom: 20px;">
                                                         <tr>
                                                             <td>
                                                                 <table width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -241,7 +241,7 @@
                                 <tr>
                                     <td style="color: #999; font-size: 14px; text-align: center;">
                                         <strong>{{domainName}}</strong><br>
-                                        {{domainAddress}}
+                                        {{domainAddress}}{{#if domainPhone}}<br>{{domainPhone}}{{/if}}
                                     </td>
                                 </tr>
                             </table>

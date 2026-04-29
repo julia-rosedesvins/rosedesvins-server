@@ -99,6 +99,13 @@ export interface ProviderNotificationEmailData {
   providerTitle?: string;
 }
 
+export interface SubscriptionExpiryWarningEmailData {
+  userFullName: string;
+  userEmail: string;
+  domainName?: string;
+  expiryDate: string;
+}
+
 export interface BookingEmailTemplateData {
   customerName: string;
   customerEmail?: string;
@@ -270,6 +277,21 @@ export class TemplateService {
   generateProviderNotificationEmail(data: ProviderNotificationEmailData): string {
     const providerNotificationTemplate = this.loadTemplate('provider-notification');
     return providerNotificationTemplate(data);
+  }
+
+  generateSubscriptionExpiryWarningEmail(data: SubscriptionExpiryWarningEmailData): string {
+    const template = this.loadTemplate('subscription-expiry-warning');
+    const contentHtml = template({
+      ...data,
+      adminPanelUrl: this.getBaseData().adminPanelUrl,
+    });
+
+    return this.baseTemplate({
+      ...this.getBaseData(),
+      title: 'Abonnement expirant dans 7 jours',
+      subtitle: 'Notification administrateur',
+      content: contentHtml,
+    });
   }
 
   generateBookingConfirmationEmail(data: BookingEmailTemplateData): string {

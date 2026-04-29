@@ -53,6 +53,20 @@ export const GetAllSubscriptionsSchema = z.object({
   userId: z
     .string()
     .regex(/^[0-9a-fA-F]{24}$/, 'Invalid user ID format')
+    .optional(),
+
+  sortBy: z
+    .enum(['newest', 'oldest', 'expiring_soon', 'expiring_late'])
+    .optional(),
+
+  dateFrom: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'dateFrom must be YYYY-MM-DD')
+    .optional(),
+
+  dateTo: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'dateTo must be YYYY-MM-DD')
     .optional()
 });
 
