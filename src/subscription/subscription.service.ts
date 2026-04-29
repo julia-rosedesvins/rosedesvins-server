@@ -1,8 +1,10 @@
-import { Injectable, NotFoundException, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, UnauthorizedException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { Subscription } from '../schemas/subscriptions.schema';
 import { User, UserRole, AccountStatus } from '../schemas/user.schema';
+import { EmailService } from '../email/email.service';
 
 export interface CreateOrUpdateSubscriptionServiceDto {
   userId: string;
@@ -24,10 +26,49 @@ export interface GetAllSubscriptionsQueryDto {
 
 @Injectable()
 export class SubscriptionService {
+  private readonly logger = new Logger(SubscriptionService.name);
+
   constructor(
     @InjectModel(Subscription.name) private subscriptionModel: Model<Subscription>,
     @InjectModel(User.name) private userModel: Model<User>,
+    private readonly emailService: EmailService,
   ) {}
+
+  @Cron(CronExpression.EVERY_DAY_AT_9AM)
+  async checkExpiringSubscriptions(): Promise<void> {
+    const now = new Date();
+    const in7Days = new Date();
+    in7Days.setDate(now.getDate() + 7);
+
+    // Find active subscriptions expiring between today and 7 days from now (day-precise)
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOf7thDay = new Date(in7Days.getFullYear(), in7Days.getMonth(), in7Days.getDate(), 23, 59, 59, 999);
+
+    const expiringSubscriptions = await this.subscriptionModel
+      .find({
+        isActive: true,
+        endDate: { $gte: startOfToday, $lte: endOf7thDay },
+      })
+      .populate('userId', 'firstName lastName email domainName')
+      .exec();
+
+    this.logger.log(`Found ${expiringSubscriptions.length} subscription(s) expiring within 7 days`);
+
+    for (const sub of expiringSubscriptions) {
+      const user = sub.userId as any;
+      if (!user) continue;
+      try {
+        await this.emailService.sendSubscriptionExpiryWarning({
+          userFullName: `${user.firstName} ${user.lastName}`,
+          userEmail: user.email,
+          domainName: user.domainName,
+          expiryDate: sub.endDate,
+        });
+      } catch (err) {
+        this.logger.error(`Failed to send expiry warning for user ${user.email}:`, err.message);
+      }
+    }
+  }
 
   async createOrUpdateSubscription(adminId: string, subscriptionDto: CreateOrUpdateSubscriptionServiceDto): Promise<{
     subscription: Subscription;
