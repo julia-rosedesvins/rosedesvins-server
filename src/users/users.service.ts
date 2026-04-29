@@ -38,6 +38,7 @@ export interface UserLoginResponse {
 export interface PaginationQuery {
   page?: number;
   limit?: number;
+  search?: string;
 }
 
 export interface PaginatedUsersResponse {
@@ -440,18 +441,27 @@ export class UsersService {
     const limit = Math.min(50, Math.max(1, query.limit || 10)); // Max 50 per page, default 10
     const skip = (page - 1) * limit;
 
-    // Get total count for pagination
-    const totalUsers = await this.userModel.countDocuments({
+    const baseFilter: any = {
       role: UserRole.USER,
       accountStatus: { $in: [AccountStatus.APPROVED, AccountStatus.ACTIVE] },
-    });
+    };
+
+    if (query.search) {
+      const regex = new RegExp(query.search, 'i');
+      baseFilter.$or = [
+        { email: regex },
+        { firstName: regex },
+        { lastName: regex },
+        { domainName: regex },
+      ];
+    }
+
+    // Get total count for pagination
+    const totalUsers = await this.userModel.countDocuments(baseFilter);
 
     // Get users with pagination
     const users = await this.userModel
-      .find({
-        role: UserRole.USER,
-        accountStatus: { $in: [AccountStatus.APPROVED, AccountStatus.ACTIVE] },
-      })
+      .find(baseFilter)
       .select('-password -loginToken')
       .sort({ approvedAt: -1, createdAt: -1 }) // Most recently approved first
       .skip(skip)
