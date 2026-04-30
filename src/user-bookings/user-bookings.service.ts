@@ -231,7 +231,7 @@ export class UserBookingsService {
   private async sendCustomerBookingEmail(bookingData: BookingEmailData, type: 'created' | 'updated' | 'cancelled'): Promise<void> {
     setImmediate(async () => {
       try {
-        const subject = this.getEmailSubject(type, 'customer');
+        const subject = this.getEmailSubject(type, 'customer', bookingData.domainName);
 
         const templateData = {
           customerName: bookingData.customerName,
@@ -295,7 +295,7 @@ export class UserBookingsService {
   private async sendProviderBookingEmail(bookingData: BookingEmailData, type: 'created' | 'cancelled'): Promise<void> {
     setImmediate(async () => {
       try {
-        const subject = this.getEmailSubject(type, 'provider');
+        const subject = this.getEmailSubject(type, 'provider', bookingData.domainName);
 
         let emailHtml: string;
 
@@ -377,19 +377,20 @@ export class UserBookingsService {
   /**
    * Generate email subject based on type and recipient
    */
-  private getEmailSubject(type: 'created' | 'updated' | 'cancelled', recipient: 'customer' | 'provider'): string {
+  private getEmailSubject(type: 'created' | 'updated' | 'cancelled', recipient: 'customer' | 'provider', domainName?: string): string {
+    const domain = domainName || 'Rose des Vins';
     const subjects = {
       created: {
-        customer: 'Confirmation de votre réservation - Rose des Vins 🍷',
-        provider: 'Nouvelle réservation reçue - Rose des Vins'
+        customer: `Confirmation de votre réservation - ${domain} 🍷`,
+        provider: `Nouvelle réservation reçue - ${domain}`
       },
       updated: {
-        customer: 'Modification de votre réservation - Rose des Vins 🍷',
-        provider: 'Réservation modifiée - Rose des Vins'
+        customer: `Modification de votre réservation - ${domain} 🍷`,
+        provider: `Réservation modifiée - ${domain}`
       },
       cancelled: {
-        customer: 'Annulation de votre réservation - Rose des Vins',
-        provider: 'Réservation annulée - Rose des Vins'
+        customer: `Annulation de votre réservation - ${domain}`,
+        provider: `Réservation annulée - ${domain}`
       }
     };
 
