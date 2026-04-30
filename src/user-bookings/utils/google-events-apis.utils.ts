@@ -229,8 +229,7 @@ export class GoogleEventsApiService {
         reminders: {
           useDefault: false,
           overrides: [
-            { method: 'email', minutes: 24 * 60 }, // 1 day before
-            { method: 'popup', minutes: 30 } // 30 minutes before
+            { method: 'popup', minutes: 30 } // 30 minutes before (popup only — no email)
           ]
         }
       };
@@ -239,8 +238,9 @@ export class GoogleEventsApiService {
       console.log('📋 Event body:', JSON.stringify(eventBody, null, 2));
 
       // Create event via Google Calendar API
+      // sendUpdates=none prevents Google from sending invitation/notification emails
       const response = await fetch(
-        'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+        'https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=none',
         {
           method: 'POST',
           headers: {
@@ -354,8 +354,7 @@ export class GoogleEventsApiService {
         reminders: {
           useDefault: false,
           overrides: [
-            { method: 'email', minutes: 24 * 60 },
-            { method: 'popup', minutes: 30 }
+            { method: 'popup', minutes: 30 } // 30 minutes before (popup only — no email)
           ]
         }
       };
@@ -364,8 +363,9 @@ export class GoogleEventsApiService {
       console.log('📋 Update body:', JSON.stringify(updateBody, null, 2));
 
       // Update event via Google Calendar API
+      // sendUpdates=none prevents Google from sending update/notification emails
       const response = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}?sendUpdates=none`,
         {
           method: 'PATCH',
           headers: {
