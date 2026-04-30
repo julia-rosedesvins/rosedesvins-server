@@ -692,6 +692,13 @@ export class EventsService {
       // Save events to database with conflict prevention
       const syncedEvents = await this.saveEventsToDatabase(events, connector.userId, 'google');
 
+      // Remove any events in our DB that no longer exist in Google Calendar
+      const liveExternalIds = googleEvents.map(e => e.id).filter(Boolean);
+      const deletedCount = await this.pruneDeletedExternalEvents(connector.userId, 'google', liveExternalIds);
+      if (deletedCount > 0) {
+        this.logger.log(`🗑️ Pruned ${deletedCount} event(s) deleted from Google Calendar`);
+      }
+
       this.logger.log(`✅ Successfully synced ${syncedEvents} events from Google Calendar`);
 
       return {
@@ -1035,6 +1042,13 @@ export class EventsService {
       // Save events to database with conflict prevention
       const syncedEvents = await this.saveEventsToDatabase(events, connector.userId, 'microsoft');
 
+      // Remove any events in our DB that no longer exist in Microsoft Calendar
+      const liveExternalIds = microsoftEvents.map((e: any) => e.id).filter(Boolean);
+      const deletedCount = await this.pruneDeletedExternalEvents(connector.userId, 'microsoft', liveExternalIds);
+      if (deletedCount > 0) {
+        this.logger.log(`🗑️ Pruned ${deletedCount} event(s) deleted from Microsoft Calendar`);
+      }
+
       this.logger.log(`✅ Successfully synced ${syncedEvents} events from Microsoft Calendar`);
 
       return {
@@ -1309,6 +1323,37 @@ export class EventsService {
   /**
    * Save events to database with duplicate prevention
    */
+  /**
+   * Remove external events from our DB that are no longer present in the remote calendar.
+   * Only removes events whose externalEventId is NOT in the provided live list.
+   * Booking-linked events (eventType !== 'external') are never touched.
+   */
+  private async pruneDeletedExternalEvents(
+    userId: any,
+    source: string,
+    liveExternalIds: string[]
+  ): Promise<number> {
+    try {
+      if (!liveExternalIds.length) {
+        // If the calendar returned zero events we skip pruning to be safe
+        // (could be a temporary API failure — better not to wipe everything)
+        return 0;
+      }
+
+      const result = await this.eventModel.deleteMany({
+        userId,
+        eventType: 'external',
+        externalCalendarSource: source,
+        externalEventId: { $nin: liveExternalIds }
+      }).exec();
+
+      return result.deletedCount ?? 0;
+    } catch (error) {
+      this.logger.error(`❌ Error pruning deleted ${source} events:`, error);
+      return 0;
+    }
+  }
+
   private async saveEventsToDatabase(events: any[], userId: any, source: string): Promise<number> {
     try {
       let savedCount = 0;
