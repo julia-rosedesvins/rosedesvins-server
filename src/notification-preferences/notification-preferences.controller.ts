@@ -2,6 +2,7 @@ import { Controller, Post, Get, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { UserGuard } from '../guards/user.guard';
+import { AdminGuard } from '../guards/admin.guard';
 import { CurrentUser } from '../decorators/current-user.decorator';
 import { ZodValidationPipe } from '../pipes/zod-validation.pipe';
 import { 
@@ -131,6 +132,24 @@ export class NotificationPreferencesController {
         success: true,
         message: 'Notification preferences retrieved successfully',
         data: responseData,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Get('admin/booking-advance-limits')
+  @ApiOperation({
+    summary: 'Get all users with their booking advance limit',
+    description: 'Returns each user email and their bookingAdvanceLimit setting'
+  })
+  async getAllBookingAdvanceLimits() {
+    try {
+      const data = await this.notificationPreferencesService.getAllBookingAdvanceLimits();
+      return {
+        success: true,
+        count: data.length,
+        data,
       };
     } catch (error) {
       throw error;
