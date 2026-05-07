@@ -26,9 +26,10 @@ import { NewsletterModule } from './newsletter/newsletter.module';
 import { MediaSyncModule } from './media-sync/media-sync.module';
 import { CitiesModule } from './cities/cities.module';
 import { StripeCheckoutModule } from './stripe-checkout/stripe-checkout.module';
+import { OutilModule } from './outil/outil.module';
 
 @Module({
-  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule, NotificationPreferencesModule, PaymentMethodsModule, WidgetModule, UserBookingsModule, EventsModule, NotificationsModule, ScheduleModule.forRoot(), DashboardAnalyticsModule, SupportContactModule, WebModule, RegionsModule, StaticExperiencesModule, ExperienceCategoriesModule, NewsletterModule, MediaSyncModule, CitiesModule, StripeCheckoutModule],
+  imports: [CustomConfigModule, UsersModule, EmailModule, ContactDetailsModule, SubscriptionModule, DomainProfileModule, ConnectorModule, AvailabilityModule, NotificationPreferencesModule, PaymentMethodsModule, WidgetModule, UserBookingsModule, EventsModule, NotificationsModule, ScheduleModule.forRoot(), DashboardAnalyticsModule, SupportContactModule, WebModule, RegionsModule, StaticExperiencesModule, ExperienceCategoriesModule, NewsletterModule, MediaSyncModule, CitiesModule, StripeCheckoutModule, OutilModule],
   controllers: [AppController],
   providers: [AppService],
 })
