@@ -31,31 +31,59 @@ export class ConnectorService {
     try {
       console.log('Validating Orange CalDAV credentials for:', username);
 
-      const xhr = new dav.transport.Basic(
-        new dav.Credentials({
-          username: username,
-          password: password
-        })
-      );
+      // Use a direct PROPFIND to the user's principal URL instead of auto-discovery.
+      // Orange's discovery paths (/.well-known/caldav) now return 500, but the
+      // direct endpoint responds correctly: 401 = bad creds, 207 = valid.
+      const principalUrl = `https://caldav.orange.fr/users/${encodeURIComponent(username)}/`;
 
-      // Attempt to discover calendars to validate credentials
-      const account = await dav.createAccount({
-        server: 'https://caldav.orange.fr',
-        xhr: xhr,
-        accountType: 'caldav'
+      const response = await axios.request({
+        method: 'PROPFIND',
+        url: principalUrl,
+        headers: {
+          Depth: '0',
+          'Content-Type': 'application/xml',
+        },
+        auth: { username, password },
+        validateStatus: () => true, // never throw on HTTP errors
+        timeout: 15000,
       });
 
-      console.log(`✅ CalDAV validation successful! Found ${account.calendars.length} calendar(s)`);
-      return true;
-    } catch (error) {
-      console.error('❌ CalDAV validation failed:', error.message);
-      
-      // Handle specific authentication errors
-      if (error.message.includes('Unauthorized') || error.status === 401) {
+      console.log(`📡 Orange CalDAV PROPFIND status: ${response.status}`);
+
+      if (response.status === 207 || response.status === 200) {
+        console.log('✅ CalDAV validation successful!');
+        return true;
+      }
+
+      if (response.status === 401) {
         throw new BadRequestException('Invalid Orange email credentials. Please check your username and password.');
       }
-      
-      if (error.message.includes('ENOTFOUND') || error.message.includes('network')) {
+
+      if (response.status === 404) {
+        // Account exists but principal URL may differ — try root with Basic auth
+        const rootResponse = await axios.request({
+          method: 'PROPFIND',
+          url: 'https://caldav.orange.fr/',
+          headers: { Depth: '0', 'Content-Type': 'application/xml' },
+          auth: { username, password },
+          validateStatus: () => true,
+          timeout: 15000,
+        });
+        if (rootResponse.status === 207 || rootResponse.status === 200) {
+          console.log('✅ CalDAV validation successful (root)!');
+          return true;
+        }
+        if (rootResponse.status === 401) {
+          throw new BadRequestException('Invalid Orange email credentials. Please check your username and password.');
+        }
+      }
+
+      throw new BadRequestException(`Failed to validate Orange calendar credentials (status ${response.status}). Please try again later.`);
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      console.error('❌ CalDAV validation failed:', error.message);
+
+      if (error.message?.includes('ENOTFOUND') || error.message?.includes('network') || error.code === 'ECONNREFUSED') {
         throw new BadRequestException('Unable to connect to Orange CalDAV server. Please try again later.');
       }
 
@@ -227,8 +255,10 @@ export class ConnectorService {
         })
       );
 
+      const principalUrl = `https://caldav.orange.fr/users/${encodeURIComponent(connector.connector_creds.orange.username)}/`;
+
       const account = await dav.createAccount({
-        server: 'https://caldav.orange.fr',
+        server: principalUrl,
         xhr: xhr,
         accountType: 'caldav'
       });

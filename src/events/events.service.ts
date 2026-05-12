@@ -1571,8 +1571,10 @@ export class EventsService {
         })
       );
 
+      const principalUrl = `https://caldav.orange.fr/users/${encodeURIComponent(username)}/`;
+
       const account = await dav.createAccount({
-        server: 'https://caldav.orange.fr',
+        server: principalUrl,
         xhr: xhr,
         accountType: 'caldav'
       });
