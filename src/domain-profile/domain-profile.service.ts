@@ -387,7 +387,7 @@ export class DomainProfileService {
       isActive: service.isActive,
       stripeEnabled: (service as any).stripeEnabled ?? true,
       // New booking settings fields
-      bookingRestrictionActive: (service as any).bookingRestrictionActive ?? false,
+      bookingRestrictionActive: (service as any).bookingRestrictionActive ?? true,
       bookingRestrictionTime: (service as any).bookingRestrictionTime ?? '24h',
       multipleBookings: (service as any).multipleBookings ?? false,
       hasCustomAvailability: (service as any).hasCustomAvailability ?? false,
@@ -602,9 +602,7 @@ export class DomainProfileService {
     // Update only the provided booking settings
     const service = domainProfile.services[serviceIndex] as any;
     
-    if (bookingSettings.bookingRestrictionActive !== undefined) {
-      service.bookingRestrictionActive = bookingSettings.bookingRestrictionActive;
-    }
+    service.bookingRestrictionActive = true;
     if (bookingSettings.bookingRestrictionTime !== undefined) {
       service.bookingRestrictionTime = bookingSettings.bookingRestrictionTime;
     }

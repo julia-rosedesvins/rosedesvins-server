@@ -42,7 +42,7 @@ export class Service {
   @Prop({ default: true })
   stripeEnabled: boolean;
 
-  @Prop({ default: false })
+  @Prop({ default: true })
   bookingRestrictionActive: boolean;
 
   @Prop({ 

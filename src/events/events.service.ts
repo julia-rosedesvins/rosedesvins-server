@@ -8,6 +8,7 @@ import { EncryptionService } from '../common/encryption.service';
 import { Buffer } from 'buffer';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import axios from 'axios';
+import { createDAVClient } from 'tsdav';
 const dav = require('dav');
 
 @Injectable()
@@ -478,121 +479,268 @@ export class EventsService {
         throw new Error('Missing Orange credentials');
       }
 
-      // Decrypt the password
       const decryptedPassword = EncryptionService.decrypt(orangeCreds.password);
+      this.logger.log(`📂 Fetching events via tsdav for user: ${connector.userId}`);
 
-      // Get calendar with caching and retry logic
-      const calendar = await this.getOrangeCalendar(orangeCreds.username, decryptedPassword);
+      // ── Use tsdav to fetch calendars and events ──────────────────────────────
+      const now = new Date();
+      const rangeStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 6, 0);
 
-      const listResponse = await fetch(calendar.url, {
-        method: 'PROPFIND',
-        headers: {
-          'Content-Type': 'application/xml; charset=utf-8',
-          'Authorization': `Basic ${Buffer.from(`${orangeCreds.username}:${decryptedPassword}`).toString('base64')}`,
-          'Depth': '1'
-        },
-        body: `<?xml version="1.0" encoding="utf-8" ?>
-        <D:propfind xmlns:D="DAV:">
-            <D:prop>
-                <D:href/>
-                <D:resourcetype/>
-                <D:displayname/>
-            </D:prop>
-        </D:propfind>`
+      const davClient = await createDAVClient({
+        serverUrl: 'https://caldav.orange.fr',
+        credentials: { username: orangeCreds.username, password: decryptedPassword },
+        authMethod: 'Basic',
+        defaultAccountType: 'caldav',
       });
 
-      if (!listResponse.ok) {
-        throw new Error(`PROPFIND failed: ${listResponse.status} ${listResponse.statusText}`);
+      const calendars = await davClient.fetchCalendars();
+      console.log(`📂 tsdav fetchCalendars response:`, calendars);
+      this.logger.log(`📋 tsdav found ${calendars.length} calendar(s): ${calendars.map(c => c.displayName).join(', ')}`);
+
+      if (calendars.length === 0) {
+        this.logger.log(`📭 No calendars found for user: ${connector.userId}`);
+        return { connectorType: 'orange', userId: connector.userId.toString(), status: 'success', message: 'No calendars found', eventsSynced: 0 };
       }
 
-      const responseText = await listResponse.text();
-      const icsFiles = this.extractIcsFilesFromResponse(responseText, calendar.url);
+      const allIcsData: string[] = [];
+      for (const cal of calendars) {
+        this.logger.log(`📅 Fetching events from calendar: ${cal.displayName} (${cal.url})`);
 
-      if (icsFiles.length === 0) {
-        this.logger.log(`📭 No .ics files found in Orange calendar for user: ${connector.userId}`);
-        return {
-          connectorType: 'orange',
-          userId: connector.userId.toString(),
-          status: 'success',
-          message: 'No events found to sync',
-          eventsSynced: 0
-        };
-      }
-
-      // Fetch and parse all events
-      const events: any[] = [];
-      const currentDate = new Date();
-      const currentMonth = currentDate.getMonth() + 1; // JavaScript months are 0-based
-      const currentYear = currentDate.getFullYear();
-
-      // Calculate next 2 months (handle year rollover)
-      const nextMonth = currentDate.getMonth() + 2; // +2 because getMonth() is 0-based, and we want next month
-      const nextMonthYear = nextMonth > 12 ? currentYear + 1 : currentYear;
-      const adjustedNextMonth = nextMonth > 12 ? nextMonth - 12 : nextMonth;
-
-      const monthAfterNext = currentDate.getMonth() + 3; // +3 for the third month
-      const monthAfterNextYear = monthAfterNext > 12 ? currentYear + 1 : currentYear;
-      const adjustedMonthAfterNext = monthAfterNext > 12 ? monthAfterNext - 12 : monthAfterNext;
-
-      for (const icsUrl of icsFiles) {
+        // Try 1: with time-range filter
         try {
-          const icsResponse = await fetch(icsUrl, {
-            method: 'GET',
-            headers: {
-              'Authorization': `Basic ${Buffer.from(`${orangeCreds.username}:${decryptedPassword}`).toString('base64')}`,
-              'Content-Type': 'text/calendar',
-              'User-Agent': 'CalDAV-Client/1.0'
-            }
+          console.log('range', rangeStart.toISOString(), rangeEnd.toISOString());
+          const calObjects = await davClient.fetchCalendarObjects({
+            calendar: cal,
+            timeRange: { start: rangeStart.toISOString(), end: rangeEnd.toISOString() },
           });
-
-          if (icsResponse.ok) {
-            const icsContent = await icsResponse.text();
-            if (icsContent.includes('VEVENT')) {
-              const eventInfo = this.extractBasicEventInfo(icsContent);
-              if (eventInfo && eventInfo.startDate) {
-                // Filter for current month + next 2 months (3 months total)
-                const eventDate = new Date(eventInfo.startDate);
-                const eventMonth = eventDate.getMonth() + 1;
-                const eventYear = eventDate.getFullYear();
-
-                const isCurrentMonth = (eventMonth === currentMonth && eventYear === currentYear);
-                const isNextMonth = (eventMonth === adjustedNextMonth && eventYear === nextMonthYear);
-                const isMonthAfterNext = (eventMonth === adjustedMonthAfterNext && eventYear === monthAfterNextYear);
-
-                if (isCurrentMonth || isNextMonth || isMonthAfterNext) {
-                  events.push(eventInfo);
-                }
-              }
+          this.logger.log(`📄 Got ${calObjects.length} event object(s) from ${cal.displayName} (with time-range)`);
+          for (const obj of calObjects) {
+            if (obj.data) {
+              this.logger.log(`📄 Event data snippet: ${obj.data.substring(0, 200)}`);
+              allIcsData.push(obj.data);
             }
           }
-        } catch (fetchError) {
-          this.logger.warn(`⚠️ Error fetching .ics file: ${fetchError.message}`);
+          continue; // success — move to next calendar
+        } catch (calErr) {
+          this.logger.warn(`⚠️ fetchCalendarObjects (with time-range) failed: ${calErr.message}`);
+        }
+
+        // Try 2: without time-range (fetches all events — maybe server rejects time-range)
+        try {
+          const calObjectsAll = await davClient.fetchCalendarObjects({ calendar: cal });
+          this.logger.log(`📄 Got ${calObjectsAll.length} event object(s) from ${cal.displayName} (no time-range)`);
+          for (const obj of calObjectsAll) {
+            if (obj.data) {
+              this.logger.log(`📄 Event data snippet: ${obj.data.substring(0, 200)}`);
+              allIcsData.push(obj.data);
+            }
+          }
+          if (calObjectsAll.length === 0) {
+            this.logger.warn(`⚠️ Calendar "${cal.displayName}" appears to be empty (0 objects returned without filter)`);
+          }
+        } catch (calErr2) {
+          this.logger.warn(`⚠️ fetchCalendarObjects (no time-range) also failed: ${calErr2.message}`);
+        }
+      }
+
+      let responseText: string | null = allIcsData.length > 0 ? allIcsData.join('\n') : null;
+
+      const authHeader = `Basic ${Buffer.from(`${orangeCreds.username}:${decryptedPassword}`).toString('base64')}`;
+      const caldavHeaders = (extra: Record<string, string> = {}) => ({
+        'Authorization': authHeader,
+        'Content-Type': 'text/xml; charset=utf-8',
+        'User-Agent': 'Mozilla/5.0 (compatible) CalDAVSynchronizer/4.4',
+        ...extra,
+      });
+
+      // ── Fallback diagnostics if tsdav returned nothing ────────────────────
+      if (!responseText) {
+        const calendar = await this.getOrangeCalendar(orangeCreds.username, decryptedPassword);
+        this.logger.log(`📂 tsdav got no events, trying raw fallback on: ${calendar.url}`);
+
+      // ── Diagnostic: plain GET to confirm the URL is reachable ───────────────
+      const diagResp = await fetch(calendar.url, { method: 'GET', headers: caldavHeaders() });
+      const diagBody = await diagResp.text();
+      this.logger.log(`🔎 GET ${calendar.url} → ${diagResp.status}`);
+      this.logger.log(`🔎 GET headers: ${JSON.stringify(Object.fromEntries(diagResp.headers.entries()))}`);
+      this.logger.log(`🔎 GET body: ${diagBody.substring(0, 800)}`);
+
+      // ── Also try PROPFIND Depth:0 on the calendar URL ───────────────────────
+      const diagPropfind = await fetch(calendar.url, {
+        method: 'PROPFIND',
+        headers: caldavHeaders({ 'Depth': '0' }),
+        body: `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:"><D:allprop/></D:propfind>`,
+      });
+      const diagPfBody = await diagPropfind.text();
+      this.logger.log(`🔎 PROPFIND Depth:0 ${calendar.url} → ${diagPropfind.status}`);
+      this.logger.log(`🔎 PROPFIND Depth:0 body: ${diagPfBody.substring(0, 800)}`);
+
+      // Build a 6-month time-range window (used for client-side filtering)
+      const now = new Date();
+
+      // Orange's backend may require the literal @ in the URL (not %40) for REPORT/Depth:1
+      const calendarUrlRaw = calendar.url.replace('%40', '@');
+
+      let responseText: string | null = null;
+
+      // ── Attempt 1: REPORT calendar-query (encoded URL) ───────────────────
+      const reportBody = `<?xml version="1.0" encoding="utf-8"?>
+<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:prop><D:getetag/><C:calendar-data/></D:prop>
+  <C:filter>
+    <C:comp-filter name="VCALENDAR">
+      <C:comp-filter name="VEVENT"/>
+    </C:comp-filter>
+  </C:filter>
+</C:calendar-query>`;
+
+      const reportResp = await fetch(calendar.url, {
+        method: 'REPORT',
+        headers: caldavHeaders({ 'Depth': '1' }),
+        body: reportBody,
+      });
+      this.logger.log(`📡 REPORT (encoded URL) → ${reportResp.status}`);
+      if (reportResp.status === 207 || reportResp.status === 200) {
+        responseText = await reportResp.text();
+        this.logger.log(`📡 REPORT OK body snippet: ${responseText.substring(0, 400)}`);
+      }
+
+      // ── Attempt 2: REPORT calendar-query (raw @ URL) ─────────────────────
+      if (!responseText) {
+        const reportResp2 = await fetch(calendarUrlRaw, {
+          method: 'REPORT',
+          headers: caldavHeaders({ 'Depth': '1' }),
+          body: reportBody,
+        });
+        this.logger.log(`📡 REPORT (raw @ URL) → ${reportResp2.status}`);
+        if (reportResp2.status === 207 || reportResp2.status === 200) {
+          responseText = await reportResp2.text();
+          this.logger.log(`📡 REPORT raw@ OK body snippet: ${responseText.substring(0, 400)}`);
+        }
+      }
+
+      // ── Attempt 3: DAV sync-collection REPORT ───────────────────────────
+      if (!responseText) {
+        const syncBody = `<?xml version="1.0" encoding="utf-8"?>
+<D:sync-collection xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:sync-token/>
+  <D:sync-level>1</D:sync-level>
+  <D:prop><D:getetag/><C:calendar-data/></D:prop>
+</D:sync-collection>`;
+        for (const url of [calendar.url, calendarUrlRaw]) {
+          const syncResp = await fetch(url, {
+            method: 'REPORT',
+            headers: caldavHeaders({ 'Depth': '1' }),
+            body: syncBody,
+          });
+          this.logger.log(`📡 sync-collection REPORT (${url === calendarUrlRaw ? 'raw@' : 'encoded'}) → ${syncResp.status}`);
+          if (syncResp.status === 207 || syncResp.status === 200) {
+            responseText = await syncResp.text();
+            this.logger.log(`📡 sync-collection OK body snippet: ${responseText.substring(0, 400)}`);
+            break;
+          } else {
+            const body = await syncResp.text();
+            this.logger.warn(`📡 sync-collection ${syncResp.status} body: ${body.substring(0, 300)}`);
+          }
+        }
+      }
+
+      // ── Attempt 4: PROPFIND Depth:1 on UUID (encoded + raw) ─────────────
+      if (!responseText) {
+        const pfBody = `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:"><D:prop><D:getetag/><D:resourcetype/><D:getcontenttype/></D:prop></D:propfind>`;
+        for (const url of [calendar.url, calendarUrlRaw]) {
+          const pfResp = await fetch(url, {
+            method: 'PROPFIND',
+            headers: caldavHeaders({ 'Depth': '1' }),
+            body: pfBody,
+          });
+          this.logger.log(`📡 PROPFIND Depth:1 (${url === calendarUrlRaw ? 'raw@' : 'encoded'}) → ${pfResp.status}`);
+          if (pfResp.status === 207 || pfResp.status === 200) {
+            const pfText = await pfResp.text();
+            this.logger.log(`📡 PROPFIND Depth:1 OK body snippet: ${pfText.substring(0, 600)}`);
+            const blocks = pfText.match(/<[^:>]*:?response[^>]*>[\s\S]*?<\/[^:>]*:?response>/gi) || [];
+            const icsHrefs: string[] = [];
+            for (const block of blocks) {
+              if (/<[^:>]*:?collection[^>]*\/>/i.test(block)) continue;
+              const m = block.match(/<[^:>]*:?href[^>]*>\s*([^\s<]+)\s*<\/[^:>]*:?href>/i);
+              if (m) icsHrefs.push(m[1]);
+            }
+            this.logger.log(`📋 PROPFIND Depth:1 found ${icsHrefs.length} event resource(s): ${icsHrefs.slice(0, 5).join(', ')}`);
+            if (icsHrefs.length > 0) {
+              const parts: string[] = [];
+              for (const href of icsHrefs) {
+                const fullUrl = href.startsWith('http') ? href : `https://caldav.orange.fr${href}`;
+                const getEvt = await fetch(fullUrl, { headers: caldavHeaders() });
+                this.logger.log(`📡 GET event ${fullUrl} → ${getEvt.status}`);
+                if (getEvt.ok) parts.push(await getEvt.text());
+              }
+              if (parts.length > 0) { responseText = parts.join('\n'); break; }
+            }
+          } else {
+            this.logger.warn(`📡 PROPFIND Depth:1 ${pfResp.status}`);
+          }
+        }
+      }
+      } // end if (!responseText) fallback block
+
+      if (!responseText) {
+        this.logger.log(`📭 No events found for user: ${connector.userId}`);
+        return { connectorType: 'orange', userId: connector.userId.toString(), status: 'success', message: 'No events found to sync', eventsSynced: 0 };
+      }
+
+      // ── Parse events from the response ─────────────────────────────────────
+      const currentDate = new Date();
+      const currentMonth = currentDate.getMonth() + 1;
+      const currentYear  = currentDate.getFullYear();
+      const nextMonth       = currentDate.getMonth() + 2; const nextMonthYear       = nextMonth > 12       ? currentYear + 1 : currentYear; const adjNextMonth       = nextMonth > 12       ? nextMonth - 12       : nextMonth;
+      const monthAfterNext  = currentDate.getMonth() + 3; const monthAfterNextYear  = monthAfterNext > 12  ? currentYear + 1 : currentYear; const adjMonthAfterNext  = monthAfterNext > 12  ? monthAfterNext - 12  : monthAfterNext;
+
+      const events: any[] = [];
+
+      // If the response contains inline <C:calendar-data> (REPORT result), parse each block
+      const calDataBlocks = responseText.match(/<[^:>]*:?calendar-data[^>]*>([\s\S]*?)<\/[^:>]*:?calendar-data>/gi) || [];
+      if (calDataBlocks.length > 0) {
+        this.logger.log(`📋 Parsing ${calDataBlocks.length} inline calendar-data block(s)`);
+        for (const block of calDataBlocks) {
+          const ics = block
+            .replace(/<[^:>]*:?calendar-data[^>]*>/i, '')
+            .replace(/<\/[^:>]*:?calendar-data>/i, '')
+            .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+            .trim();
+          if (!ics.includes('VEVENT')) continue;
+          const info = this.extractBasicEventInfo(ics);
+          if (info?.startDate) {
+            const d = new Date(info.startDate);
+            const m = d.getMonth() + 1, y = d.getFullYear();
+            if ((m === currentMonth && y === currentYear) || (m === adjNextMonth && y === nextMonthYear) || (m === adjMonthAfterNext && y === monthAfterNextYear)) {
+              events.push(info);
+            }
+          }
+        }
+      } else {
+        // Plain ICS text (individual GET fallback)
+        const icsBlocks = responseText.split('BEGIN:VCALENDAR').filter(b => b.includes('VEVENT'));
+        for (const block of icsBlocks) {
+          const ics = 'BEGIN:VCALENDAR' + block;
+          const info = this.extractBasicEventInfo(ics);
+          if (info?.startDate) {
+            const d = new Date(info.startDate);
+            const m = d.getMonth() + 1, y = d.getFullYear();
+            if ((m === currentMonth && y === currentYear) || (m === adjNextMonth && y === nextMonthYear) || (m === adjMonthAfterNext && y === monthAfterNextYear)) {
+              events.push(info);
+            }
+          }
         }
       }
 
       if (events.length === 0) {
-        return {
-          connectorType: 'orange',
-          userId: connector.userId.toString(),
-          status: 'success',
-          message: 'No events found to sync (current + next 2 months)',
-          eventsSynced: 0
-        };
+        return { connectorType: 'orange', userId: connector.userId.toString(), status: 'success', message: 'No events found to sync (current + next 2 months)', eventsSynced: 0 };
       }
 
-      // Save events to database with conflict prevention
       const syncedEvents = await this.saveEventsToDatabase(events, connector.userId, 'orange');
-
       this.logger.log(`✅ Successfully synced ${syncedEvents} events from Orange calendar`);
-
-      return {
-        connectorType: 'orange',
-        userId: connector.userId.toString(),
-        status: 'success',
-        message: `Successfully synced ${syncedEvents} events`,
-        eventsSynced: syncedEvents,
-        eventsData: events
-      };
+      return { connectorType: 'orange', userId: connector.userId.toString(), status: 'success', message: `Successfully synced ${syncedEvents} events`, eventsSynced: syncedEvents, eventsData: events };
 
     } catch (error) {
       this.logger.error(`❌ Orange calendar sync error for user ${connector.userId}:`, error);
@@ -1550,62 +1698,167 @@ export class EventsService {
   /**
    * Get or discover Orange calendar with caching and retry logic
    */
-  private async getOrangeCalendar(username: string, password: string, retryCount = 0): Promise<any> {
+  /**
+   * Discover the Orange CalDAV calendar URL using the RFC 4791 manual discovery flow.
+   * Bypasses the `dav` library entirely (it sends PROPFIND to /users/{email}/ which now
+   * returns 404 on Orange's SabreDAV backend).
+   *
+   * Flow:
+   *  1. GET /.well-known/caldav  → follow redirect to get the real server root
+   *  2. PROPFIND /               → parse <current-user-principal>
+   *  3. PROPFIND {principal}/    → parse <calendar-home-set>
+   *  4. PROPFIND {home}/  D:1   → find first cal:calendar collection
+   */
+  private async getOrangeCalendar(username: string, password: string): Promise<{ url: string; displayName: string; homeUrl: string }> {
     const cacheKey = `orange-${username}`;
     const cached = this.calendarCache.get(cacheKey);
-
-    // Check if we have a valid cached calendar
     if (cached && (Date.now() - cached.timestamp) < this.CACHE_TTL) {
       this.logger.log('📅 Using cached calendar');
       return cached.calendar;
     }
 
-    try {
-      this.logger.log('🔍 Discovering calendars...');
+    this.logger.log('🔍 Discovering Orange CalDAV calendar via RFC 4791 flow...');
 
-      // Create CalDAV client
-      const xhr = new dav.transport.Basic(
-        new dav.Credentials({
-          username,
-          password
-        })
-      );
+    const authHeader = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
+    const baseHeaders = {
+      'Authorization': authHeader,
+      'Content-Type': 'text/xml; charset=utf-8',
+      'User-Agent': 'Mozilla/5.0 (compatible) CalDAVSynchronizer/4.4',
+    };
 
-      const principalUrl = `https://caldav.orange.fr/users/${encodeURIComponent(username)}/`;
+    const propfindBody = (props: string) =>
+      `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><D:prop>${props}</D:prop></D:propfind>`;
 
-      const account = await dav.createAccount({
-        server: principalUrl,
-        xhr: xhr,
-        accountType: 'caldav'
-      });
+    // Extract href from INSIDE a named property tag (not just the first href in the doc)
+    const extractPropHref = (xml: string, propLocalName: string): string | null => {
+      const propRe = new RegExp(`<[^:>\\s]*:?${propLocalName}[^>]*>([\\s\\S]*?)<\\/[^:>\\s]*:?${propLocalName}>`, 'i');
+      const propMatch = xml.match(propRe);
+      if (!propMatch) return null;
+      const hrefRe = /<[^:>\s]*:?href[^>]*>\s*([^\s<]+)\s*<\/[^:>\s]*:?href>/i;
+      const hrefMatch = propMatch[1].match(hrefRe);
+      return hrefMatch ? hrefMatch[1].trim() : null;
+    };
 
-      if (!account.calendars || account.calendars.length === 0) {
-        throw new Error('No calendars found for Orange account');
-      }
+    const extractTag = (xml: string, tag: string): string | null => {
+      const re = new RegExp(`<[^:>\\s]*:?${tag}[^>]*>\\s*([^<]+)\\s*<\\/[^:>\\s]*:?${tag}>`, 'i');
+      const m = xml.match(re);
+      return m ? m[1].trim() : null;
+    };
 
-      const calendar = account.calendars[0];
+    // Encode special characters in URL path segments (e.g. @ → %40) while preserving slashes
+    const encodePath = (path: string): string =>
+      path.split('/').map(seg => seg ? encodeURIComponent(decodeURIComponent(seg)) : seg).join('/');
 
-      // Cache the discovered calendar
-      this.calendarCache.set(cacheKey, {
-        calendar,
-        timestamp: Date.now()
-      });
+    const toAbsolute = (path: string, root: string): string => {
+      const base = path.startsWith('http') ? path : `${root}${path.startsWith('/') ? '' : '/'}${path}`;
+      // Encode the path portion only (preserve scheme + host)
+      try {
+        const u = new URL(base);
+        u.pathname = encodePath(u.pathname);
+        return u.toString();
+      } catch { return base; }
+    };
 
-      this.logger.log(`📅 Calendar discovered and cached: ${calendar.displayName || 'Default Calendar'}`);
-      return calendar;
+    // ── Step 1: Resolve the CalDAV server root via .well-known redirect ──────
+    const wellKnownResp = await fetch('https://caldav.orange.fr/.well-known/caldav', {
+      method: 'GET',
+      redirect: 'follow',
+      headers: { 'Authorization': authHeader, 'User-Agent': baseHeaders['User-Agent'] },
+    });
+    const serverRoot = 'https://caldav.orange.fr';
+    this.logger.log(`📡 .well-known → ${serverRoot} (status ${wellKnownResp.status})`);
 
-    } catch (error) {
-      this.logger.error('Error discovering calendar:', error);
+    // ── Step 2: PROPFIND / to get current-user-principal ────────────────────
+    const rootPropfindResp = await fetch(`${serverRoot}/`, {
+      method: 'PROPFIND',
+      headers: { ...baseHeaders, 'Depth': '0' },
+      body: propfindBody('<D:current-user-principal/>'),
+    });
+    this.logger.log(`📡 PROPFIND ${serverRoot}/ (Depth:0) → ${rootPropfindResp.status}`);
+    const rootXml = await rootPropfindResp.text();
 
-      // Retry logic for network issues
-      if (retryCount < 2 && (error.message.includes('Bad status') || error.message.includes('network'))) {
-        this.logger.log(`🔄 Retrying calendar discovery (attempt ${retryCount + 1}/3)...`);
-        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // Exponential backoff
-        return this.getOrangeCalendar(username, password, retryCount + 1);
-      }
-
-      throw error;
+    // Extract href from inside <current-user-principal>, NOT the first href in the doc
+    let principalPath = extractPropHref(rootXml, 'current-user-principal');
+    if (!principalPath) {
+      // Orange fallback: derive principal URL from username
+      principalPath = `/principals/${encodeURIComponent(username)}/`;
+      this.logger.log(`👤 current-user-principal not found, using fallback: ${principalPath}`);
     }
+    const principalUrl = toAbsolute(principalPath, serverRoot);
+    this.logger.log(`👤 Principal: ${principalUrl}`);
+
+    // ── Step 3: PROPFIND {principal} to get calendar-home-set ───────────────
+    const principalResp = await fetch(principalUrl, {
+      method: 'PROPFIND',
+      headers: { ...baseHeaders, 'Depth': '0' },
+      body: propfindBody('<C:calendar-home-set/>'),
+    });
+    this.logger.log(`📡 PROPFIND ${principalUrl} (Depth:0) → ${principalResp.status}`);
+    const principalXml = await principalResp.text();
+
+    // Extract href from inside <calendar-home-set>
+    let homePath = extractPropHref(principalXml, 'calendar-home-set');
+    if (!homePath) {
+      // Orange fallback: /calendars/{username}/
+      homePath = `/calendars/${encodeURIComponent(username)}/`;
+      this.logger.log(`🏠 calendar-home-set not found, using fallback: ${homePath}`);
+    }
+    const homeUrl = toAbsolute(homePath, serverRoot);
+    this.logger.log(`🏠 Calendar home: ${homeUrl}`);
+
+    // ── Step 4: PROPFIND {home} Depth:1 to list calendars ───────────────────
+    const homeResp = await fetch(homeUrl, {
+      method: 'PROPFIND',
+      headers: { ...baseHeaders, 'Depth': '1' },
+      body: propfindBody('<D:resourcetype/><D:displayname/>'),
+    });
+    this.logger.log(`📡 PROPFIND ${homeUrl} (Depth:1) → ${homeResp.status}`);
+    const homeXml = await homeResp.text();
+    this.logger.log(`📝 Home XML snippet: ${homeXml.substring(0, 1200)}`);
+
+    // Parse <response> blocks and find the first one that contains <cal:calendar>
+    const responseBlocks = homeXml.match(/<[^:>]*:?response[^>]*>[\s\S]*?<\/[^:>]*:?response>/gi) || [];
+    this.logger.log(`📋 Found ${responseBlocks.length - 1} calendar(s): ${responseBlocks.slice(1).map(b => extractTag(b, 'href')).filter(Boolean).join(', ')}`);
+
+    let calendarUrl: string | null = null;
+    let displayName = 'Mon calendrier';
+    for (const block of responseBlocks) {
+      const blockHref = extractTag(block, 'href') || '';
+      // Skip the home collection itself (exact match)
+      const normalizedHome = homeUrl.replace(/^https?:\/\/[^/]+/, '');
+      const normalizedBlock = blockHref.replace(/^https?:\/\/[^/]+/, '');
+      if (normalizedBlock === normalizedHome || normalizedBlock === normalizedHome.replace(/\/$/, '')) continue;
+
+      this.logger.log(`📦 Block href=${blockHref} | hasCalendar=${/<[^:>]*:?calendar\b[^>]*\/>/i.test(block)} | resourcetype snippet: ${block.match(/<[^:>]*:?resourcetype[^>]*>[\s\S]*?<\/[^:>]*:?resourcetype>/i)?.[0]?.substring(0, 120) ?? 'none'}`);
+
+      // Match any self-closing tag whose local-name is exactly "calendar"
+      // e.g. <cal:calendar/> or <C:calendar/> or <calendar/>
+      if (!/<[^:>\s]*:?calendar\s*\/>/i.test(block)) continue;
+
+      const href = blockHref;
+      if (!href) continue;
+      const name = extractTag(block, 'displayname');
+      if (name) displayName = name;
+      calendarUrl = href.startsWith('http') ? href : `${serverRoot}${href}`;
+      break;
+    }
+
+    if (!calendarUrl) throw new Error('Orange CalDAV: no cal:calendar collection found in home set');
+
+    this.logger.log(`📅 Calendar discovered: ${displayName} (${calendarUrl})`);
+
+    // Ensure the calendar URL has properly encoded path segments (e.g. @ → %40)
+    const encodedCalendarUrl = (() => {
+      try {
+        const u = new URL(calendarUrl);
+        u.pathname = u.pathname.split('/').map(seg => seg ? encodeURIComponent(decodeURIComponent(seg)) : seg).join('/');
+        return u.toString();
+      } catch { return calendarUrl; }
+    })();
+
+    const result = { url: encodedCalendarUrl, displayName, homeUrl };
+    this.calendarCache.set(cacheKey, { calendar: result, timestamp: Date.now() });
+    return result;
   }
 
   /**
