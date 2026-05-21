@@ -48,7 +48,7 @@ export class Service {
   @Prop({ 
     type: String,
     enum: ['last_minute', '1h', '2h', '4h', '24h', '48h', '72h', '7d', '10d'],
-    default: '24h'
+    default: 'last_minute'
   })
   bookingRestrictionTime: string;
 

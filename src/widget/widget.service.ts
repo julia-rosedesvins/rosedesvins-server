@@ -108,7 +108,7 @@ export class WidgetService {
         timezone: availability.timezone,
         defaultSlotDuration: availability.defaultSlotDuration,
         bufferTime: availability.bufferTime,
-        bookingRestrictionTime: service.bookingRestrictionTime ?? '24h',
+        bookingRestrictionTime: service.bookingRestrictionTime ?? 'last_minute',
         multipleBookingsSameSlot: service.multipleBookings,
         isActive: availability.isActive
       } : {
@@ -132,7 +132,7 @@ export class WidgetService {
       },
       notificationPreferences: notificationPreferences ? {
         // bookingAdvanceLimit: notificationPreferences.bookingAdvanceLimit,
-        bookingAdvanceLimit: service.bookingRestrictionTime ?? '24h',
+        bookingAdvanceLimit: service.bookingRestrictionTime ?? 'last_minute',
       } : {
         bookingAdvanceLimit: '1_hour',
       }

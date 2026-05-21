@@ -341,7 +341,9 @@ export class DomainProfileService {
       languagesOffered: serviceData.languagesOffered,
       category: serviceData.category || null,
       serviceBannerUrl: serviceBannerUrl,
-      isActive: serviceData.isActive
+      isActive: serviceData.isActive,
+      bookingRestrictionActive: true,
+      bookingRestrictionTime: 'last_minute',
     };
     
     const domainProfile = await this.domainProfileModel.findOneAndUpdate(
@@ -388,7 +390,7 @@ export class DomainProfileService {
       stripeEnabled: (service as any).stripeEnabled ?? true,
       // New booking settings fields
       bookingRestrictionActive: (service as any).bookingRestrictionActive ?? true,
-      bookingRestrictionTime: (service as any).bookingRestrictionTime ?? '24h',
+      bookingRestrictionTime: (service as any).bookingRestrictionTime ?? 'last_minute',
       multipleBookings: (service as any).multipleBookings ?? false,
       hasCustomAvailability: (service as any).hasCustomAvailability ?? false,
       dateAvailability: (service as any).dateAvailability ?? []
