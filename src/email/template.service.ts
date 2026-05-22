@@ -97,6 +97,7 @@ export interface ProviderNotificationEmailData {
   additionalNotes?: string;
   eventName?: string;
   providerTitle?: string;
+  customerPhone?: string;
 }
 
 export interface SubscriptionExpiryWarningEmailData {
@@ -135,6 +136,7 @@ export interface BookingEmailTemplateData {
   backendUrl: string;
   serviceBannerUrl: string;
   cancelBookingUrl?: string;
+  customerPhone?: string;
 }
 
 @Injectable()

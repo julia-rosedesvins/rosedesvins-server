@@ -47,6 +47,9 @@
                                 <tr>
                                     <td style="background: linear-gradient(135deg, #e8f5e8 0%, #f0f8f0 100%); border: 1px solid #3A7B59; border-radius: 12px; padding: 20px; text-align: center;">
                                         <p style="color: #2d5f44; font-size: 16px; margin: 5px 0;"><strong>{{eventName}}</strong></p>
+                                        <p style="color: #2d5f44; font-size: 14px; margin: 6px 0 0 0;">{{customerName}}</p>
+                                        {{#if customerEmail}}<p style="color: #2d5f44; font-size: 14px; margin: 6px 0 0 0;">{{customerEmail}}</p>{{/if}}
+                                        {{#if customerPhone}}<p style="color: #2d5f44; font-size: 14px; margin: 6px 0 0 0;">{{customerPhone}}</p>{{/if}}
                                     </td>
                                 </tr>
                             </table>

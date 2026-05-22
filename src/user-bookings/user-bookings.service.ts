@@ -55,6 +55,7 @@ export interface BookingEmailData {
   cancelBookingUrl?: string;
   eventName?: string;
   providerTitle?: string;
+  customerPhone?: string;
 }
 
 /**
@@ -355,6 +356,7 @@ export class UserBookingsService {
             backendUrl: bookingData.backendUrl,
             serviceBannerUrl: bookingData.serviceBannerUrl,
             customerEmail: bookingData.customerEmail,
+            customerPhone: bookingData.customerPhone,
             additionalNotes: bookingData.additionalNotes ?? undefined,
             providerTitle: bookingData.providerTitle || 'Nouvelle réservation reçue !',
           });
@@ -540,6 +542,7 @@ export class UserBookingsService {
           const bookingEmailData: BookingEmailData = {
             customerName: `${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
             customerEmail: createBookingDto.customerEmail,
+            customerPhone: createBookingDto.phoneNo,
             providerName: user ? `${user.firstName} ${user.lastName}` : 'Rose des Vins',
             providerEmail: user ? user.email : 'admin@rosedesvins.com',
             eventTitle: eventTitle,
@@ -633,6 +636,7 @@ export class UserBookingsService {
       const bookingEmailData: BookingEmailData = {
         customerName: `${booking.userContactFirstname} ${booking.userContactLastname}`,
         customerEmail: booking.customerEmail,
+        customerPhone: booking.phoneNo,
         providerName: user ? `${user.firstName} ${user.lastName}` : 'Rose des Vins',
         providerEmail: user ? user.email : 'admin@rosedesvins.com',
         eventTitle,
@@ -1461,6 +1465,7 @@ export class UserBookingsService {
           const bookingEmailData: BookingEmailData = {
             customerName: `${updatedBooking.userContactFirstname} ${updatedBooking.userContactLastname}`,
             customerEmail: updatedBooking.customerEmail,
+            customerPhone: updatedBooking.phoneNo,
             providerName: user ? `${user.firstName} ${user.lastName}` : 'Rose des Vins',
             providerEmail: user ? user.email : 'admin@rosedesvins.com',
             eventTitle: service?.name || 'Dégustation de vins',
@@ -1901,6 +1906,7 @@ export class UserBookingsService {
           const bookingEmailData: BookingEmailData = {
             customerName: `${booking.userContactFirstname} ${booking.userContactLastname}`,
             customerEmail: booking.customerEmail,
+            customerPhone: booking.phoneNo,
             providerName: user ? `${user.firstName} ${user.lastName}` : 'Rose des Vins',
             providerEmail: user ? user.email : 'admin@rosedesvins.com',
             eventTitle: service?.name || 'Dégustation de vins',
