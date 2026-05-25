@@ -5,6 +5,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { User, UserRole, AccountStatus } from '../schemas/user.schema';
 import { Subscription } from '../schemas/subscriptions.schema';
+import { NewsletterSubscription } from '../schemas/newsletter-subscription.schema';
 import { CreateAdminDto, AdminLoginDto } from '../validators/admin.validators';
 import { ContactFormDto, UserActionDto, UserLoginDto, ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto, UpdateUserDto } from '../validators/user.validators';
 import { EmailService } from '../email/email.service';
@@ -60,6 +61,7 @@ export class UsersService {
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(Subscription.name) private subscriptionModel: Model<Subscription>,
+    @InjectModel(NewsletterSubscription.name) private newsletterSubscriptionModel: Model<NewsletterSubscription>,
     private jwtService: JwtService,
     private emailService: EmailService,
   ) {}
@@ -652,6 +654,14 @@ export class UsersService {
       if (existingUser) {
         throw new ConflictException('Email already in use');
       }
+    }
+
+    // Update newsletter subscription email if email is being changed
+    if (updateUserDto.email && updateUserDto.email.toLowerCase() !== user.email) {
+      await this.newsletterSubscriptionModel.updateOne(
+        { email: user.email },
+        { $set: { email: updateUserDto.email.toLowerCase() } },
+      );
     }
 
     // Update fields
