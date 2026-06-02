@@ -49,6 +49,14 @@ export class NotificationsService {
         private templateService: TemplateService,
     ) { }
 
+    private joinUrl(baseUrl: string, path: string): string {
+        if (!baseUrl || !path) return baseUrl || path || '';
+        if (path.startsWith('http://') || path.startsWith('https://')) return path;
+        const cleanBase = baseUrl.replace(/\/+$/, '');
+        const cleanPath = path.replace(/^\/+/, '');
+        return `${cleanBase}/${cleanPath}`;
+    }
+
     /**
      * Cron job that runs every 30 minutes to check for upcoming events
      * and send notifications based on user preferences
@@ -360,8 +368,7 @@ export class NotificationsService {
                 // Enhanced fields for booking-style template
                 domainName: domainName,
                 domainAddress: '', // Domain profile doesn't have address field
-                domainLogoUrl: domain?.domainLogoUrl ? `${backendUrl}${domain.domainLogoUrl}` : `${backendUrl}/assets/logo.png`,
-                serviceName: service?.name || event.eventName,
+                domainLogoUrl: this.joinUrl(backendUrl, domain?.domainLogoUrl || '/assets/logo.png'),
                 serviceDescription: service?.description || event.eventDescription,
                 participantsAdults: booking.participantsAdults || 1,
                 participantsChildren: booking.participantsEnfants || 0,
@@ -370,9 +377,9 @@ export class NotificationsService {
                 totalPrice: service?.pricePerPerson ? `${service.pricePerPerson * (booking.participantsAdults + booking.participantsEnfants || 0)}€` : '0€',
                 paymentMethod: paymentMethod,
                 frontendUrl: frontendUrl,
-                appLogoUrl: `${frontendUrl}/assets/logo.png`,
+                appLogoUrl: this.joinUrl(backendUrl, '/assets/logo.png'),
                 backendUrl: backendUrl,
-                serviceBannerUrl: service?.serviceBannerUrl ? `${backendUrl}${service.serviceBannerUrl}` : `${backendUrl}/uploads/default-service-banner.jpg`,
+                serviceBannerUrl: this.joinUrl(backendUrl, service?.serviceBannerUrl || '/uploads/default-service-banner.jpg'),
                 cancelBookingUrl: cancelBookingUrl,
                 additionalNotes: booking.additionalNotes || null,
             };
@@ -486,9 +493,7 @@ export class NotificationsService {
                 // Enhanced fields for booking-style template
                 domainName: domainName,
                 domainAddress: '', // Domain profile doesn't have address field
-                domainLogoUrl: domain?.domainLogoUrl ? `${backendUrl}${domain.domainLogoUrl}` : `${backendUrl}/assets/logo.png`,
-                serviceName: service?.name,
-                serviceDescription: service?.description || event.eventDescription,
+                domainLogoUrl: this.joinUrl(backendUrl, domain?.domainLogoUrl || '/assets/logo.png'),
                 participantsAdults: booking.participantsAdults || 1,
                 participantsChildren: booking.participantsEnfants || 0,
                 selectedLanguage: this.getLanguageInFrench(booking.selectedLanguage),
@@ -496,10 +501,9 @@ export class NotificationsService {
                 totalPrice: service?.pricePerPerson ? `${service.pricePerPerson * (booking.participantsAdults + booking.participantsEnfants || 0)}€` : '0€',
                 paymentMethod: paymentMethod,
                 frontendUrl: frontendUrl,
-                appLogoUrl: `${frontendUrl}/assets/logo.png`,
+                appLogoUrl: this.joinUrl(backendUrl, '/assets/logo.png'),
                 backendUrl: backendUrl,
-                serviceBannerUrl: service?.serviceBannerUrl ? `${backendUrl}${service.serviceBannerUrl}` : `${backendUrl}/uploads/default-service-banner.jpg`,
-                customerEmail: booking.customerEmail,
+                serviceBannerUrl: this.joinUrl(backendUrl, service?.serviceBannerUrl || '/uploads/default-service-banner.jpg'),
                 additionalNotes: booking.additionalNotes || null,
                 providerTitle: 'Votre réservation approche !'
             };
