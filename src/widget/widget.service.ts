@@ -98,7 +98,7 @@ export class WidgetService {
         pricePerPerson: service.pricePerPerson,
         timeOfServiceInMinutes: service.timeOfServiceInMinutes,
         numberOfWinesTasted: service.numberOfWinesTasted,
-        languagesOffered: service.languagesOffered,
+        languagesOffered: (service.languagesOffered || []).filter((l: string) => l && l.trim().toLowerCase() !== 'autre'),
         isActive: service.isActive,
       },
       availability: availability ? {
