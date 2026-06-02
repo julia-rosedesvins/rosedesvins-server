@@ -136,7 +136,8 @@ export class SubscriptionController {
         userId: queryDto.userId,
         sortBy: queryDto.sortBy,
         dateFrom: queryDto.dateFrom,
-        dateTo: queryDto.dateTo
+        dateTo: queryDto.dateTo,
+        search: queryDto.search
       };
 
       const result = await this.subscriptionService.getAllSubscriptions(queryParams);

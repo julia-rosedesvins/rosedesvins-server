@@ -67,6 +67,11 @@ export const GetAllSubscriptionsSchema = z.object({
   dateTo: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'dateTo must be YYYY-MM-DD')
+    .optional(),
+
+  search: z
+    .string()
+    .max(100)
     .optional()
 });
 
