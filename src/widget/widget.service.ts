@@ -25,18 +25,16 @@ export class WidgetService {
     const userObjectId = new Types.ObjectId(userId);
     const serviceObjectId = new Types.ObjectId(serviceId);
 
-    // 1. Check if user subscription is active
+    // 1. Check if user subscription is active (only blocked if manually set to inactive)
     const subscription = await this.subscriptionModel
       .findOne({
         userId: userObjectId,
         isActive: true,
-        startDate: { $lte: new Date() },
-        endDate: { $gte: new Date() }
       })
       .exec();
 
     if (!subscription) {
-      throw new BadRequestException('User subscription is not active or has expired');
+      throw new BadRequestException('User subscription is not active');
     }
 
     // 2. Get domain profile with the specific service
