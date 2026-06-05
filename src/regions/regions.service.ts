@@ -739,6 +739,34 @@ export class RegionsService {
             .exec();
     }
 
+    /**
+     * Builds a MongoDB-compatible regex pattern that is insensitive to accents/diacritics.
+     * e.g. "chateau" will match "château", "Château", etc.
+     */
+    private buildAccentInsensitivePattern(query: string): string {
+        const ACCENT_MAP: Record<string, string> = {
+            a: '[aàâäáãå]',
+            e: '[eéèêë]',
+            i: '[iîïíì]',
+            o: '[oôöóòõø]',
+            u: '[uùûüúű]',
+            c: '[cç]',
+            n: '[nñ]',
+            y: '[yÿý]',
+        };
+        // Strip accents from input first, then map each base char to its accent class
+        const stripped = query.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        return stripped
+            .split('')
+            .map(char => {
+                const lower = char.toLowerCase();
+                if (ACCENT_MAP[lower]) return ACCENT_MAP[lower];
+                // Escape regex special chars
+                return char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            })
+            .join('');
+    }
+
     async unifiedSearch(query: string): Promise<{
         success: boolean;
         data: {
@@ -753,6 +781,9 @@ export class RegionsService {
         try {
             const backendUrl = this.configService.get<string>('BACKEND_URL') || '';
             const searchQuery = query.trim();
+            const searchPattern = this.buildAccentInsensitivePattern(searchQuery);
+            const normalizeStr = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+            const normalizedQuery = normalizeStr(searchQuery);
             
             // Return early if query is empty after trimming
             if (!searchQuery) {
@@ -778,9 +809,9 @@ export class RegionsService {
             const serviceSearchConditions: any = {
                 'services.isActive': true,
                 $or: [
-                    { 'services.name': { $regex: searchQuery, $options: 'i' } },
-                    { 'services.description': { $regex: searchQuery, $options: 'i' } },
-                { 'services.languagesOffered': { $in: [new RegExp(searchQuery, 'i')] } }
+                    { 'services.name': { $regex: searchPattern, $options: 'i' } },
+                    { 'services.description': { $regex: searchPattern, $options: 'i' } },
+                { 'services.languagesOffered': { $in: [new RegExp(searchPattern, 'i')] } }
             ]
         };
 
@@ -802,22 +833,22 @@ export class RegionsService {
             this.staticExperienceModel
                 .find({
                     $or: [
-                        { name: { $regex: searchQuery, $options: 'i' } },
-                        { category: { $regex: searchQuery, $options: 'i' } },
-                        { city: { $regex: searchQuery, $options: 'i' } },
+                        { name: { $regex: searchPattern, $options: 'i' } },
+                        { category: { $regex: searchPattern, $options: 'i' } },
+                        { city: { $regex: searchPattern, $options: 'i' } },
                     ]
                 })
                 .limit(10)
                 .lean()
                 .exec(),
             this.userModel
-                .find({ domainName: { $regex: searchQuery, $options: 'i' } })
+                .find({ domainName: { $regex: searchPattern, $options: 'i' } })
                 .select('_id domainName domainLatitude domainLongitude address city codePostal region')
                 .limit(10)
                 .lean()
                 .exec(),
             this.regionModel
-                .find({ denom: { $regex: searchQuery, $options: 'i' } })
+                .find({ denom: { $regex: searchPattern, $options: 'i' } })
                 .limit(10)
                 .lean()
                 .exec(),
@@ -831,10 +862,10 @@ export class RegionsService {
             for (const service of profileDoc.services as any[]) {
                 if (!service.isActive) continue;
 
-                const matchesName = service.name.toLowerCase().includes(searchQuery.toLowerCase());
-                const matchesDescription = service.description?.toLowerCase().includes(searchQuery.toLowerCase());
+                const matchesName = normalizeStr(service.name).includes(normalizedQuery);
+                const matchesDescription = service.description ? normalizeStr(service.description).includes(normalizedQuery) : false;
                 const matchesLanguage = service.languagesOffered?.some((lang: string) => 
-                    lang.toLowerCase().includes(searchQuery.toLowerCase())
+                    normalizeStr(lang).includes(normalizedQuery)
                 );
                 const matchesPrice = numericQuery !== null && 
                     Math.abs(service.pricePerPerson - numericQuery) <= 10;
@@ -939,7 +970,7 @@ export class RegionsService {
                     suggestedRoute = `/region/${encodeURIComponent(domains[0].location.region)}`;
                 } else {
                     // Find the region name that best matches the search query
-                    const exactDomainRegion = domains.find(d => d.location?.region?.toLowerCase() === searchQuery.trim().toLowerCase());
+                    const exactDomainRegion = domains.find(d => d.location?.region && normalizeStr(d.location.region) === normalizedQuery);
                     const bestDomainRegion = exactDomainRegion || domains.find(d => d.location?.region);
                     suggestedRoute = bestDomainRegion?.location?.region
                         ? `/region/${encodeURIComponent(bestDomainRegion.location.region)}`
@@ -948,7 +979,7 @@ export class RegionsService {
             } else if (hasRegions) {
                 type = 'region';
                 // Always go directly to the best matching region page
-                const exactRegion = regionResults.find(r => r.denom.toLowerCase() === searchQuery.trim().toLowerCase());
+                const exactRegion = regionResults.find(r => normalizeStr(r.denom) === normalizedQuery);
                 const bestRegion = exactRegion || regionResults[0];
                 suggestedRoute = `/region/${encodeURIComponent(bestRegion.denom)}`;
             } else if (hasStaticExperiences) {
@@ -994,14 +1025,14 @@ export class RegionsService {
             type = 'mixed';
             // Priority: domain > region > service/static-experience
             if (hasDomains) {
-                const exactDomainRegion = domains.find(d => d.location?.region?.toLowerCase() === searchQuery.trim().toLowerCase());
+                const exactDomainRegion = domains.find(d => d.location?.region && normalizeStr(d.location.region) === normalizedQuery);
                 const bestDomainRegion = exactDomainRegion || domains.find(d => d.location?.region);
                 suggestedRoute = bestDomainRegion?.location?.region
                     ? `/region/${encodeURIComponent(bestDomainRegion.location.region)}`
                     : `/region/${encodeURIComponent(searchQuery)}`;
             } else if (hasRegions) {
                 // Always go directly to the best matching region page
-                const exactRegion = regionResults.find(r => r.denom.toLowerCase() === searchQuery.trim().toLowerCase());
+                const exactRegion = regionResults.find(r => normalizeStr(r.denom) === normalizedQuery);
                 const bestRegion = exactRegion || regionResults[0];
                 suggestedRoute = `/region/${encodeURIComponent(bestRegion.denom)}`;
             } else if (hasStaticExperiences) {
