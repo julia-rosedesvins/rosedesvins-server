@@ -2,12 +2,16 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { SupportContact } from '../schemas/support-contact.schema';
+import { User } from '../schemas/user.schema';
 import { CreateSupportContactDto, PaginationQueryDto } from '../validators/support-contact.validators';
+import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class SupportContactService {
   constructor(
     @InjectModel(SupportContact.name) private supportContactModel: Model<SupportContact>,
+    @InjectModel(User.name) private userModel: Model<User>,
+    private emailService: EmailService,
   ) {}
 
   async createSupportTicket(userId: string, createSupportContactDto: CreateSupportContactDto): Promise<SupportContact> {
@@ -17,10 +21,34 @@ export class SupportContactService {
       userId: userObjectId,
       subject: createSupportContactDto.subject,
       message: createSupportContactDto.message,
-      status: 'pending', // Default status
+      status: 'pending',
     });
 
-    return await supportContact.save();
+    const saved = await supportContact.save();
+
+    // Send alert email to admin (non-blocking)
+    try {
+      const user = await this.userModel.findById(userObjectId).select('firstName lastName email domainName').exec();
+      if (user) {
+        await this.emailService.sendSupportTicketAlert({
+          userFullName: `${user.firstName} ${user.lastName}`,
+          userEmail: user.email,
+          domainName: (user as any).domainName,
+          subject: createSupportContactDto.subject,
+          message: createSupportContactDto.message,
+          ticketId: (saved._id as any).toString(),
+        });
+      }
+    } catch (emailError) {
+      // Do not fail ticket creation if email fails
+      console.error('Failed to send support ticket alert email:', emailError);
+    }
+
+    return saved;
+  }
+
+  async getUnreadCount(): Promise<number> {
+    return this.supportContactModel.countDocuments({ status: 'pending' }).exec();
   }
 
   async getUserSupportTickets(userId: string, query: PaginationQueryDto): Promise<{

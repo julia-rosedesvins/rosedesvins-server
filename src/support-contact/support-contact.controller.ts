@@ -124,6 +124,17 @@ export class SupportContactController {
     }
   }
 
+  @Get('admin/unread-count')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Get count of pending (unread) support tickets' })
+  @ApiBearerAuth('admin-token')
+  async getUnreadCount(
+    @CurrentAdmin() admin: any
+  ): Promise<{ success: boolean; data: { count: number } }> {
+    const count = await this.supportContactService.getUnreadCount();
+    return { success: true, data: { count } };
+  }
+
   @Get('admin/all-tickets')
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Get all support tickets for admin (paginated)' })
