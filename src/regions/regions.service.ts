@@ -936,17 +936,21 @@ export class RegionsService {
             } else if (hasDomains) {
                 type = 'domain';
                 if (domains.length === 1 && domains[0].location.region) {
-                    suggestedRoute = `/region/${encodeURIComponent(domains[0].location.region)}?q=${encodeURIComponent(searchQuery)}`;
+                    suggestedRoute = `/region/${encodeURIComponent(domains[0].location.region)}`;
                 } else {
-                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                    // Find the region name that best matches the search query
+                    const exactDomainRegion = domains.find(d => d.location?.region?.toLowerCase() === searchQuery.trim().toLowerCase());
+                    const bestDomainRegion = exactDomainRegion || domains.find(d => d.location?.region);
+                    suggestedRoute = bestDomainRegion?.location?.region
+                        ? `/region/${encodeURIComponent(bestDomainRegion.location.region)}`
+                        : `/region/${encodeURIComponent(searchQuery)}`;
                 }
             } else if (hasRegions) {
                 type = 'region';
-                if (regionResults.length === 1) {
-                    suggestedRoute = `/region/${encodeURIComponent(regionResults[0].denom)}?q=${encodeURIComponent(searchQuery)}`;
-                } else {
-                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
-                }
+                // Always go directly to the best matching region page
+                const exactRegion = regionResults.find(r => r.denom.toLowerCase() === searchQuery.trim().toLowerCase());
+                const bestRegion = exactRegion || regionResults[0];
+                suggestedRoute = `/region/${encodeURIComponent(bestRegion.denom)}`;
             } else if (hasStaticExperiences) {
                 type = 'static-experience';
                 // Try to find region by coordinates first, then by city name
@@ -981,42 +985,25 @@ export class RegionsService {
                 }
                 
                 if (matchedRegion) {
-                    suggestedRoute = `/region/${encodeURIComponent(matchedRegion.denom)}?q=${encodeURIComponent(searchQuery)}`;
+                    suggestedRoute = `/region/${encodeURIComponent(matchedRegion.denom)}`;
                 } else {
-                    // If still no region found, try to find the nearest parent region
-                    if (experiencesWithCoords.length > 0) {
-                        const exp = experiencesWithCoords[0];
-                        const nearestRegion = await this.regionModel.findOne({
-                            isParent: true
-                        }).sort({
-                            // Simple distance calculation - find closest region center
-                        }).limit(1).exec();
-                        
-                        if (nearestRegion) {
-                            suggestedRoute = `/region/${encodeURIComponent(nearestRegion.denom)}?q=${encodeURIComponent(searchQuery)}`;
-                        } else {
-                            suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
-                        }
-                    } else {
-                        suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
-                    }
+                    suggestedRoute = `/region/${encodeURIComponent(searchQuery)}`;
                 }
             }
         } else {
             type = 'mixed';
             // Priority: domain > region > service/static-experience
             if (hasDomains) {
-                if (domains.length === 1 && domains[0].location.region) {
-                    suggestedRoute = `/region/${encodeURIComponent(domains[0].location.region)}?q=${encodeURIComponent(searchQuery)}`;
-                } else {
-                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
-                }
+                const exactDomainRegion = domains.find(d => d.location?.region?.toLowerCase() === searchQuery.trim().toLowerCase());
+                const bestDomainRegion = exactDomainRegion || domains.find(d => d.location?.region);
+                suggestedRoute = bestDomainRegion?.location?.region
+                    ? `/region/${encodeURIComponent(bestDomainRegion.location.region)}`
+                    : `/region/${encodeURIComponent(searchQuery)}`;
             } else if (hasRegions) {
-                if (regionResults.length === 1) {
-                    suggestedRoute = `/region/${encodeURIComponent(regionResults[0].denom)}?q=${encodeURIComponent(searchQuery)}`;
-                } else {
-                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
-                }
+                // Always go directly to the best matching region page
+                const exactRegion = regionResults.find(r => r.denom.toLowerCase() === searchQuery.trim().toLowerCase());
+                const bestRegion = exactRegion || regionResults[0];
+                suggestedRoute = `/region/${encodeURIComponent(bestRegion.denom)}`;
             } else if (hasStaticExperiences) {
                 // Try to find region by coordinates for static experiences
                 const experiencesWithCoords = staticExperienceResults.filter(exp => exp.latitude && exp.longitude);
@@ -1031,16 +1018,16 @@ export class RegionsService {
                     }).exec();
                     
                     if (matchedRegion) {
-                        suggestedRoute = `/region/${encodeURIComponent(matchedRegion.denom)}?q=${encodeURIComponent(searchQuery)}`;
+                        suggestedRoute = `/region/${encodeURIComponent(matchedRegion.denom)}`;
                     } else {
-                        suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                        suggestedRoute = `/region/${encodeURIComponent(searchQuery)}`;
                     }
                 } else {
-                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                    suggestedRoute = `/region/${encodeURIComponent(searchQuery)}`;
                 }
             } else {
                 // Services only
-                suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                suggestedRoute = `/experiences?q=${encodeURIComponent(searchQuery)}`;
             }
         }
 
