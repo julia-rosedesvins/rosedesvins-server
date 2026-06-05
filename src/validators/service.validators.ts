@@ -39,6 +39,10 @@ export const ServiceSchema = z.object({
     .min(1, 'At least one language must be offered')
     .max(10, 'Maximum 10 languages allowed'),
   
+  category: z
+    .string()
+    .optional(),
+  
   isActive: z
     .boolean()
     .default(true)
@@ -88,6 +92,10 @@ export const UpdateServiceSchema = z.object({
     .array(z.string().min(2, 'Language must be at least 2 characters'))
     .min(1, 'At least one language must be offered')
     .max(10, 'Maximum 10 languages allowed')
+    .optional(),
+  
+  category: z
+    .string()
     .optional(),
   
   isActive: z

@@ -13,6 +13,8 @@ export interface UserContactDetails {
   codePostal: string | null;
   city: string | null;
   siteWeb: string | null;
+  domainLatitude: number | null;
+  domainLongitude: number | null;
 }
 
 export interface UpdateContactDetailsDto {
@@ -24,6 +26,8 @@ export interface UpdateContactDetailsDto {
   codePostal?: string;
   city?: string;
   siteWeb?: string;
+  domainLatitude?: number | null;
+  domainLongitude?: number | null;
 }
 
 @Injectable()
@@ -37,7 +41,7 @@ export class ContactDetailsService {
       _id: userId,
       role: UserRole.USER,
       accountStatus: { $in: [AccountStatus.APPROVED, AccountStatus.ACTIVE] }
-    }).select('firstName lastName email phoneNumber domainName address codePostal city siteWeb');
+    }).select('firstName lastName email phoneNumber domainName address codePostal city siteWeb domainLatitude domainLongitude');
 
     if (!user) {
       throw new UnauthorizedException('User not found or access denied');
@@ -53,6 +57,8 @@ export class ContactDetailsService {
       codePostal: user.codePostal,
       city: user.city,
       siteWeb: user.siteWeb,
+      domainLatitude: user.domainLatitude,
+      domainLongitude: user.domainLongitude,
     };
   }
 
@@ -77,7 +83,7 @@ export class ContactDetailsService {
       userId,
       filteredUpdateData,
       { new: true, runValidators: true }
-    ).select('firstName lastName email phoneNumber domainName address codePostal city siteWeb');
+    ).select('firstName lastName email phoneNumber domainName address codePostal city siteWeb domainLatitude domainLongitude');
 
     if (!updatedUser) {
       throw new UnauthorizedException('Failed to update user details');
@@ -93,6 +99,8 @@ export class ContactDetailsService {
       codePostal: updatedUser.codePostal,
       city: updatedUser.city,
       siteWeb: updatedUser.siteWeb,
+      domainLatitude: updatedUser.domainLatitude,
+      domainLongitude: updatedUser.domainLongitude,
     };
   }
 }

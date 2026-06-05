@@ -42,6 +42,7 @@ export interface BookingEmailData {
   // Enhanced template fields
   domainName: string;
   domainAddress: string;
+  domainPhone: string;
   domainLogoUrl: string;
   serviceName: string;
   serviceDescription: string;
@@ -54,6 +55,7 @@ export interface BookingEmailData {
   cancelBookingUrl?: string;
   eventName?: string;
   providerTitle?: string;
+  customerPhone?: string;
 }
 
 /**
@@ -108,12 +110,26 @@ export class UserBookingsService {
 
     const methodTranslations: { [key: string]: string } = {
       'bank card': 'Carte bancaire',
+      'bank_card': 'Carte bancaire',
       'checks': 'Chèques',
-      'cash': 'Espèces'
+      'cash': 'Espèces',
+      'cash_on_onsite': 'Espèces',
     };
 
-    const translatedMethods = methods
-      .map(method => methodTranslations[method] || method)
+    // Separate stripe from on-site methods
+    const hasStripe = methods.some(m => m.toLowerCase() === 'stripe');
+    const onSiteMethods = methods.filter(m => m.toLowerCase() !== 'stripe');
+
+    if (hasStripe && onSiteMethods.length === 0) {
+      return 'Paiement en ligne par carte bancaire';
+    }
+
+    if (onSiteMethods.length === 0) {
+      return 'Paiement sur place';
+    }
+
+    const translatedMethods = onSiteMethods
+      .map(method => methodTranslations[method.toLowerCase()] || method)
       .join(', ');
 
     return `Paiement sur place (${translatedMethods})`;
@@ -136,10 +152,10 @@ export class UserBookingsService {
       }
 
       // Default fallback if no payment methods found
-      return 'Paiement sur place (Carte bancaire, Chèques, Espèces)';
+      return 'Paiement sur place';
     } catch (error) {
       console.warn('Could not fetch payment methods for user:', userId, error);
-      return 'Paiement sur place (Carte bancaire, Chèques, Espèces)';
+      return 'Paiement sur place';
     }
   }
 
@@ -185,6 +201,11 @@ export class UserBookingsService {
   private joinUrl(baseUrl: string, path: string): string {
     if (!baseUrl || !path) return baseUrl || path || '';
 
+    // If path is already an absolute URL, return it as-is
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return path;
+    }
+
     // Remove trailing slash from base URL and leading slash from path
     const cleanBase = baseUrl.replace(/\/+$/, '');
     const cleanPath = path.replace(/^\/+/, '');
@@ -211,7 +232,7 @@ export class UserBookingsService {
   private async sendCustomerBookingEmail(bookingData: BookingEmailData, type: 'created' | 'updated' | 'cancelled'): Promise<void> {
     setImmediate(async () => {
       try {
-        const subject = this.getEmailSubject(type, 'customer');
+        const subject = this.getEmailSubject(type, 'customer', bookingData.domainName);
 
         const templateData = {
           customerName: bookingData.customerName,
@@ -227,6 +248,7 @@ export class UserBookingsService {
           numberOfWinesTasted: bookingData.numberOfWinesTasted,
           domainName: bookingData.domainName,
           domainAddress: bookingData.domainAddress,
+          domainPhone: bookingData.domainPhone,
           domainLogoUrl: bookingData.domainLogoUrl,
           serviceName: bookingData.serviceName,
           serviceDescription: bookingData.serviceDescription,
@@ -271,45 +293,74 @@ export class UserBookingsService {
   /**
    * Send booking notification email to service provider using existing templates
    */
-  private async sendProviderBookingEmail(bookingData: BookingEmailData, type: 'created'): Promise<void> {
+  private async sendProviderBookingEmail(bookingData: BookingEmailData, type: 'created' | 'cancelled'): Promise<void> {
     setImmediate(async () => {
       try {
-        const subject = this.getEmailSubject(type, 'provider');
+        const subject = this.getEmailSubject(type, 'provider', bookingData.domainName);
 
-        // Use the existing provider notification template
-        const emailHtml = this.templateService.generateProviderNotificationEmail({
-          providerName: bookingData.providerName,
-          providerEmail: bookingData.providerEmail,
-          customerName: bookingData.customerName,
-          eventTitle: bookingData.eventTitle,
-          eventDate: bookingData.eventDate,
-          eventTime: bookingData.eventTime,
-          eventTimezone: bookingData.eventTimezone,
-          eventDuration: bookingData.eventDuration,
-          eventDescription: this.formatEventDescription(bookingData, type),
-          hoursBeforeEvent: 0, // Immediate notification
-          eventName: bookingData.eventName,
+        let emailHtml: string;
 
-          // Enhanced fields for booking-style template
-          domainName: bookingData.domainName,
-          domainAddress: '', // Domain profile doesn't have address field
-          domainLogoUrl: bookingData.domainLogoUrl,
-          serviceName: bookingData.serviceName,
-          serviceDescription: bookingData.serviceDescription,
-          participantsAdults: bookingData.participantsAdults || 1,
-          participantsChildren: bookingData.participantsChildren || 0,
-          selectedLanguage: bookingData.selectedLanguage || 'Français',
-          numberOfWinesTasted: bookingData.numberOfWinesTasted || 3,
-          totalPrice: bookingData.totalPrice,
-          paymentMethod: bookingData.paymentMethod,
-          frontendUrl: bookingData.frontendUrl,
-          appLogoUrl: bookingData.appLogoUrl,
-          backendUrl: bookingData.backendUrl,
-          serviceBannerUrl: bookingData.serviceBannerUrl,
-          customerEmail: bookingData.customerEmail,
-          additionalNotes: bookingData.additionalNotes ?? undefined,
-          providerTitle: bookingData.providerTitle || 'Nouvelle réservation reçue !',
-        });
+        if (type === 'cancelled') {
+          emailHtml = this.templateService.generateProviderCancellationEmail({
+            providerName: bookingData.providerName,
+            providerEmail: bookingData.providerEmail,
+            customerName: bookingData.customerName,
+            customerEmail: bookingData.customerEmail,
+            eventTitle: bookingData.eventTitle,
+            eventDate: bookingData.eventDate,
+            eventTime: bookingData.eventTime,
+            eventTimezone: bookingData.eventTimezone,
+            eventDuration: bookingData.eventDuration,
+            domainName: bookingData.domainName,
+            domainLogoUrl: bookingData.domainLogoUrl,
+            serviceName: bookingData.serviceName,
+            serviceDescription: bookingData.serviceDescription,
+            participantsAdults: bookingData.participantsAdults || 1,
+            participantsChildren: bookingData.participantsChildren || 0,
+            selectedLanguage: bookingData.selectedLanguage || 'Français',
+            numberOfWinesTasted: bookingData.numberOfWinesTasted || 0,
+            totalPrice: bookingData.totalPrice,
+            paymentMethod: bookingData.paymentMethod,
+            appLogoUrl: bookingData.appLogoUrl,
+            backendUrl: bookingData.backendUrl,
+            serviceBannerUrl: bookingData.serviceBannerUrl,
+            additionalNotes: bookingData.additionalNotes ?? undefined,
+          });
+        } else {
+          // Use the existing provider notification template
+          emailHtml = this.templateService.generateProviderNotificationEmail({
+            providerName: bookingData.providerName,
+            providerEmail: bookingData.providerEmail,
+            customerName: bookingData.customerName,
+            eventTitle: bookingData.eventTitle,
+            eventDate: bookingData.eventDate,
+            eventTime: bookingData.eventTime,
+            eventTimezone: bookingData.eventTimezone,
+            eventDuration: bookingData.eventDuration,
+            eventDescription: this.formatEventDescription(bookingData, type),
+            hoursBeforeEvent: 0,
+            eventName: bookingData.eventName,
+            domainName: bookingData.domainName,
+            domainAddress: '',
+            domainLogoUrl: bookingData.domainLogoUrl,
+            serviceName: bookingData.serviceName,
+            serviceDescription: bookingData.serviceDescription,
+            participantsAdults: bookingData.participantsAdults || 1,
+            participantsChildren: bookingData.participantsChildren || 0,
+            selectedLanguage: bookingData.selectedLanguage || 'Français',
+            numberOfWinesTasted: bookingData.numberOfWinesTasted || 3,
+            totalPrice: bookingData.totalPrice,
+            paymentMethod: bookingData.paymentMethod,
+            frontendUrl: bookingData.frontendUrl,
+            appLogoUrl: bookingData.appLogoUrl,
+            backendUrl: bookingData.backendUrl,
+            serviceBannerUrl: bookingData.serviceBannerUrl,
+            customerEmail: bookingData.customerEmail,
+            customerPhone: bookingData.customerPhone,
+            additionalNotes: bookingData.additionalNotes ?? undefined,
+            providerTitle: bookingData.providerTitle || 'Nouvelle réservation reçue !',
+          });
+        }
 
         const emailJob = {
           to: bookingData.providerEmail,
@@ -328,19 +379,20 @@ export class UserBookingsService {
   /**
    * Generate email subject based on type and recipient
    */
-  private getEmailSubject(type: 'created' | 'updated' | 'cancelled', recipient: 'customer' | 'provider'): string {
+  private getEmailSubject(type: 'created' | 'updated' | 'cancelled', recipient: 'customer' | 'provider', domainName?: string): string {
+    const domain = domainName || 'Rose des Vins';
     const subjects = {
       created: {
-        customer: 'Confirmation de votre réservation - Rose des Vins 🍷',
-        provider: 'Nouvelle réservation reçue - Rose des Vins'
+        customer: `Confirmation de votre réservation - ${domain} 🍷`,
+        provider: `Nouvelle réservation reçue - ${domain}`
       },
       updated: {
-        customer: 'Modification de votre réservation - Rose des Vins 🍷',
-        provider: 'Réservation modifiée - Rose des Vins'
+        customer: `Modification de votre réservation - ${domain} 🍷`,
+        provider: `Réservation modifiée - ${domain}`
       },
       cancelled: {
-        customer: 'Annulation de votre réservation - Rose des Vins',
-        provider: 'Réservation annulée - Rose des Vins'
+        customer: `Annulation de votre réservation - ${domain}`,
+        provider: `Réservation annulée - ${domain}`
       }
     };
 
@@ -421,7 +473,7 @@ export class UserBookingsService {
         const eventData = {
           userId: userObjectId, // The wine business owner who receives the booking
           bookingId: savedBooking._id, // Reference to the created booking
-          eventName: `Réservation: ${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
+          eventName: `Réservation : ${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
           eventDate: parsedDate, // Use the same parsed date
           eventTime: createBookingDto.bookingTime,
           eventEndTime: eventEndTime, // End time calculated from service duration
@@ -450,6 +502,8 @@ export class UserBookingsService {
       });
 
       // Send email notifications (non-blocking)
+      // Skip for Stripe payments — confirmation emails are sent after the webhook confirms payment
+      if (createBookingDto.paymentMethod?.method !== 'stripe') {
       setImmediate(async () => {
         try {
           // Get user and domain profile for email data
@@ -488,6 +542,7 @@ export class UserBookingsService {
           const bookingEmailData: BookingEmailData = {
             customerName: `${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
             customerEmail: createBookingDto.customerEmail,
+            customerPhone: createBookingDto.phoneNo,
             providerName: user ? `${user.firstName} ${user.lastName}` : 'Rose des Vins',
             providerEmail: user ? user.email : 'admin@rosedesvins.com',
             eventTitle: eventTitle,
@@ -500,12 +555,13 @@ export class UserBookingsService {
             selectedLanguage: this.getLanguageInFrench(createBookingDto.selectedLanguage),
             additionalNotes: createBookingDto.additionalNotes,
             numberOfWinesTasted: service?.numberOfWinesTasted || 0,
-            eventName: `Réservation: ${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
+            eventName: `Réservation : ${createBookingDto.userContactFirstname} ${createBookingDto.userContactLastname}`,
             // Enhanced template data
             domainName: user?.domainName || 'Domaine La Bastide Blanche',
             domainAddress: user?.address && user?.codePostal && user?.city
               ? `${user.address} - ${user.codePostal} - ${user.city}`
               : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+            domainPhone: user?.phoneNumber || '',
             domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
@@ -533,6 +589,7 @@ export class UserBookingsService {
           // Don't fail the booking creation if email fails
         }
       });
+      } // end: skip emails for stripe
 
       return savedBooking;
     } catch (error) {
@@ -546,6 +603,84 @@ export class UserBookingsService {
       }
 
       throw new InternalServerErrorException('Failed to create booking');
+    }
+  }
+
+  /**
+   * Send confirmation emails for a booking by ID.
+   * Called by StripeCheckoutService after payment_intent.succeeded webhook.
+   */
+  async sendBookingConfirmationEmails(bookingId: string): Promise<void> {
+    try {
+      const booking = await this.userBookingModel.findById(bookingId).lean();
+      if (!booking) {
+        console.warn(`sendBookingConfirmationEmails: booking ${bookingId} not found`);
+        return;
+      }
+
+      const userObjectId = new Types.ObjectId(booking.userId.toString());
+      const user = await this.userModel.findById(userObjectId);
+      const domainProfile = await this.domainProfileModel.findOne({ userId: userObjectId });
+
+      const service = domainProfile?.services?.find(
+        (s) => (s as any)._id?.toString() === booking.serviceId?.toString(),
+      );
+
+      let eventTitle = 'Dégustation de vins';
+      if (service?.name) eventTitle = service.name;
+      else if (domainProfile?.domainDescription) eventTitle = `Dégustation - ${domainProfile.domainDescription}`;
+      else if (user?.firstName && user?.lastName) eventTitle = `Dégustation - ${user.firstName} ${user.lastName}`;
+
+      const formattedPaymentMethods = 'Paiement en ligne par carte bancaire';
+
+      const bookingEmailData: BookingEmailData = {
+        customerName: `${booking.userContactFirstname} ${booking.userContactLastname}`,
+        customerEmail: booking.customerEmail,
+        customerPhone: booking.phoneNo,
+        providerName: user ? `${user.firstName} ${user.lastName}` : 'Rose des Vins',
+        providerEmail: user ? user.email : 'admin@rosedesvins.com',
+        eventTitle,
+        eventDate: new Date(booking.bookingDate).toLocaleDateString('fr-FR'),
+        eventTime: booking.bookingTime,
+        eventTimezone: 'CET',
+        eventDuration: service?.timeOfServiceInMinutes ? `${service.timeOfServiceInMinutes} minutes` : '60 minutes',
+        participantsAdults: booking.participantsAdults,
+        participantsChildren: booking.participantsEnfants || 0,
+        selectedLanguage: this.getLanguageInFrench(booking.selectedLanguage),
+        additionalNotes: booking.additionalNotes,
+        numberOfWinesTasted: (service as any)?.numberOfWinesTasted || 0,
+        domainName: user?.domainName || 'Domaine La Bastide Blanche',
+        domainAddress:
+          user?.address && user?.codePostal && user?.city
+            ? `${user.address} - ${user.codePostal} - ${user.city}`
+            : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+        domainPhone: user?.phoneNumber || '',
+        domainLogoUrl: this.joinUrl(
+          this.configService.get('BACKEND_URL') || 'http://localhost:3000',
+          domainProfile?.domainLogoUrl || '/assets/logo.png',
+        ),
+        serviceName: service?.name || 'Visite de cave et dégustation de vins',
+        serviceDescription: (service as any)?.description || '',
+        totalPrice: (service as any)?.pricePerPerson
+          ? `${(service as any).pricePerPerson * booking.participantsAdults} €`
+          : '0 €',
+        paymentMethod: formattedPaymentMethods,
+        frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
+        appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
+        backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
+        serviceBannerUrl: this.joinUrl(
+          this.configService.get('BACKEND_URL') || 'http://localhost:3000',
+          (service as any)?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
+        ),
+        cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${booking._id}`,
+        providerTitle: 'Nouvelle réservation reçue !',
+        eventName: `Réservation : ${booking.userContactFirstname} ${booking.userContactLastname}`,
+      };
+
+      await this.sendCustomerBookingEmail(bookingEmailData, 'created');
+      await this.sendProviderBookingEmail(bookingEmailData, 'created');
+    } catch (err) {
+      console.error('sendBookingConfirmationEmails error:', err);
     }
   }
 
@@ -660,7 +795,7 @@ export class UserBookingsService {
       const endDate = new Date(startDate.getTime() + (eventDuration * 60 * 1000));
 
       // Create iCal event for the booking
-      const eventTitle = `Réservation: ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
+      const eventTitle = `Réservation : ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
       const eventUid = uuidv4();
 
       const icalCalendar = ical({ name: 'ROSEDESVINS APP' });
@@ -846,7 +981,7 @@ export class UserBookingsService {
       const endDateTimeStr = `${bookingDateStr}T${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}:00`;
 
       // Create Microsoft Graph API event
-      const eventTitle = `Réservation: ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
+      const eventTitle = `Réservation : ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
 
       console.log('🕐 Event timing:', {
         startDateTime: startDateTimeStr,
@@ -987,7 +1122,7 @@ export class UserBookingsService {
       const endDateTimeStr = `${bookingDateStr}T${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}:00`;
 
       // Create event title
-      const eventTitle = `Réservation: ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
+      const eventTitle = `Réservation : ${bookingDto.userContactFirstname} ${bookingDto.userContactLastname}`;
 
       console.log('🕐 Event timing:', {
         startDateTime: startDateTimeStr,
@@ -1123,8 +1258,10 @@ export class UserBookingsService {
         })
       );
 
+      const principalUrl = `https://caldav.orange.fr/users/${encodeURIComponent(username)}/`;
+
       const account = await dav.createAccount({
-        server: 'https://caldav.orange.fr',
+        server: principalUrl,
         xhr: xhr,
         accountType: 'caldav'
       });
@@ -1260,7 +1397,7 @@ export class UserBookingsService {
         eventUpdateFields.eventEndTime = eventEndTime;
       }
       if (isCustomerInfoChanged) {
-        eventUpdateFields.eventName = `Réservation: ${updateData.userContactFirstname || existingBooking.userContactFirstname} ${updateData.userContactLastname || existingBooking.userContactLastname}`;
+        eventUpdateFields.eventName = `Réservation : ${updateData.userContactFirstname || existingBooking.userContactFirstname} ${updateData.userContactLastname || existingBooking.userContactLastname}`;
       }
       if (updateData.additionalNotes) {
         eventUpdateFields.eventDescription = updateData.additionalNotes;
@@ -1328,6 +1465,7 @@ export class UserBookingsService {
           const bookingEmailData: BookingEmailData = {
             customerName: `${updatedBooking.userContactFirstname} ${updatedBooking.userContactLastname}`,
             customerEmail: updatedBooking.customerEmail,
+            customerPhone: updatedBooking.phoneNo,
             providerName: user ? `${user.firstName} ${user.lastName}` : 'Rose des Vins',
             providerEmail: user ? user.email : 'admin@rosedesvins.com',
             eventTitle: service?.name || 'Dégustation de vins',
@@ -1345,6 +1483,7 @@ export class UserBookingsService {
             domainAddress: user?.address && user?.codePostal && user?.city
               ? `${user.address} - ${user.codePostal} - ${user.city}`
               : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+            domainPhone: user?.phoneNumber || '',
             domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
@@ -1583,7 +1722,7 @@ export class UserBookingsService {
       const endMins = endMinutes % 60;
       const endDateTimeStr = `${bookingDateStr}T${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}:00`;
 
-      const eventTitle = `Réservation: ${newBooking.userContactFirstname} ${newBooking.userContactLastname}`;
+      const eventTitle = `Réservation : ${newBooking.userContactFirstname} ${newBooking.userContactLastname}`;
 
       console.log('📋 Updating Microsoft event:', {
         eventId: newBooking.microsoftEventId,
@@ -1741,6 +1880,8 @@ export class UserBookingsService {
       console.log('✅ Successfully deleted booking:', bookingId);
 
       // Send cancellation email to customer only
+      // Skip if booking was payment_pending — it was never confirmed, so no cancellation email needed
+      if (booking.bookingStatus !== 'payment_pending') {
       setImmediate(async () => {
         try {
           const user = await this.userModel.findById(booking.userId);
@@ -1765,6 +1906,7 @@ export class UserBookingsService {
           const bookingEmailData: BookingEmailData = {
             customerName: `${booking.userContactFirstname} ${booking.userContactLastname}`,
             customerEmail: booking.customerEmail,
+            customerPhone: booking.phoneNo,
             providerName: user ? `${user.firstName} ${user.lastName}` : 'Rose des Vins',
             providerEmail: user ? user.email : 'admin@rosedesvins.com',
             eventTitle: service?.name || 'Dégustation de vins',
@@ -1782,6 +1924,7 @@ export class UserBookingsService {
             domainAddress: user?.address && user?.codePostal && user?.city
               ? `${user.address} - ${user.codePostal} - ${user.city}`
               : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
+            domainPhone: user?.phoneNumber || '',
             domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
@@ -1798,13 +1941,15 @@ export class UserBookingsService {
           bookingEmailData.domainLogoUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', domainProfile?.domainLogoUrl || '/assets/logo.png');
           bookingEmailData.serviceBannerUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', service?.serviceBannerUrl || '/uploads/default-service-banner.jpg');
 
-          // Send cancellation notification to customer only
+          // Send cancellation notification to customer and provider
           await this.sendCustomerBookingEmail(bookingEmailData, 'cancelled');
+          await this.sendProviderBookingEmail(bookingEmailData, 'cancelled');
         } catch (emailError) {
           console.error('Failed to send cancellation email:', emailError);
           // Don't fail the deletion if email fails
         }
       });
+      } // end: skip cancellation email for payment_pending bookings
 
       return {
         success: true,
@@ -1943,7 +2088,7 @@ export class UserBookingsService {
         if (propfindResponse.ok) {
           const responseText = await propfindResponse.text();
           // Use the same title format as when creating the event (Réservation: not Booking:)
-          const expectedEventTitle = `Réservation: ${booking.userContactFirstname} ${booking.userContactLastname}`;
+          const expectedEventTitle = `Réservation : ${booking.userContactFirstname} ${booking.userContactLastname}`;
 
           console.log('📋 Looking for event with title:', expectedEventTitle);
           console.log('📄 PROPFIND response length:', responseText.length);
@@ -2208,7 +2353,7 @@ export class UserBookingsService {
       const endMins = endMinutes % 60;
       const endDateTimeStr = `${bookingDateStr}T${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}:00`;
 
-      const eventTitle = `Réservation: ${newBooking.userContactFirstname} ${newBooking.userContactLastname}`;
+      const eventTitle = `Réservation : ${newBooking.userContactFirstname} ${newBooking.userContactLastname}`;
 
       // Prepare event data for Google Calendar API
       const eventData = {

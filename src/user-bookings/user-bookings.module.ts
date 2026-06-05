@@ -36,5 +36,6 @@ import { GoogleEventsApiService } from './utils/google-events-apis.utils';
     ConnectorService,
     GoogleEventsApiService
   ],
+  exports: [UserBookingsService],
 })
 export class UserBookingsModule {}

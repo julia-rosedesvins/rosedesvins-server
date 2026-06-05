@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { User } from './user.schema';
+import { ExperienceCategory } from './experience-category.schema';
 
 @Schema()
 export class Service {
@@ -25,19 +26,29 @@ export class Service {
   @Prop({ type: [String], required: true })
   languagesOffered: string[];
 
+  @Prop({ 
+    type: Types.ObjectId, 
+    ref: ExperienceCategory.name,
+    required: false
+  })
+  category: Types.ObjectId;
+
   @Prop({ required: false, trim: true })
   serviceBannerUrl: string;
 
   @Prop({ default: true })
   isActive: boolean;
 
-  @Prop({ default: false })
+  @Prop({ default: true })
+  stripeEnabled: boolean;
+
+  @Prop({ default: true })
   bookingRestrictionActive: boolean;
 
   @Prop({ 
     type: String,
-    enum: ['24h', '48h'],
-    default: '24h'
+    enum: ['last_minute', '1h', '2h', '4h', '24h', '48h', '72h', '7d', '10d'],
+    default: 'last_minute'
   })
   bookingRestrictionTime: string;
 

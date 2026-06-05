@@ -38,6 +38,11 @@ export const PaginationQuerySchema = z.object({
     .optional()
     .transform((val) => val ? parseInt(val, 10) : 10)
     .refine((val) => val >= 1 && val <= 50, 'Limit must be between 1 and 50'),
+
+  search: z
+    .string()
+    .optional()
+    .transform((val) => val?.trim() || undefined),
 });
 
 export const UserActionSchema = z.object({

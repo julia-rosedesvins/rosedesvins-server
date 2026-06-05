@@ -12,6 +12,7 @@ import {
   HttpException,
   UseInterceptors,
   UploadedFiles,
+  Query,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiResponse, ApiOperation, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
@@ -176,6 +177,190 @@ export class DomainProfileController {
     }
   }
 
+  @Get('public/services/all')
+  @ApiOperation({ summary: 'Get all services with pagination (Public)' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Services retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        data: {
+          type: 'object',
+          properties: {
+            services: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  serviceId: { type: 'string' },
+                  serviceName: { type: 'string' },
+                  serviceDescription: { type: 'string' },
+                  numberOfPeople: { type: 'string' },
+                  pricePerPerson: { type: 'number' },
+                  timeOfServiceInMinutes: { type: 'number' },
+                  numberOfWinesTasted: { type: 'number' },
+                  languagesOffered: { type: 'array', items: { type: 'string' } },
+                  serviceBannerUrl: { type: 'string', nullable: true },
+                  isActive: { type: 'boolean' },
+                  domain: {
+                    type: 'object',
+                    properties: {
+                      domainId: { type: 'string' },
+                      userId: { type: 'string' },
+                      domainName: { type: 'string', nullable: true },
+                      domainDescription: { type: 'string' },
+                      colorCode: { type: 'string' },
+                      domainProfilePictureUrl: { type: 'string', nullable: true },
+                      domainLogoUrl: { type: 'string', nullable: true },
+                      location: {
+                        type: 'object',
+                        properties: {
+                          domainLatitude: { type: 'number', nullable: true },
+                          domainLongitude: { type: 'number', nullable: true },
+                          address: { type: 'string', nullable: true },
+                          city: { type: 'string', nullable: true },
+                          codePostal: { type: 'string', nullable: true },
+                          region: { type: 'string', nullable: true }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            pagination: {
+              type: 'object',
+              properties: {
+                total: { type: 'number' },
+                page: { type: 'number' },
+                limit: { type: 'number' },
+                totalPages: { type: 'number' }
+              }
+            }
+          }
+        }
+      }
+    }
+  })
+  async getAllServicesPublic(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('categories') categories?: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: {
+      services: any[];
+      pagination: {
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+      };
+    };
+  }> {
+    try {
+      const pageNum = page ? parseInt(page, 10) : 1;
+      const limitNum = limit ? parseInt(limit, 10) : 10;
+      const categoryIds = categories ? categories.split(',') : undefined;
+
+      // Validate pagination parameters
+      if (pageNum < 1 || limitNum < 1 || limitNum > 100) {
+        throw new HttpException(
+          'Invalid pagination parameters. Page must be >= 1, limit must be between 1 and 100',
+          HttpStatus.BAD_REQUEST
+        );
+      }
+
+      const result = await this.domainProfileService.getAllServicesPublic(pageNum, limitNum, categoryIds);
+
+      return {
+        success: true,
+        message: 'Services retrieved successfully',
+        data: result
+      };
+    } catch (error) {
+      console.error('Error retrieving services:', error);
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException('Internal server error', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get('public/:domainId')
+  @ApiOperation({ summary: 'Get domain profile by ID with location data (Public)' })
+
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Domain profile retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        data: {
+          type: 'object',
+          properties: {
+            domainProfile: { type: 'object' },
+            location: {
+              type: 'object',
+              properties: {
+                domainLatitude: { type: 'number', nullable: true },
+                domainLongitude: { type: 'number', nullable: true },
+                address: { type: 'string', nullable: true },
+                city: { type: 'string', nullable: true },
+                codePostal: { type: 'string', nullable: true }
+              }
+            }
+          }
+        }
+      }
+    }
+  })
+  async getPublicDomainProfile(
+    @Param('domainId') domainId: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: {
+      domainProfile: any;
+      location: {
+        domainLatitude: number | null;
+        domainLongitude: number | null;
+        address: string | null;
+        city: string | null;
+        codePostal: string | null;
+      };
+    } | null;
+  }> {
+    try {
+      const result = await this.domainProfileService.getPublicDomainProfileById(domainId);
+
+      if (!result) {
+        throw new HttpException('Domain profile not found', HttpStatus.NOT_FOUND);
+      }
+
+      return {
+        success: true,
+        message: 'Domain profile retrieved successfully',
+        data: result
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        if (error.getStatus() !== HttpStatus.NOT_FOUND) {
+          console.error('Error retrieving public domain profile:', error);
+        }
+        throw error;
+      }
+      console.error('Error retrieving public domain profile:', error);
+      throw new HttpException('Internal server error', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
   // Service Management Endpoints
   @Post('services/add')
   @UseGuards(UserGuard)
@@ -231,7 +416,8 @@ export class DomainProfileController {
         timeOfServiceInMinutes: parseInt(serviceData.timeOfServiceInMinutes),
         numberOfWinesTasted: parseInt(serviceData.numberOfWinesTasted),
         isActive: serviceData.isActive === 'true' || serviceData.isActive === true,
-        languagesOffered: this.parseArrayFromFormData(serviceData, 'languagesOffered')
+        languagesOffered: this.parseArrayFromFormData(serviceData, 'languagesOffered'),
+        category: serviceData.category || undefined
       };
 
       const validatedService = ServiceSchema.parse(parsedServiceData);
@@ -344,6 +530,7 @@ export class DomainProfileController {
         pricePerPerson: serviceData.pricePerPerson ? parseFloat(serviceData.pricePerPerson) : undefined,
         timeOfServiceInMinutes: serviceData.timeOfServiceInMinutes ? parseInt(serviceData.timeOfServiceInMinutes) : undefined,
         numberOfWinesTasted: serviceData.numberOfWinesTasted ? parseInt(serviceData.numberOfWinesTasted) : undefined,
+        category: serviceData.category || undefined,
         isActive: serviceData.isActive !== undefined ? (serviceData.isActive === 'true' || serviceData.isActive === true) : undefined,
         languagesOffered: serviceData.languagesOffered || serviceData['languagesOffered[]'] 
           ? this.parseArrayFromFormData(serviceData, 'languagesOffered') 
@@ -501,6 +688,7 @@ export class DomainProfileController {
       bookingRestrictionTime?: string;
       multipleBookings?: boolean;
       hasCustomAvailability?: boolean;
+      stripeEnabled?: boolean;
       dateAvailability?: Array<{
         date: string;
         enabled: boolean;
@@ -523,9 +711,9 @@ export class DomainProfileController {
 
       // Validate booking restriction time if provided
       if (bookingSettings.bookingRestrictionTime && 
-          !['24h', '48h'].includes(bookingSettings.bookingRestrictionTime)) {
+          !['last_minute', '1h', '2h', '4h', '24h', '48h', '72h', '7d', '10d'].includes(bookingSettings.bookingRestrictionTime)) {
         throw new HttpException(
-          'Invalid booking restriction time. Must be "24h" or "48h"',
+          'Invalid booking restriction time. Must be one of: last_minute, 1h, 2h, 4h, 24h, 48h, 72h, 7d, 10d',
           HttpStatus.BAD_REQUEST
         );
       }
@@ -536,6 +724,7 @@ export class DomainProfileController {
         bookingRestrictionTime?: string;
         multipleBookings?: boolean;
         hasCustomAvailability?: boolean;
+        stripeEnabled?: boolean;
         dateAvailability?: Array<{
           date: Date;
           enabled: boolean;
@@ -551,6 +740,7 @@ export class DomainProfileController {
         bookingRestrictionTime: bookingSettings.bookingRestrictionTime,
         multipleBookings: bookingSettings.multipleBookings,
         hasCustomAvailability: bookingSettings.hasCustomAvailability,
+        ...(bookingSettings.stripeEnabled !== undefined && { stripeEnabled: bookingSettings.stripeEnabled }),
         dateAvailability: bookingSettings.dateAvailability ? 
           bookingSettings.dateAvailability.map(dateConfig => ({
             date: new Date(dateConfig.date),
@@ -587,5 +777,12 @@ export class DomainProfileController {
       
       throw error;
     }
+  }
+
+  @Post('admin/migrate-stripe-enabled')
+  @ApiOperation({ summary: 'Backfill stripeEnabled=false on all service sub-documents missing the field' })
+  @ApiResponse({ status: 201, description: 'Returns matched and modified document counts' })
+  async backfillStripeEnabled() {
+    return this.domainProfileService.backfillStripeEnabled();
   }
 }

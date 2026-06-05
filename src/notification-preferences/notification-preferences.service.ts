@@ -3,12 +3,15 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { NotificationPreferences, NotificationPreferencesDocument } from '../schemas/notification-preferences.schema';
 import { CreateOrUpdateNotificationPreferencesDto } from '../validators/notification-preferences.validators';
+import { User } from '../schemas/user.schema';
 
 @Injectable()
 export class NotificationPreferencesService {
   constructor(
     @InjectModel(NotificationPreferences.name)
     private notificationPreferencesModel: Model<NotificationPreferencesDocument>,
+    @InjectModel(User.name)
+    private userModel: Model<User>,
   ) {}
 
   /**
@@ -62,6 +65,36 @@ export class NotificationPreferencesService {
       return notificationPreferences;
     } catch (error) {
       console.error('Error in getNotificationPreferences:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all users with their bookingAdvanceLimit
+   * @returns Array of { email, bookingAdvanceLimit }
+   */
+  async getAllBookingAdvanceLimits(): Promise<{ email: string; bookingAdvanceLimit: string }[]> {
+    try {
+      const preferences = await this.notificationPreferencesModel
+        .find({}, { userId: 1, bookingAdvanceLimit: 1 })
+        .lean()
+        .exec();
+
+      const userIds = preferences.map((p) => p.userId);
+      const users = await this.userModel
+        .find({ _id: { $in: userIds } }, { _id: 1, email: 1, domainName: 1 })
+        .lean()
+        .exec();
+
+      const userMap = new Map(users.map((u) => [u._id.toString(), { email: u.email, domainName: u.domainName }]));
+
+      return preferences.map((p) => ({
+        email: userMap.get(p.userId.toString())?.email || 'Unknown',
+        domainName: userMap.get(p.userId.toString())?.domainName || 'Unknown',
+        bookingAdvanceLimit: p.bookingAdvanceLimit,
+      }));
+    } catch (error) {
+      console.error('Error in getAllBookingAdvanceLimits:', error);
       throw error;
     }
   }

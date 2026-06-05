@@ -133,7 +133,11 @@ export class SubscriptionController {
         page: queryDto.page || 1,
         limit: queryDto.limit || 10,
         status: queryDto.status,
-        userId: queryDto.userId
+        userId: queryDto.userId,
+        sortBy: queryDto.sortBy,
+        dateFrom: queryDto.dateFrom,
+        dateTo: queryDto.dateTo,
+        search: queryDto.search
       };
 
       const result = await this.subscriptionService.getAllSubscriptions(queryParams);

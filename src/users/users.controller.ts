@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Res, HttpStatus, Get, UseGuards, UsePipes, Query, Put, Param } from '@nestjs/common';
+import { Controller, Post, Body, Res, HttpStatus, Get, UseGuards, UsePipes, Query, Put, Param, Delete } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBody, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { Response } from 'express';
 import { UsersService } from './users.service';
@@ -420,6 +420,24 @@ export class UsersController {
         success: true,
         message: 'User updated successfully',
         data: userResponse,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Delete('admin/users/:id')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Delete a user and their subscription' })
+  @ApiBearerAuth('admin-token')
+  async deleteUser(
+    @Param('id') id: string,
+  ) {
+    try {
+      const result = await this.usersService.deleteUser(id);
+      return {
+        success: true,
+        message: result.message,
       };
     } catch (error) {
       throw error;

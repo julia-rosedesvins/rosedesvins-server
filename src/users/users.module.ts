@@ -5,6 +5,7 @@ import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
 import { User, UserSchema } from '../schemas/user.schema';
 import { Subscription, SubscriptionSchema } from '../schemas/subscriptions.schema';
+import { NewsletterSubscription, NewsletterSubscriptionSchema } from '../schemas/newsletter-subscription.schema';
 import { AdminGuard } from '../guards/admin.guard';
 import { EmailModule } from '../email/email.module';
 
@@ -12,7 +13,8 @@ import { EmailModule } from '../email/email.module';
   imports: [
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema },
-      { name: Subscription.name, schema: SubscriptionSchema }
+      { name: Subscription.name, schema: SubscriptionSchema },
+      { name: NewsletterSubscription.name, schema: NewsletterSubscriptionSchema },
     ]),
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production',

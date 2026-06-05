@@ -1,10 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { ConfigService } from '@nestjs/config';
 import { DomainProfile } from '../schemas/domain-profile.schema';
 import { User } from '../schemas/user.schema';
+import { StaticExperience } from '../schemas/static-experience.schema';
 import { promises as fs } from 'fs';
 import { join } from 'path';
+import { S3Service } from '../common/services/s3.service';
 
 export interface CreateOrUpdateDomainProfileServiceDto {
   domainName?: string;
@@ -32,6 +35,9 @@ export class DomainProfileService {
   constructor(
     @InjectModel(DomainProfile.name) private domainProfileModel: Model<DomainProfile>,
     @InjectModel(User.name) private userModel: Model<User>,
+    @InjectModel(StaticExperience.name) private staticExperienceModel: Model<StaticExperience>,
+    private configService: ConfigService,
+    private readonly s3Service: S3Service,
   ) {}
 
   async createOrUpdateDomainProfile(
@@ -70,7 +76,10 @@ export class DomainProfileService {
       if (existingDomainProfile?.domainProfilePictureUrl) {
         await this.deleteFile(existingDomainProfile.domainProfilePictureUrl);
       }
-      domainProfilePictureUrl = `/uploads/domain-profiles/${files.domainProfilePicture[0].filename}`;
+      domainProfilePictureUrl = await this.uploadDomainImageToS3(
+        files.domainProfilePicture[0],
+        'domain-profiles/profile-pictures'
+      );
     }
 
     if (files?.domainLogo?.[0]) {
@@ -78,7 +87,10 @@ export class DomainProfileService {
       if (existingDomainProfile?.domainLogoUrl) {
         await this.deleteFile(existingDomainProfile.domainLogoUrl);
       }
-      domainLogoUrl = `/uploads/domain-profiles/${files.domainLogo[0].filename}`;
+      domainLogoUrl = await this.uploadDomainImageToS3(
+        files.domainLogo[0],
+        'domain-profiles/logos'
+      );
     }
 
     const profileData = {
@@ -171,6 +183,134 @@ export class DomainProfileService {
   }
 
   /**
+   * Get domain profile by ID with user location data (Public API)
+   * @param domainId - Domain profile ID
+   * @returns Domain profile with location data
+   */
+  async getPublicDomainProfileById(domainId: string): Promise<{
+    domainProfile: any;
+    location: {
+      domainLatitude: number | null;
+      domainLongitude: number | null;
+      address: string | null;
+      city: string | null;
+      codePostal: string | null;
+    };
+  } | null> {
+    try {
+      if (!Types.ObjectId.isValid(domainId)) {
+        return null;
+      }
+
+      const domainObjectId = new Types.ObjectId(domainId);
+      const backendUrl = this.configService.get<string>('BACKEND_URL') || 'http://localhost:5001';
+      
+      // Find domain profile and populate user data
+      const domainProfile = await this.domainProfileModel
+        .findById(domainObjectId)
+        .populate('userId', 'domainName domainLatitude domainLongitude address city codePostal siteWeb')
+        .exec();
+
+      // Helper function to build full URL
+      const buildFullUrl = (url: string | undefined | null): string | null => {
+        if (!url) return null;
+        // If URL already starts with http:// or https://, return as is
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          return url;
+        }
+        // Otherwise prepend BACKEND_URL
+        return `${backendUrl}${url.startsWith('/') ? '' : '/'}${url}`;
+      };
+
+      if (!domainProfile) {
+        // Fallback for non-client domain route: static experience by ID
+        const staticExperience = await this.staticExperienceModel.findById(domainObjectId).exec();
+        if (!staticExperience) {
+          return null;
+        }
+
+        return {
+          domainProfile: {
+            _id: staticExperience._id,
+            userId: '',
+            domainDescription: staticExperience.domain_description || staticExperience.about || staticExperience.category || '',
+            domainProfilePictureUrl: buildFullUrl(staticExperience.domain_profile_pic_url || staticExperience.main_image),
+            domainLogoUrl: buildFullUrl(staticExperience.domain_logo_url),
+            mainImage: buildFullUrl(staticExperience.main_image),
+            colorCode: '#3A7B59',
+            services: [],
+            domainName: staticExperience.domain_name || staticExperience.name,
+            siteWeb: staticExperience.website || null,
+            phone: staticExperience.phone || null,
+            openingHours: staticExperience.opening_hours || null,
+            createdAt: staticExperience.createdAt,
+            updatedAt: staticExperience.updatedAt,
+            producer: 'non-client',
+            staticExperienceId: staticExperience._id,
+          },
+          location: {
+            domainLatitude: staticExperience.latitude || null,
+            domainLongitude: staticExperience.longitude || null,
+            address: staticExperience.address || null,
+            city: staticExperience.city || null,
+            codePostal: null,
+          }
+        };
+      }
+
+      const user = domainProfile.userId as any;
+
+      // Map services with full URLs for service banners
+      const servicesWithFullUrls = domainProfile.services.map(service => {
+        const serviceObj = service['_doc'] || service;
+        return {
+          _id: serviceObj._id,
+          name: serviceObj.name,
+          description: serviceObj.description,
+          numberOfPeople: serviceObj.numberOfPeople,
+          pricePerPerson: serviceObj.pricePerPerson,
+          timeOfServiceInMinutes: serviceObj.timeOfServiceInMinutes,
+          numberOfWinesTasted: serviceObj.numberOfWinesTasted,
+          languagesOffered: serviceObj.languagesOffered,
+          serviceBannerUrl: buildFullUrl(serviceObj.serviceBannerUrl),
+          isActive: serviceObj.isActive,
+          bookingRestrictionActive: serviceObj.bookingRestrictionActive,
+          bookingRestrictionTime: serviceObj.bookingRestrictionTime,
+          multipleBookings: serviceObj.multipleBookings,
+          hasCustomAvailability: serviceObj.hasCustomAvailability,
+          dateAvailability: serviceObj.dateAvailability
+        };
+      });
+
+      return {
+        domainProfile: {
+          _id: domainProfile._id,
+          userId: domainProfile.userId._id,
+          domainDescription: domainProfile.domainDescription || '',
+          domainProfilePictureUrl: buildFullUrl(domainProfile.domainProfilePictureUrl),
+          domainLogoUrl: buildFullUrl(domainProfile.domainLogoUrl),
+          colorCode: domainProfile.colorCode,
+          services: servicesWithFullUrls,
+          domainName: user?.domainName,
+          siteWeb: user?.siteWeb,
+          createdAt: domainProfile.createdAt,
+          updatedAt: domainProfile.updatedAt
+        },
+        location: {
+          domainLatitude: user?.domainLatitude || null,
+          domainLongitude: user?.domainLongitude || null,
+          address: user?.address || null,
+          city: user?.city || null,
+          codePostal: user?.codePostal || null
+        }
+      };
+    } catch (error) {
+      console.error('Error in getPublicDomainProfileById:', error);
+      return null;
+    }
+  }
+
+  /**
    * Add a new service to user's domain profile
    * @param userId - User ID
    * @param serviceData - Service data to add
@@ -199,8 +339,11 @@ export class DomainProfileService {
       timeOfServiceInMinutes: serviceData.timeOfServiceInMinutes,
       numberOfWinesTasted: serviceData.numberOfWinesTasted,
       languagesOffered: serviceData.languagesOffered,
+      category: serviceData.category || null,
       serviceBannerUrl: serviceBannerUrl,
-      isActive: serviceData.isActive
+      isActive: serviceData.isActive,
+      bookingRestrictionActive: true,
+      bookingRestrictionTime: 'last_minute',
     };
     
     const domainProfile = await this.domainProfileModel.findOneAndUpdate(
@@ -241,11 +384,13 @@ export class DomainProfileService {
       timeOfServiceInMinutes: service.timeOfServiceInMinutes,
       numberOfWinesTasted: service.numberOfWinesTasted,
       languagesOffered: service.languagesOffered,
+      category: service.category,
       serviceBannerUrl: service.serviceBannerUrl,
       isActive: service.isActive,
+      stripeEnabled: (service as any).stripeEnabled ?? true,
       // New booking settings fields
-      bookingRestrictionActive: (service as any).bookingRestrictionActive ?? false,
-      bookingRestrictionTime: (service as any).bookingRestrictionTime ?? '24h',
+      bookingRestrictionActive: (service as any).bookingRestrictionActive ?? true,
+      bookingRestrictionTime: (service as any).bookingRestrictionTime ?? 'last_minute',
       multipleBookings: (service as any).multipleBookings ?? false,
       hasCustomAvailability: (service as any).hasCustomAvailability ?? false,
       dateAvailability: (service as any).dateAvailability ?? []
@@ -315,6 +460,9 @@ export class DomainProfileService {
     }
     if (updateData.languagesOffered !== undefined) {
       mappedUpdateData.languagesOffered = updateData.languagesOffered;
+    }
+    if (updateData.category !== undefined) {
+      mappedUpdateData.category = updateData.category;
     }
     if (serviceBannerUrl !== undefined) {
       mappedUpdateData.serviceBannerUrl = serviceBannerUrl;
@@ -423,6 +571,7 @@ export class DomainProfileService {
       bookingRestrictionTime?: string;
       multipleBookings?: boolean;
       hasCustomAvailability?: boolean;
+      stripeEnabled?: boolean;
       dateAvailability?: Array<{
         date: Date;
         enabled: boolean;
@@ -455,9 +604,7 @@ export class DomainProfileService {
     // Update only the provided booking settings
     const service = domainProfile.services[serviceIndex] as any;
     
-    if (bookingSettings.bookingRestrictionActive !== undefined) {
-      service.bookingRestrictionActive = bookingSettings.bookingRestrictionActive;
-    }
+    service.bookingRestrictionActive = true;
     if (bookingSettings.bookingRestrictionTime !== undefined) {
       service.bookingRestrictionTime = bookingSettings.bookingRestrictionTime;
     }
@@ -469,6 +616,9 @@ export class DomainProfileService {
     }
     if (bookingSettings.dateAvailability !== undefined) {
       service.dateAvailability = bookingSettings.dateAvailability;
+    }
+    if (bookingSettings.stripeEnabled !== undefined) {
+      service.stripeEnabled = bookingSettings.stripeEnabled;
     }
 
     await domainProfile.save();
@@ -491,6 +641,20 @@ export class DomainProfileService {
    */
   private async deleteFile(filePath: string): Promise<void> {
     try {
+      if (!filePath) return;
+
+      // Delete from S3 if it's an S3 URL
+      if (filePath.includes('.amazonaws.com/')) {
+        const key = this.extractS3KeyFromUrl(filePath);
+        await this.s3Service.deleteFile(key);
+        return;
+      }
+
+      // Skip external non-S3 URLs
+      if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+        return;
+      }
+
       // Convert relative URL to absolute file path
       const absolutePath = join(process.cwd(), filePath.replace(/^\//, ''));
       await fs.unlink(absolutePath);
@@ -498,5 +662,134 @@ export class DomainProfileService {
     } catch (error) {
       console.warn(`Failed to delete file ${filePath}:`, error.message);
     }
+  }
+
+  private async uploadDomainImageToS3(file: Express.Multer.File, folder: string): Promise<string> {
+    const buffer = file.buffer ? file.buffer : await fs.readFile(file.path);
+    const { url } = await this.s3Service.uploadFile(buffer, file.originalname, folder);
+
+    // Best effort cleanup for disk storage temp file
+    if (file.path) {
+      try {
+        await fs.unlink(file.path);
+      } catch {
+        // no-op
+      }
+    }
+
+    return url;
+  }
+
+  private extractS3KeyFromUrl(url: string): string {
+    const urlParts = url.split('.amazonaws.com/');
+    return urlParts[1] || url;
+  }
+
+  /**
+   * Get all public services with pagination and optional category filtering
+   */
+  async getAllServicesPublic(page: number = 1, limit: number = 10, categoryIds?: string[]): Promise<{
+    services: any[];
+    pagination: {
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+    };
+  }> {
+    const skip = (page - 1) * limit;
+    const backendUrl = this.configService.get<string>('BACKEND_URL') || '';
+    const buildFullUrl = (url?: string | null): string | null => {
+      if (!url) return null;
+      if (url.startsWith('http://') || url.startsWith('https://')) return url;
+      return `${backendUrl}${url}`;
+    };
+
+    // Get all domain profiles with services
+    const domainProfiles = await this.domainProfileModel
+      .find({ 'services.0': { $exists: true } }) // Only profiles with at least one service
+      .populate('userId', 'firstName lastName email domainName domainLatitude domainLongitude address city codePostal region')
+      .exec();
+
+    // Flatten all services with their domain information
+    const allServices: any[] = [];
+    for (const profile of domainProfiles) {
+      const user = profile.userId as any;
+      const profileDoc = profile.toObject();
+      
+      for (const service of profileDoc.services as any[]) {
+        allServices.push({
+          serviceId: service._id,
+          serviceName: service.name,
+          serviceDescription: service.description,
+          numberOfPeople: service.numberOfPeople,
+          pricePerPerson: service.pricePerPerson,
+          timeOfServiceInMinutes: service.timeOfServiceInMinutes,
+          numberOfWinesTasted: service.numberOfWinesTasted,
+          languagesOffered: service.languagesOffered,
+          serviceBannerUrl: buildFullUrl(service.serviceBannerUrl),
+          isActive: service.isActive,
+          category: service.category,
+          domain: {
+            domainId: profile._id,
+            userId: user?._id || null,
+            domainName: user?.domainName || null,
+            domainDescription: profileDoc.domainDescription,
+            colorCode: profileDoc.colorCode,
+            domainProfilePictureUrl: buildFullUrl(profileDoc.domainProfilePictureUrl),
+            domainLogoUrl: buildFullUrl(profileDoc.domainLogoUrl),
+            location: {
+              domainLatitude: user?.domainLatitude || null,
+              domainLongitude: user?.domainLongitude || null,
+              address: user?.address || null,
+              city: user?.city || null,
+              codePostal: user?.codePostal || null,
+              region: user?.region || null,
+            }
+          }
+        });
+      }
+    }
+
+    // Filter only active services
+    let activeServices = allServices.filter(s => s.isActive);
+
+    // Filter by categories if provided
+    if (categoryIds && categoryIds.length > 0) {
+      activeServices = activeServices.filter(s => 
+        s.category && categoryIds.includes(s.category)
+      );
+    }
+
+    // Calculate pagination
+    const total = activeServices.length;
+    const totalPages = Math.ceil(total / limit);
+    const paginatedServices = activeServices.slice(skip, skip + limit);
+
+    return {
+      services: paginatedServices,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages
+      }
+    };
+  }
+
+  /**
+   * Migration: set stripeEnabled = false on every service sub-document
+   * that does not yet have the field defined in the database.
+   */
+  async backfillStripeEnabled(): Promise<{ matched: number; modified: number }> {
+    const result = await (this.domainProfileModel as any).updateMany(
+      { 'services.stripeEnabled': { $exists: false } },
+      { $set: { 'services.$[elem].stripeEnabled': false } },
+      { arrayFilters: [{ 'elem.stripeEnabled': { $exists: false } }], multi: true },
+    );
+    return {
+      matched: result.matchedCount ?? result.n ?? 0,
+      modified: result.modifiedCount ?? result.nModified ?? 0,
+    };
   }
 }

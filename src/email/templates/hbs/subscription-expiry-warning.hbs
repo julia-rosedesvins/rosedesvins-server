@@ -1,0 +1,35 @@
+<h2>⚠️ Abonnement expirant dans 7 jours</h2>
+
+<p>Un abonnement actif expire dans <strong>7 jours</strong>. Veuillez le renouveler depuis l'interface d'administration.</p>
+
+<div class="warning">
+    <p><strong>⏳ Action requise :</strong> L'abonnement de cet utilisateur arrivera à expiration le <strong>{{expiryDate}}</strong>.</p>
+</div>
+
+<div class="credentials">
+    <h3>📋 Détails de l'utilisateur</h3>
+    <div class="field">
+        <strong>Nom :</strong> <span>{{userFullName}}</span>
+    </div>
+    <div class="field">
+        <strong>E-mail :</strong> <span>{{userEmail}}</span>
+    </div>
+    {{#if domainName}}
+    <div class="field">
+        <strong>Domaine :</strong> <span>{{domainName}}</span>
+    </div>
+    {{/if}}
+    <div class="field">
+        <strong>Date d'expiration :</strong> <span>{{expiryDate}}</span>
+    </div>
+</div>
+
+<p style="text-align: center; margin: 30px 0;">
+    <a href="{{adminPanelUrl}}" class="button">
+        🔄 Gérer les abonnements
+    </a>
+</p>
+
+<p style="margin-top: 30px;">
+    <em style="color: #3A7B59;">L'équipe Rose des Vins</em>
+</p>

@@ -25,18 +25,16 @@ export class WidgetService {
     const userObjectId = new Types.ObjectId(userId);
     const serviceObjectId = new Types.ObjectId(serviceId);
 
-    // 1. Check if user subscription is active
+    // 1. Check if user subscription is active (only blocked if manually set to inactive)
     const subscription = await this.subscriptionModel
       .findOne({
         userId: userObjectId,
         isActive: true,
-        startDate: { $lte: new Date() },
-        endDate: { $gte: new Date() }
       })
       .exec();
 
     if (!subscription) {
-      throw new BadRequestException('User subscription is not active or has expired');
+      throw new BadRequestException('User subscription is not active');
     }
 
     // 2. Get domain profile with the specific service
@@ -98,17 +96,17 @@ export class WidgetService {
         pricePerPerson: service.pricePerPerson,
         timeOfServiceInMinutes: service.timeOfServiceInMinutes,
         numberOfWinesTasted: service.numberOfWinesTasted,
-        languagesOffered: service.languagesOffered,
+        languagesOffered: (service.languagesOffered || []).filter((l: string) => l && l.trim().toLowerCase() !== 'autre'),
         isActive: service.isActive,
       },
       availability: availability ? {
         weeklyAvailability: availability.weeklyAvailability,
-        publicHolidays: availability.publicHolidays,
+        publicHolidays: [], // Public holidays feature disabled — re-enable by replacing [] with availability.publicHolidays
         specialDateOverrides: service.dateAvailability && service.hasCustomAvailability ? service.dateAvailability : [],
         timezone: availability.timezone,
         defaultSlotDuration: availability.defaultSlotDuration,
         bufferTime: availability.bufferTime,
-        bookingRestrictionTime: service.bookingRestrictionActive ? service.bookingRestrictionTime : null,
+        bookingRestrictionTime: service.bookingRestrictionTime ?? 'last_minute',
         multipleBookingsSameSlot: service.multipleBookings,
         isActive: availability.isActive
       } : {
@@ -124,9 +122,15 @@ export class WidgetService {
       },
       paymentMethods: {
         methods: paymentMethods ? paymentMethods.methods : [],
+        cancellationPolicy: paymentMethods?.cancellationPolicy ?? null,
+        stripeConnect: (paymentMethods?.stripeConnect && service.stripeEnabled !== false) ? {
+          stripeAccountId: paymentMethods.stripeConnect.stripeAccountId,
+          chargesEnabled: paymentMethods.stripeConnect.chargesEnabled,
+        } : null,
       },
       notificationPreferences: notificationPreferences ? {
-        bookingAdvanceLimit: notificationPreferences.bookingAdvanceLimit,
+        // bookingAdvanceLimit: notificationPreferences.bookingAdvanceLimit,
+        bookingAdvanceLimit: service.bookingRestrictionTime ?? 'last_minute',
       } : {
         bookingAdvanceLimit: '1_hour',
       }
