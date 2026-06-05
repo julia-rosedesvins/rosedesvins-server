@@ -731,40 +731,78 @@ export class RegionsService {
     }
 
     async searchRegions(query: string): Promise<Region[]> {
+        const pattern = this.buildAccentInsensitivePattern(query);
         return this.regionModel
             .find({
-                denom: { $regex: query, $options: 'i' },
+                denom: { $regex: pattern, $options: 'i' },
             })
             .limit(50)
             .exec();
     }
 
     /**
-     * Builds a MongoDB-compatible regex pattern that is insensitive to accents/diacritics.
-     * e.g. "chateau" will match "château", "Château", etc.
+     * Builds a MongoDB-compatible regex pattern that is:
+     *  - Insensitive to accents/diacritics ("chateau" matches "château")
+     *  - Tolerant of missing French bridge/article words (le, la, les, des, de, du, l', d'…)
+     *    e.g. "chateau crostes"  → matches "Château les Crostes"
+     *         "domaine eglise"   → matches "Domaine de l'Église"
+     *         "chateau les crostes" → same ("les" stripped from query, made optional in target)
      */
     private buildAccentInsensitivePattern(query: string): string {
         const ACCENT_MAP: Record<string, string> = {
-            a: '[aàâäáãå]',
-            e: '[eéèêë]',
-            i: '[iîïíì]',
-            o: '[oôöóòõø]',
-            u: '[uùûüúű]',
-            c: '[cç]',
-            n: '[nñ]',
-            y: '[yÿý]',
+            a: '[a\u00e0\u00e2\u00e4\u00e1\u00e3\u00e5]',
+            e: '[e\u00e9\u00e8\u00ea\u00eb]',
+            i: '[i\u00ee\u00ef\u00ed\u00ec]',
+            o: '[o\u00f4\u00f6\u00f3\u00f2\u00f5\u00f8]',
+            u: '[u\u00f9\u00fb\u00fc\u00fa\u0171]',
+            c: '[c\u00e7]',
+            n: '[n\u00f1]',
+            y: '[y\u00ff\u00fd]',
         };
-        // Strip accents from input first, then map each base char to its accent class
-        const stripped = query.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        return stripped
-            .split('')
-            .map(char => {
-                const lower = char.toLowerCase();
-                if (ACCENT_MAP[lower]) return ACCENT_MAP[lower];
-                // Escape regex special chars
-                return char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            })
-            .join('');
+
+        const BRIDGE_WORDS = new Set([
+            'le', 'la', 'les', 'des', 'de', 'du', 'd', 'l',
+            'au', 'aux', 'en', 'et', 'un', 'une',
+        ]);
+
+        const buildCharPattern = (char: string): string => {
+            const lower = char.toLowerCase();
+            if (ACCENT_MAP[lower]) return ACCENT_MAP[lower];
+            return char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        };
+
+        // Normalise input: strip accents, lower-case, replace apostrophes & hyphens with spaces
+        const stripped = query
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/['\u2019\u2018\-]/g, ' ');
+
+        const tokens = stripped.split(/\s+/).filter(t => t.length > 0);
+
+        // Drop bridge words the user typed — they will be optional in the separator
+        const significant = tokens.filter(t => !BRIDGE_WORDS.has(t));
+        const finalTokens = significant.length > 0 ? significant : tokens;
+
+        if (finalTokens.length === 0) {
+            return query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        const tokenPatterns = finalTokens.map(token =>
+            token.split('').map(buildCharPattern).join(''),
+        );
+
+        if (tokenPatterns.length === 1) return tokenPatterns[0];
+
+        // Between significant tokens allow:
+        //   - plain bridge words followed by space/hyphen: " les ", " de "
+        //   - contracted bridge words with apostrophe: " l'" " d'"
+        // Both are optional and repeatable so " de l'" also works.
+        const UNCONTRACTED = '(?:le|la|les|des|de|du|au|aux|en|et|un|une)';
+        const CONTRACTED    = "[dl]['\\u2019]";
+        const BRIDGE_SEP    = `[\\s\\-]+(?:${UNCONTRACTED}[\\s\\-]+|${CONTRACTED})*`;
+
+        return tokenPatterns.join(BRIDGE_SEP);
     }
 
     async unifiedSearch(query: string): Promise<{
@@ -782,7 +820,14 @@ export class RegionsService {
             const backendUrl = this.configService.get<string>('BACKEND_URL') || '';
             const searchQuery = query.trim();
             const searchPattern = this.buildAccentInsensitivePattern(searchQuery);
-            const normalizeStr = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+            const normalizeStr = (s: string) =>
+                s.normalize('NFD')
+                 .replace(/[\u0300-\u036f]/g, '')
+                 .toLowerCase()
+                 .replace(/['\u2019\u2018]/g, ' ')
+                 .replace(/\b(le|la|les|des|de|du|au|aux|en|et|un|une)\b/g, ' ')
+                 .replace(/\s+/g, ' ')
+                 .trim();
             const normalizedQuery = normalizeStr(searchQuery);
             
             // Return early if query is empty after trimming
