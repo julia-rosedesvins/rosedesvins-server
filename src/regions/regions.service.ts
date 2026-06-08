@@ -731,12 +731,78 @@ export class RegionsService {
     }
 
     async searchRegions(query: string): Promise<Region[]> {
+        const pattern = this.buildAccentInsensitivePattern(query);
         return this.regionModel
             .find({
-                denom: { $regex: query, $options: 'i' },
+                denom: { $regex: pattern, $options: 'i' },
             })
             .limit(50)
             .exec();
+    }
+
+    /**
+     * Builds a MongoDB-compatible regex pattern that is:
+     *  - Insensitive to accents/diacritics ("chateau" matches "château")
+     *  - Tolerant of missing French bridge/article words (le, la, les, des, de, du, l', d'…)
+     *    e.g. "chateau crostes"  → matches "Château les Crostes"
+     *         "domaine eglise"   → matches "Domaine de l'Église"
+     *         "chateau les crostes" → same ("les" stripped from query, made optional in target)
+     */
+    private buildAccentInsensitivePattern(query: string): string {
+        const ACCENT_MAP: Record<string, string> = {
+            a: '[a\u00e0\u00e2\u00e4\u00e1\u00e3\u00e5]',
+            e: '[e\u00e9\u00e8\u00ea\u00eb]',
+            i: '[i\u00ee\u00ef\u00ed\u00ec]',
+            o: '[o\u00f4\u00f6\u00f3\u00f2\u00f5\u00f8]',
+            u: '[u\u00f9\u00fb\u00fc\u00fa\u0171]',
+            c: '[c\u00e7]',
+            n: '[n\u00f1]',
+            y: '[y\u00ff\u00fd]',
+        };
+
+        const BRIDGE_WORDS = new Set([
+            'le', 'la', 'les', 'des', 'de', 'du', 'd', 'l',
+            'au', 'aux', 'en', 'et', 'un', 'une',
+        ]);
+
+        const buildCharPattern = (char: string): string => {
+            const lower = char.toLowerCase();
+            if (ACCENT_MAP[lower]) return ACCENT_MAP[lower];
+            return char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        };
+
+        // Normalise input: strip accents, lower-case, replace apostrophes & hyphens with spaces
+        const stripped = query
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/['\u2019\u2018\-]/g, ' ');
+
+        const tokens = stripped.split(/\s+/).filter(t => t.length > 0);
+
+        // Drop bridge words the user typed — they will be optional in the separator
+        const significant = tokens.filter(t => !BRIDGE_WORDS.has(t));
+        const finalTokens = significant.length > 0 ? significant : tokens;
+
+        if (finalTokens.length === 0) {
+            return query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        const tokenPatterns = finalTokens.map(token =>
+            token.split('').map(buildCharPattern).join(''),
+        );
+
+        if (tokenPatterns.length === 1) return tokenPatterns[0];
+
+        // Between significant tokens allow:
+        //   - plain bridge words followed by space/hyphen: " les ", " de "
+        //   - contracted bridge words with apostrophe: " l'" " d'"
+        // Both are optional and repeatable so " de l'" also works.
+        const UNCONTRACTED = '(?:le|la|les|des|de|du|au|aux|en|et|un|une)';
+        const CONTRACTED    = "[dl]['\\u2019]";
+        const BRIDGE_SEP    = `[\\s\\-]+(?:${UNCONTRACTED}[\\s\\-]+|${CONTRACTED})*`;
+
+        return tokenPatterns.join(BRIDGE_SEP);
     }
 
     async unifiedSearch(query: string): Promise<{
@@ -753,6 +819,16 @@ export class RegionsService {
         try {
             const backendUrl = this.configService.get<string>('BACKEND_URL') || '';
             const searchQuery = query.trim();
+            const searchPattern = this.buildAccentInsensitivePattern(searchQuery);
+            const normalizeStr = (s: string) =>
+                s.normalize('NFD')
+                 .replace(/[\u0300-\u036f]/g, '')
+                 .toLowerCase()
+                 .replace(/['\u2019\u2018]/g, ' ')
+                 .replace(/\b(le|la|les|des|de|du|au|aux|en|et|un|une)\b/g, ' ')
+                 .replace(/\s+/g, ' ')
+                 .trim();
+            const normalizedQuery = normalizeStr(searchQuery);
             
             // Return early if query is empty after trimming
             if (!searchQuery) {
@@ -778,9 +854,9 @@ export class RegionsService {
             const serviceSearchConditions: any = {
                 'services.isActive': true,
                 $or: [
-                    { 'services.name': { $regex: searchQuery, $options: 'i' } },
-                    { 'services.description': { $regex: searchQuery, $options: 'i' } },
-                { 'services.languagesOffered': { $in: [new RegExp(searchQuery, 'i')] } }
+                    { 'services.name': { $regex: searchPattern, $options: 'i' } },
+                    { 'services.description': { $regex: searchPattern, $options: 'i' } },
+                { 'services.languagesOffered': { $in: [new RegExp(searchPattern, 'i')] } }
             ]
         };
 
@@ -802,22 +878,22 @@ export class RegionsService {
             this.staticExperienceModel
                 .find({
                     $or: [
-                        { name: { $regex: searchQuery, $options: 'i' } },
-                        { category: { $regex: searchQuery, $options: 'i' } },
-                        { city: { $regex: searchQuery, $options: 'i' } },
+                        { name: { $regex: searchPattern, $options: 'i' } },
+                        { category: { $regex: searchPattern, $options: 'i' } },
+                        { city: { $regex: searchPattern, $options: 'i' } },
                     ]
                 })
                 .limit(10)
                 .lean()
                 .exec(),
             this.userModel
-                .find({ domainName: { $regex: searchQuery, $options: 'i' } })
+                .find({ domainName: { $regex: searchPattern, $options: 'i' } })
                 .select('_id domainName domainLatitude domainLongitude address city codePostal region')
                 .limit(10)
                 .lean()
                 .exec(),
             this.regionModel
-                .find({ denom: { $regex: searchQuery, $options: 'i' } })
+                .find({ denom: { $regex: searchPattern, $options: 'i' } })
                 .limit(10)
                 .lean()
                 .exec(),
@@ -831,10 +907,10 @@ export class RegionsService {
             for (const service of profileDoc.services as any[]) {
                 if (!service.isActive) continue;
 
-                const matchesName = service.name.toLowerCase().includes(searchQuery.toLowerCase());
-                const matchesDescription = service.description?.toLowerCase().includes(searchQuery.toLowerCase());
+                const matchesName = normalizeStr(service.name).includes(normalizedQuery);
+                const matchesDescription = service.description ? normalizeStr(service.description).includes(normalizedQuery) : false;
                 const matchesLanguage = service.languagesOffered?.some((lang: string) => 
-                    lang.toLowerCase().includes(searchQuery.toLowerCase())
+                    normalizeStr(lang).includes(normalizedQuery)
                 );
                 const matchesPrice = numericQuery !== null && 
                     Math.abs(service.pricePerPerson - numericQuery) <= 10;
@@ -936,17 +1012,21 @@ export class RegionsService {
             } else if (hasDomains) {
                 type = 'domain';
                 if (domains.length === 1 && domains[0].location.region) {
-                    suggestedRoute = `/region/${encodeURIComponent(domains[0].location.region)}?q=${encodeURIComponent(searchQuery)}`;
+                    suggestedRoute = `/region/${encodeURIComponent(domains[0].location.region)}`;
                 } else {
-                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                    // Find the region name that best matches the search query
+                    const exactDomainRegion = domains.find(d => d.location?.region && normalizeStr(d.location.region) === normalizedQuery);
+                    const bestDomainRegion = exactDomainRegion || domains.find(d => d.location?.region);
+                    suggestedRoute = bestDomainRegion?.location?.region
+                        ? `/region/${encodeURIComponent(bestDomainRegion.location.region)}`
+                        : `/region/${encodeURIComponent(searchQuery)}`;
                 }
             } else if (hasRegions) {
                 type = 'region';
-                if (regionResults.length === 1) {
-                    suggestedRoute = `/region/${encodeURIComponent(regionResults[0].denom)}?q=${encodeURIComponent(searchQuery)}`;
-                } else {
-                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
-                }
+                // Always go directly to the best matching region page
+                const exactRegion = regionResults.find(r => normalizeStr(r.denom) === normalizedQuery);
+                const bestRegion = exactRegion || regionResults[0];
+                suggestedRoute = `/region/${encodeURIComponent(bestRegion.denom)}`;
             } else if (hasStaticExperiences) {
                 type = 'static-experience';
                 // Try to find region by coordinates first, then by city name
@@ -981,42 +1061,25 @@ export class RegionsService {
                 }
                 
                 if (matchedRegion) {
-                    suggestedRoute = `/region/${encodeURIComponent(matchedRegion.denom)}?q=${encodeURIComponent(searchQuery)}`;
+                    suggestedRoute = `/region/${encodeURIComponent(matchedRegion.denom)}`;
                 } else {
-                    // If still no region found, try to find the nearest parent region
-                    if (experiencesWithCoords.length > 0) {
-                        const exp = experiencesWithCoords[0];
-                        const nearestRegion = await this.regionModel.findOne({
-                            isParent: true
-                        }).sort({
-                            // Simple distance calculation - find closest region center
-                        }).limit(1).exec();
-                        
-                        if (nearestRegion) {
-                            suggestedRoute = `/region/${encodeURIComponent(nearestRegion.denom)}?q=${encodeURIComponent(searchQuery)}`;
-                        } else {
-                            suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
-                        }
-                    } else {
-                        suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
-                    }
+                    suggestedRoute = `/region/${encodeURIComponent(searchQuery)}`;
                 }
             }
         } else {
             type = 'mixed';
             // Priority: domain > region > service/static-experience
             if (hasDomains) {
-                if (domains.length === 1 && domains[0].location.region) {
-                    suggestedRoute = `/region/${encodeURIComponent(domains[0].location.region)}?q=${encodeURIComponent(searchQuery)}`;
-                } else {
-                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
-                }
+                const exactDomainRegion = domains.find(d => d.location?.region && normalizeStr(d.location.region) === normalizedQuery);
+                const bestDomainRegion = exactDomainRegion || domains.find(d => d.location?.region);
+                suggestedRoute = bestDomainRegion?.location?.region
+                    ? `/region/${encodeURIComponent(bestDomainRegion.location.region)}`
+                    : `/region/${encodeURIComponent(searchQuery)}`;
             } else if (hasRegions) {
-                if (regionResults.length === 1) {
-                    suggestedRoute = `/region/${encodeURIComponent(regionResults[0].denom)}?q=${encodeURIComponent(searchQuery)}`;
-                } else {
-                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
-                }
+                // Always go directly to the best matching region page
+                const exactRegion = regionResults.find(r => normalizeStr(r.denom) === normalizedQuery);
+                const bestRegion = exactRegion || regionResults[0];
+                suggestedRoute = `/region/${encodeURIComponent(bestRegion.denom)}`;
             } else if (hasStaticExperiences) {
                 // Try to find region by coordinates for static experiences
                 const experiencesWithCoords = staticExperienceResults.filter(exp => exp.latitude && exp.longitude);
@@ -1031,16 +1094,16 @@ export class RegionsService {
                     }).exec();
                     
                     if (matchedRegion) {
-                        suggestedRoute = `/region/${encodeURIComponent(matchedRegion.denom)}?q=${encodeURIComponent(searchQuery)}`;
+                        suggestedRoute = `/region/${encodeURIComponent(matchedRegion.denom)}`;
                     } else {
-                        suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                        suggestedRoute = `/region/${encodeURIComponent(searchQuery)}`;
                     }
                 } else {
-                    suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                    suggestedRoute = `/region/${encodeURIComponent(searchQuery)}`;
                 }
             } else {
                 // Services only
-                suggestedRoute = `/regions?q=${encodeURIComponent(searchQuery)}`;
+                suggestedRoute = `/experiences?q=${encodeURIComponent(searchQuery)}`;
             }
         }
 

@@ -178,8 +178,61 @@ export class EmailService {
     this.logger.log(`Rejection email sent to ${email}`);
   }
 
-  async sendSubscriptionExpiryWarning(data: {
+  async sendSupportTicketAlert(data: {
     userFullName: string;
+    userEmail: string;
+    domainName?: string;
+    subject: string;
+    message: string;
+    ticketId: string;
+  }): Promise<void> {
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@rosedesvins.com';
+    const adminUrl = process.env.FRONTEND_URL
+      ? `${process.env.FRONTEND_URL}/admin/support-tickets`
+      : 'http://localhost:3000/admin/support-tickets';
+
+    const emailJob: EmailJob = {
+      to: adminEmail,
+      subject: `🎫 Nouveau ticket de support - ${data.subject}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #318160;">Nouveau ticket de support</h2>
+          <p>Un nouveau ticket de support a été soumis par un utilisateur.</p>
+
+          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <h3 style="margin-top: 0; color: #318160;">Informations de l'utilisateur :</h3>
+            <p><strong>Nom :</strong> ${data.userFullName}</p>
+            <p><strong>Email :</strong> ${data.userEmail}</p>
+            ${data.domainName ? `<p><strong>Domaine :</strong> ${data.domainName}</p>` : ''}
+          </div>
+
+          <div style="background-color: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #ffc107;">
+            <h3 style="margin-top: 0; color: #856404;">Détails du ticket :</h3>
+            <p><strong>Sujet :</strong> ${data.subject}</p>
+            <p><strong>Message :</strong></p>
+            <p style="white-space: pre-wrap;">${data.message}</p>
+            <p style="font-size: 12px; color: #666;"><strong>ID du ticket :</strong> ${data.ticketId}</p>
+          </div>
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${adminUrl}" style="background-color: #318160; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
+              Voir les tickets de support
+            </a>
+          </div>
+
+          <p style="color: #666; font-size: 12px; margin-top: 30px;">
+            Cordialement,<br>
+            L'équipe Rose des Vins
+          </p>
+        </div>
+      `,
+    };
+
+    await this.sendEmail(emailJob);
+    this.logger.log(`Support ticket alert sent to admin for ticket ${data.ticketId}`);
+  }
+
+  async sendSubscriptionExpiryWarning(data: {    userFullName: string;
     userEmail: string;
     domainName: string;
     expiryDate: Date;
