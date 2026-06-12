@@ -815,6 +815,39 @@ export class RegionsService {
         return patterns.length === 1 ? patterns[0] : patterns.map(p => `(?=.*${p})`).join('');
     }
 
+    private buildExperienceRoute(regionName: string | null | undefined, domainId: string): string {
+        const region = regionName?.trim() || 'domaine';
+        return `/experience/${encodeURIComponent(region)}/${domainId}`;
+    }
+
+    private async resolveRegionNameForCoordinates(latitude: number, longitude: number): Promise<string | null> {
+        const matchedRegion = await this.regionModel.findOne({
+            min_lat: { $lte: latitude },
+            max_lat: { $gte: latitude },
+            min_lon: { $lte: longitude },
+            max_lon: { $gte: longitude },
+        }).exec();
+        return matchedRegion?.denom || null;
+    }
+
+    private async resolveRegionNameForStaticExperience(exp: {
+        latitude?: number | null;
+        longitude?: number | null;
+        city?: string | null;
+    }): Promise<string | null> {
+        if (exp.latitude && exp.longitude) {
+            const regionByCoords = await this.resolveRegionNameForCoordinates(exp.latitude, exp.longitude);
+            if (regionByCoords) return regionByCoords;
+        }
+        if (exp.city) {
+            const regionByCity = await this.regionModel.findOne({
+                denom: { $regex: exp.city, $options: 'i' },
+            }).exec();
+            if (regionByCity) return regionByCity.denom;
+        }
+        return null;
+    }
+
     async unifiedSearch(query: string): Promise<{
         success: boolean;
         data: {
@@ -986,6 +1019,15 @@ export class RegionsService {
                     Math.abs(service.pricePerPerson - numericQuery) <= 10;
 
                 if (matchesName || matchesDescription || matchesLanguage || matchesPrice) {
+                    const domain = {
+                        domainId: profile._id.toString(),
+                        userId: user?._id || null,
+                        domainName: user?.domainName || null,
+                        domainDescription: profileDoc.domainDescription,
+                        colorCode: profileDoc.colorCode,
+                        region: user?.region || null,
+                        city: user?.city || null,
+                    };
                     services.push({
                         serviceId: service._id,
                         serviceName: service.name,
@@ -993,34 +1035,39 @@ export class RegionsService {
                         pricePerPerson: service.pricePerPerson,
                         languagesOffered: service.languagesOffered,
                         serviceBannerUrl: service.serviceBannerUrl ? `${backendUrl}${service.serviceBannerUrl}` : null,
-                        domain: {
-                            domainId: profile._id,
-                            userId: user?._id || null,
-                            domainName: user?.domainName || null,
-                            domainDescription: profileDoc.domainDescription,
-                            colorCode: profileDoc.colorCode,
-                        }
+                        domain,
+                        experienceRoute: this.buildExperienceRoute(
+                            domain.region || domain.city || domain.domainName,
+                            domain.domainId,
+                        ),
                     });
                 }
             }
         }
 
-        const staticExperienceResults = (staticExperiences as any[]).map(exp => ({
-            domainName: exp.domain_name || exp.name,
-            domainDescription: exp.domain_description || exp.about || exp.category || '',
-            domainProfilePictureUrl: exp.domain_profile_pic_url || exp.main_image || null,
-            domainLogoUrl: exp.domain_logo_url || null,
-            name: exp.name,
-            category: exp.category,
-            address: exp.address,
-            city: exp.city,
-            latitude: exp.latitude,
-            longitude: exp.longitude,
-            rating: exp.rating,
-            website: exp.website,
-            mainImage: exp.main_image,
-            about: exp.about,
-            type: 'static-experience' as const
+        const staticExperienceResults = await Promise.all((staticExperiences as any[]).map(async (exp) => {
+            const domainId = exp._id.toString();
+            const regionName = await this.resolveRegionNameForStaticExperience(exp);
+            return {
+                domainId,
+                domainName: exp.domain_name || exp.name,
+                domainDescription: exp.domain_description || exp.about || exp.category || '',
+                domainProfilePictureUrl: exp.domain_profile_pic_url || exp.main_image || null,
+                domainLogoUrl: exp.domain_logo_url || null,
+                name: exp.name,
+                category: exp.category,
+                address: exp.address,
+                city: exp.city,
+                region: regionName,
+                latitude: exp.latitude,
+                longitude: exp.longitude,
+                rating: exp.rating,
+                website: exp.website,
+                mainImage: exp.main_image,
+                about: exp.about,
+                type: 'static-experience' as const,
+                experienceRoute: this.buildExperienceRoute(regionName || exp.city, domainId),
+            };
         }));
 
         // Domain profiles query (depends on usersWithDomains result from parallel block)
@@ -1035,6 +1082,13 @@ export class RegionsService {
 
         const domains = (domainProfiles as any[]).map(profile => {
             const user = profile.userId as any;
+            const location = {
+                latitude: user?.domainLatitude || null,
+                longitude: user?.domainLongitude || null,
+                address: user?.address || null,
+                city: user?.city || null,
+                region: user?.region || null,
+            };
             return {
                 domainId: profile._id,
                 userId: user?._id || null,
@@ -1043,13 +1097,11 @@ export class RegionsService {
                 colorCode: profile.colorCode,
                 domainProfilePictureUrl: profile.domainProfilePictureUrl ? `${backendUrl}${profile.domainProfilePictureUrl}` : null,
                 domainLogoUrl: profile.domainLogoUrl ? `${backendUrl}${profile.domainLogoUrl}` : null,
-                location: {
-                    latitude: user?.domainLatitude || null,
-                    longitude: user?.domainLongitude || null,
-                    address: user?.address || null,
-                    city: user?.city || null,
-                    region: user?.region || null,
-                }
+                location,
+                experienceRoute: this.buildExperienceRoute(
+                    location.region || location.city || user?.domainName,
+                    profile._id.toString(),
+                ),
             };
         });
 
@@ -1073,107 +1125,74 @@ export class RegionsService {
         const hasStaticExperiences = staticExperienceResults.length > 0;
         const totalResults = [hasServices, hasDomains, hasRegions, hasStaticExperiences].filter(Boolean).length;
 
+        const pickBestService = () => {
+            const exactService = services.find(s => normalizeStr(s.serviceName) === normalizedQuery);
+            return exactService || services[0];
+        };
+
+        const pickBestDomain = () => {
+            const exactDomain = domains.find(d => d.domainName && normalizeStr(d.domainName) === normalizedQuery);
+            return exactDomain || domains[0];
+        };
+
+        const pickBestStaticExperience = () => {
+            const exactExperience = staticExperienceResults.find(exp => normalizeStr(exp.name) === normalizedQuery);
+            return exactExperience || staticExperienceResults[0];
+        };
+
+        const buildServiceRoute = (service: (typeof services)[number]) =>
+            this.buildExperienceRoute(
+                service.domain.region || service.domain.city || service.domain.domainName,
+                service.domain.domainId,
+            );
+
+        const buildDomainRoute = (domain: (typeof domains)[number]) =>
+            this.buildExperienceRoute(
+                domain.location?.region || domain.location?.city || domain.domainName,
+                domain.domainId,
+            );
+
         if (totalResults === 0) {
             type = null;
         } else if (totalResults === 1) {
             if (hasServices) {
                 type = 'service';
-                suggestedRoute = `/experiences?q=${encodeURIComponent(searchQuery)}`;
+                suggestedRoute = buildServiceRoute(pickBestService());
             } else if (hasDomains) {
                 type = 'domain';
-                if (domains.length === 1 && domains[0].location.region) {
-                    suggestedRoute = `/region/${encodeURIComponent(domains[0].location.region)}`;
-                } else {
-                    // Find the region name that best matches the search query
-                    const exactDomainRegion = domains.find(d => d.location?.region && normalizeStr(d.location.region) === normalizedQuery);
-                    const bestDomainRegion = exactDomainRegion || domains.find(d => d.location?.region);
-                    suggestedRoute = bestDomainRegion?.location?.region
-                        ? `/region/${encodeURIComponent(bestDomainRegion.location.region)}`
-                        : `/region/${encodeURIComponent(searchQuery)}`;
-                }
+                suggestedRoute = buildDomainRoute(pickBestDomain());
             } else if (hasRegions) {
                 type = 'region';
-                // Always go directly to the best matching region page
                 const exactRegion = regionResults.find(r => normalizeStr(r.denom) === normalizedQuery);
                 const bestRegion = exactRegion || regionResults[0];
                 suggestedRoute = `/region/${encodeURIComponent(bestRegion.denom)}`;
             } else if (hasStaticExperiences) {
                 type = 'static-experience';
-                // Try to find region by coordinates first, then by city name
-                let matchedRegion: any = null;
-                
-                // Get coordinates from static experiences
-                const experiencesWithCoords = staticExperienceResults.filter(exp => exp.latitude && exp.longitude);
-                
-                if (experiencesWithCoords.length > 0) {
-                    // Use the first experience with coordinates to find the region
-                    const exp = experiencesWithCoords[0];
-                    
-                    // Find region that contains these coordinates
-                    matchedRegion = await this.regionModel.findOne({
-                        min_lat: { $lte: exp.latitude },
-                        max_lat: { $gte: exp.latitude },
-                        min_lon: { $lte: exp.longitude },
-                        max_lon: { $gte: exp.longitude }
-                    }).exec();
-                }
-                
-                // If no region found by coordinates, try by city name
-                if (!matchedRegion) {
-                    const cities = staticExperienceResults.map(exp => exp.city).filter(Boolean);
-                    const uniqueCities = [...new Set(cities)];
-                    
-                    if (uniqueCities.length === 1 && uniqueCities[0]) {
-                        matchedRegion = await this.regionModel.findOne({
-                            denom: { $regex: uniqueCities[0], $options: 'i' }
-                        }).exec();
-                    }
-                }
-                
-                if (matchedRegion) {
-                    suggestedRoute = `/region/${encodeURIComponent(matchedRegion.denom)}`;
-                } else {
-                    suggestedRoute = `/region/${encodeURIComponent(searchQuery)}`;
-                }
+                suggestedRoute = pickBestStaticExperience().experienceRoute;
             }
         } else {
             type = 'mixed';
-            // Priority: domain > region > service/static-experience
-            if (hasDomains) {
-                const exactDomainRegion = domains.find(d => d.location?.region && normalizeStr(d.location.region) === normalizedQuery);
-                const bestDomainRegion = exactDomainRegion || domains.find(d => d.location?.region);
-                suggestedRoute = bestDomainRegion?.location?.region
-                    ? `/region/${encodeURIComponent(bestDomainRegion.location.region)}`
-                    : `/region/${encodeURIComponent(searchQuery)}`;
+            // Priority: exact service/experience match > domain > service > static experience > region
+            const exactService = services.find(s => normalizeStr(s.serviceName) === normalizedQuery);
+            const exactStaticExperience = staticExperienceResults.find(exp => normalizeStr(exp.name) === normalizedQuery);
+            const exactDomain = domains.find(d => d.domainName && normalizeStr(d.domainName) === normalizedQuery);
+
+            if (exactService) {
+                suggestedRoute = buildServiceRoute(exactService);
+            } else if (exactStaticExperience) {
+                suggestedRoute = exactStaticExperience.experienceRoute;
+            } else if (exactDomain) {
+                suggestedRoute = buildDomainRoute(exactDomain);
+            } else if (hasServices) {
+                suggestedRoute = buildServiceRoute(pickBestService());
+            } else if (hasDomains) {
+                suggestedRoute = buildDomainRoute(pickBestDomain());
+            } else if (hasStaticExperiences) {
+                suggestedRoute = pickBestStaticExperience().experienceRoute;
             } else if (hasRegions) {
-                // Always go directly to the best matching region page
                 const exactRegion = regionResults.find(r => normalizeStr(r.denom) === normalizedQuery);
                 const bestRegion = exactRegion || regionResults[0];
                 suggestedRoute = `/region/${encodeURIComponent(bestRegion.denom)}`;
-            } else if (hasStaticExperiences) {
-                // Try to find region by coordinates for static experiences
-                const experiencesWithCoords = staticExperienceResults.filter(exp => exp.latitude && exp.longitude);
-                
-                if (experiencesWithCoords.length > 0) {
-                    const exp = experiencesWithCoords[0];
-                    const matchedRegion = await this.regionModel.findOne({
-                        min_lat: { $lte: exp.latitude },
-                        max_lat: { $gte: exp.latitude },
-                        min_lon: { $lte: exp.longitude },
-                        max_lon: { $gte: exp.longitude }
-                    }).exec();
-                    
-                    if (matchedRegion) {
-                        suggestedRoute = `/region/${encodeURIComponent(matchedRegion.denom)}`;
-                    } else {
-                        suggestedRoute = `/region/${encodeURIComponent(searchQuery)}`;
-                    }
-                } else {
-                    suggestedRoute = `/region/${encodeURIComponent(searchQuery)}`;
-                }
-            } else {
-                // Services only
-                suggestedRoute = `/experiences?q=${encodeURIComponent(searchQuery)}`;
             }
         }
 
