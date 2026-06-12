@@ -732,77 +732,120 @@ export class RegionsService {
 
     async searchRegions(query: string): Promise<Region[]> {
         const pattern = this.buildAccentInsensitivePattern(query);
+        const plain = query.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         return this.regionModel
-            .find({
-                denom: { $regex: pattern, $options: 'i' },
-            })
+            .find({ $or: [
+                { denom: { $regex: pattern, $options: 'i' } },
+                { denom: { $regex: plain, $options: 'i' } },
+            ]})
             .limit(50)
             .exec();
     }
 
     /**
-     * Builds a MongoDB-compatible regex pattern that is:
-     *  - Insensitive to accents/diacritics ("chateau" matches "château")
-     *  - Tolerant of missing French bridge/article words (le, la, les, des, de, du, l', d'…)
-     *    e.g. "chateau crostes"  → matches "Château les Crostes"
-     *         "domaine eglise"   → matches "Domaine de l'Église"
-     *         "chateau les crostes" → same ("les" stripped from query, made optional in target)
+     * Builds an accent-insensitive, case-insensitive regex pattern for a SINGLE token.
+     * Character classes include both upper and lower variants explicitly so the pattern
+     * works regardless of the regex engine's Unicode case-folding behaviour.
+     * e.g. "chateau" → [cCçÇ]h[aAàÀâÂäÄáÁãÃåÅ]t[eEéÉèÈêÊëË][aAàÀâÂäÄáÁãÃåÅ][uUùÙûÛüÜúÚűŰ]
      */
-    private buildAccentInsensitivePattern(query: string): string {
+    private buildTokenPattern(token: string): string {
         const ACCENT_MAP: Record<string, string> = {
-            a: '[a\u00e0\u00e2\u00e4\u00e1\u00e3\u00e5]',
-            e: '[e\u00e9\u00e8\u00ea\u00eb]',
-            i: '[i\u00ee\u00ef\u00ed\u00ec]',
-            o: '[o\u00f4\u00f6\u00f3\u00f2\u00f5\u00f8]',
-            u: '[u\u00f9\u00fb\u00fc\u00fa\u0171]',
-            c: '[c\u00e7]',
-            n: '[n\u00f1]',
-            y: '[y\u00ff\u00fd]',
+            a: '[aA\u00e0\u00c0\u00e2\u00c2\u00e4\u00c4\u00e1\u00c1\u00e3\u00c3\u00e5\u00c5]',
+            e: '[eE\u00e9\u00c9\u00e8\u00c8\u00ea\u00ca\u00eb\u00cb]',
+            i: '[iI\u00ee\u00ce\u00ef\u00cf\u00ed\u00cd\u00ec\u00cc]',
+            o: '[oO\u00f4\u00d4\u00f6\u00d6\u00f3\u00d3\u00f2\u00d2\u00f5\u00d5\u00f8\u00d8]',
+            u: '[uU\u00f9\u00d9\u00fb\u00db\u00fc\u00dc\u00fa\u00da\u0171\u0170]',
+            c: '[cC\u00e7\u00c7]',
+            n: '[nN\u00f1\u00d1]',
+            y: '[yY\u00ff\u0178\u00fd\u00dd]',
         };
+        return token
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .split('')
+            .map(char => {
+                if (ACCENT_MAP[char]) return ACCENT_MAP[char];
+                return char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            })
+            .join('');
+    }
 
+    /**
+     * Splits a query into significant tokens:
+     *  - strips accents, lowercases, splits on whitespace/apostrophes/hyphens
+     *  - removes French bridge/article words (de, la, les …)
+     */
+    private extractSearchTokens(query: string): string[] {
         const BRIDGE_WORDS = new Set([
             'le', 'la', 'les', 'des', 'de', 'du', 'd', 'l',
             'au', 'aux', 'en', 'et', 'un', 'une',
         ]);
-
-        const buildCharPattern = (char: string): string => {
-            const lower = char.toLowerCase();
-            if (ACCENT_MAP[lower]) return ACCENT_MAP[lower];
-            return char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        };
-
-        // Normalise input: strip accents, lower-case, replace apostrophes & hyphens with spaces
-        const stripped = query
+        const raw = query
             .normalize('NFD')
             .replace(/[\u0300-\u036f]/g, '')
             .toLowerCase()
-            .replace(/['\u2019\u2018\-]/g, ' ');
+            .replace(/['\u2019\u2018\-]/g, ' ')
+            .split(/\s+/)
+            .filter(t => t.length > 0);
+        const significant = raw.filter(t => !BRIDGE_WORDS.has(t));
+        return significant.length > 0 ? significant : raw;
+    }
 
-        const tokens = stripped.split(/\s+/).filter(t => t.length > 0);
+    /**
+     * For a list of tokens and a field name, returns a MongoDB $and array
+     * where every token must appear somewhere in that field.
+     * Each token condition is an $or of the accent-insensitive pattern + plain escaped fallback.
+     */
+    private buildTokenAndConditions(field: string, tokens: string[]): Record<string, any>[] | null {
+        if (tokens.length === 0) return null;
+        return tokens.map(token => ({
+            $or: [
+                { [field]: { $regex: this.buildTokenPattern(token), $options: 'i' } },
+                { [field]: { $regex: token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+            ],
+        }));
+    }
 
-        // Drop bridge words the user typed — they will be optional in the separator
-        const significant = tokens.filter(t => !BRIDGE_WORDS.has(t));
-        const finalTokens = significant.length > 0 ? significant : tokens;
+    /** @deprecated kept for any callers outside unifiedSearch */
+    private buildAccentInsensitivePattern(query: string): string {
+        const tokens = this.extractSearchTokens(query);
+        if (tokens.length === 0) return query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const patterns = tokens.map(t => this.buildTokenPattern(t));
+        return patterns.length === 1 ? patterns[0] : patterns.map(p => `(?=.*${p})`).join('');
+    }
 
-        if (finalTokens.length === 0) {
-            return query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    private buildExperienceRoute(regionName: string | null | undefined, domainId: string): string {
+        const region = regionName?.trim() || 'domaine';
+        return `/experience/${encodeURIComponent(region)}/${domainId}`;
+    }
+
+    private async resolveRegionNameForCoordinates(latitude: number, longitude: number): Promise<string | null> {
+        const matchedRegion = await this.regionModel.findOne({
+            min_lat: { $lte: latitude },
+            max_lat: { $gte: latitude },
+            min_lon: { $lte: longitude },
+            max_lon: { $gte: longitude },
+        }).exec();
+        return matchedRegion?.denom || null;
+    }
+
+    private async resolveRegionNameForStaticExperience(exp: {
+        latitude?: number | null;
+        longitude?: number | null;
+        city?: string | null;
+    }): Promise<string | null> {
+        if (exp.latitude && exp.longitude) {
+            const regionByCoords = await this.resolveRegionNameForCoordinates(exp.latitude, exp.longitude);
+            if (regionByCoords) return regionByCoords;
         }
-
-        const tokenPatterns = finalTokens.map(token =>
-            token.split('').map(buildCharPattern).join(''),
-        );
-
-        if (tokenPatterns.length === 1) return tokenPatterns[0];
-
-        // Between significant tokens allow:
-        //   - plain bridge words followed by space/hyphen: " les ", " de "
-        //   - contracted bridge words with apostrophe: " l'" " d'"
-        // Both are optional and repeatable so " de l'" also works.
-        const UNCONTRACTED = '(?:le|la|les|des|de|du|au|aux|en|et|un|une)';
-        const CONTRACTED    = "[dl]['\\u2019]";
-        const BRIDGE_SEP    = `[\\s\\-]+(?:${UNCONTRACTED}[\\s\\-]+|${CONTRACTED})*`;
-
-        return tokenPatterns.join(BRIDGE_SEP);
+        if (exp.city) {
+            const regionByCity = await this.regionModel.findOne({
+                denom: { $regex: exp.city, $options: 'i' },
+            }).exec();
+            if (regionByCity) return regionByCity.denom;
+        }
+        return null;
     }
 
     async unifiedSearch(query: string): Promise<{
@@ -820,6 +863,13 @@ export class RegionsService {
             const backendUrl = this.configService.get<string>('BACKEND_URL') || '';
             const searchQuery = query.trim();
             const searchPattern = this.buildAccentInsensitivePattern(searchQuery);
+            // Plain normalised pattern: accent-stripped, case-insensitive fallback
+            // so simple queries always work even if the char-class pattern has PCRE edge cases.
+            const plainPattern = searchQuery
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const normalizeStr = (s: string) =>
                 s.normalize('NFD')
                  .replace(/[\u0300-\u036f]/g, '')
@@ -829,6 +879,8 @@ export class RegionsService {
                  .replace(/\s+/g, ' ')
                  .trim();
             const normalizedQuery = normalizeStr(searchQuery);
+            // Split into tokens for flexible in-memory matching (handles multi-word queries)
+            const queryTokens = normalizedQuery.split(/\s+/).filter(t => t.length > 0);
             
             // Return early if query is empty after trimming
             if (!searchQuery) {
@@ -850,54 +902,97 @@ export class RegionsService {
 
             this.logger.log(`Unified search for: "${searchQuery}" (numeric: ${isNumeric})`);
 
-            // Search in services (via domain profiles) - enhanced search
+            // Extract significant tokens once – used for all collection queries
+            const searchTokens = this.extractSearchTokens(searchQuery);
+
+            // Helper: build a single-field per-token condition (all tokens must match, any order)
+            const makeAndCond = (field: string) => {
+                const conds = this.buildTokenAndConditions(field, searchTokens);
+                if (!conds || conds.length === 0) return {};
+                return conds.length === 1 ? conds[0] : { $and: conds };
+            };
+
+            // Service search: every token must match in name OR description OR language
+            const servicePerToken = searchTokens.map(token => ({
+                $or: [
+                    { 'services.name':        { $regex: this.buildTokenPattern(token), $options: 'i' } },
+                    { 'services.name':        { $regex: token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+                    { 'services.description': { $regex: this.buildTokenPattern(token), $options: 'i' } },
+                    { 'services.description': { $regex: token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+                    { 'services.languagesOffered': { $in: [new RegExp(this.buildTokenPattern(token), 'i')] } },
+                ],
+            }));
+
             const serviceSearchConditions: any = {
                 'services.isActive': true,
+                ...(servicePerToken.length > 0
+                    ? { $and: servicePerToken }
+                    : {}),
+            };
+
+            if (numericQuery !== null) {
+                serviceSearchConditions.$or = [{
+                    'services.pricePerPerson': { $gte: numericQuery - 10, $lte: numericQuery + 10 },
+                }];
+            }
+
+            // Static experience: every token must match name OR category OR city OR domain_name
+            const staticPerToken = searchTokens.map(token => ({
                 $or: [
-                    { 'services.name': { $regex: searchPattern, $options: 'i' } },
-                    { 'services.description': { $regex: searchPattern, $options: 'i' } },
-                { 'services.languagesOffered': { $in: [new RegExp(searchPattern, 'i')] } }
-            ]
-        };
+                    { name:        { $regex: this.buildTokenPattern(token), $options: 'i' } },
+                    { name:        { $regex: token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+                    { category:    { $regex: this.buildTokenPattern(token), $options: 'i' } },
+                    { category:    { $regex: token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+                    { city:        { $regex: this.buildTokenPattern(token), $options: 'i' } },
+                    { city:        { $regex: token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+                    { domain_name: { $regex: this.buildTokenPattern(token), $options: 'i' } },
+                    { domain_name: { $regex: token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+                ],
+            }));
 
-        // Add price search if query is numeric
-        if (numericQuery !== null) {
-            serviceSearchConditions.$or.push({
-                'services.pricePerPerson': { $gte: numericQuery - 10, $lte: numericQuery + 10 }
-            });
-        }
+            const staticCond = staticPerToken.length > 0
+                ? (staticPerToken.length === 1 ? staticPerToken[0] : { $and: staticPerToken })
+                : {};
 
-        // Run all independent queries in parallel for maximum speed
-        const [domainProfilesWithServices, staticExperiences, usersWithDomains, regions] = await Promise.all([
-            this.domainProfileModel
-                .find(serviceSearchConditions)
-                .populate('userId', 'domainName domainLatitude domainLongitude address city codePostal region')
-                .limit(10)
-                .lean()
-                .exec(),
-            this.staticExperienceModel
-                .find({
-                    $or: [
-                        { name: { $regex: searchPattern, $options: 'i' } },
-                        { category: { $regex: searchPattern, $options: 'i' } },
-                        { city: { $regex: searchPattern, $options: 'i' } },
-                    ]
-                })
-                .limit(10)
-                .lean()
-                .exec(),
-            this.userModel
-                .find({ domainName: { $regex: searchPattern, $options: 'i' } })
-                .select('_id domainName domainLatitude domainLongitude address city codePostal region')
-                .limit(10)
-                .lean()
-                .exec(),
-            this.regionModel
-                .find({ denom: { $regex: searchPattern, $options: 'i' } })
-                .limit(10)
-                .lean()
-                .exec(),
-        ]);
+            const userConds  = this.buildTokenAndConditions('domainName', searchTokens);
+            const userCond   = userConds
+                ? (userConds.length === 1 ? userConds[0] : { $and: userConds })
+                : null;
+
+            const regionConds = this.buildTokenAndConditions('denom', searchTokens);
+            const regionCond  = regionConds
+                ? (regionConds.length === 1 ? regionConds[0] : { $and: regionConds })
+                : null;
+
+            // Run all independent queries in parallel for maximum speed
+            const [domainProfilesWithServices, staticExperiences, usersWithDomains, regions] = await Promise.all([
+                this.domainProfileModel
+                    .find(serviceSearchConditions)
+                    .populate('userId', 'domainName domainLatitude domainLongitude address city codePostal region')
+                    .limit(20)
+                    .lean()
+                    .exec(),
+                this.staticExperienceModel
+                    .find(staticCond)
+                    .limit(20)
+                    .lean()
+                    .exec(),
+                userCond
+                    ? this.userModel
+                        .find(userCond)
+                        .select('_id domainName domainLatitude domainLongitude address city codePostal region')
+                        .limit(20)
+                        .lean()
+                        .exec()
+                    : Promise.resolve([]),
+                regionCond
+                    ? this.regionModel
+                        .find(regionCond)
+                        .limit(20)
+                        .lean()
+                        .exec()
+                    : Promise.resolve([]),
+            ]);
 
         const services: any[] = [];
         for (const profile of domainProfilesWithServices) {
@@ -907,15 +1002,32 @@ export class RegionsService {
             for (const service of profileDoc.services as any[]) {
                 if (!service.isActive) continue;
 
-                const matchesName = normalizeStr(service.name).includes(normalizedQuery);
-                const matchesDescription = service.description ? normalizeStr(service.description).includes(normalizedQuery) : false;
-                const matchesLanguage = service.languagesOffered?.some((lang: string) => 
-                    normalizeStr(lang).includes(normalizedQuery)
+                const matchesName = queryTokens.length > 0
+                    ? queryTokens.every(t => normalizeStr(service.name).includes(t))
+                    : normalizeStr(service.name).includes(normalizedQuery);
+                const matchesDescription = service.description
+                    ? (queryTokens.length > 0
+                        ? queryTokens.every(t => normalizeStr(service.description).includes(t))
+                        : normalizeStr(service.description).includes(normalizedQuery))
+                    : false;
+                const matchesLanguage = service.languagesOffered?.some((lang: string) =>
+                    queryTokens.length > 0
+                        ? queryTokens.every(t => normalizeStr(lang).includes(t))
+                        : normalizeStr(lang).includes(normalizedQuery)
                 );
                 const matchesPrice = numericQuery !== null && 
                     Math.abs(service.pricePerPerson - numericQuery) <= 10;
 
                 if (matchesName || matchesDescription || matchesLanguage || matchesPrice) {
+                    const domain = {
+                        domainId: profile._id.toString(),
+                        userId: user?._id || null,
+                        domainName: user?.domainName || null,
+                        domainDescription: profileDoc.domainDescription,
+                        colorCode: profileDoc.colorCode,
+                        region: user?.region || null,
+                        city: user?.city || null,
+                    };
                     services.push({
                         serviceId: service._id,
                         serviceName: service.name,
@@ -923,34 +1035,39 @@ export class RegionsService {
                         pricePerPerson: service.pricePerPerson,
                         languagesOffered: service.languagesOffered,
                         serviceBannerUrl: service.serviceBannerUrl ? `${backendUrl}${service.serviceBannerUrl}` : null,
-                        domain: {
-                            domainId: profile._id,
-                            userId: user?._id || null,
-                            domainName: user?.domainName || null,
-                            domainDescription: profileDoc.domainDescription,
-                            colorCode: profileDoc.colorCode,
-                        }
+                        domain,
+                        experienceRoute: this.buildExperienceRoute(
+                            domain.region || domain.city || domain.domainName,
+                            domain.domainId,
+                        ),
                     });
                 }
             }
         }
 
-        const staticExperienceResults = (staticExperiences as any[]).map(exp => ({
-            domainName: exp.domain_name || exp.name,
-            domainDescription: exp.domain_description || exp.about || exp.category || '',
-            domainProfilePictureUrl: exp.domain_profile_pic_url || exp.main_image || null,
-            domainLogoUrl: exp.domain_logo_url || null,
-            name: exp.name,
-            category: exp.category,
-            address: exp.address,
-            city: exp.city,
-            latitude: exp.latitude,
-            longitude: exp.longitude,
-            rating: exp.rating,
-            website: exp.website,
-            mainImage: exp.main_image,
-            about: exp.about,
-            type: 'static-experience' as const
+        const staticExperienceResults = await Promise.all((staticExperiences as any[]).map(async (exp) => {
+            const domainId = exp._id.toString();
+            const regionName = await this.resolveRegionNameForStaticExperience(exp);
+            return {
+                domainId,
+                domainName: exp.domain_name || exp.name,
+                domainDescription: exp.domain_description || exp.about || exp.category || '',
+                domainProfilePictureUrl: exp.domain_profile_pic_url || exp.main_image || null,
+                domainLogoUrl: exp.domain_logo_url || null,
+                name: exp.name,
+                category: exp.category,
+                address: exp.address,
+                city: exp.city,
+                region: regionName,
+                latitude: exp.latitude,
+                longitude: exp.longitude,
+                rating: exp.rating,
+                website: exp.website,
+                mainImage: exp.main_image,
+                about: exp.about,
+                type: 'static-experience' as const,
+                experienceRoute: this.buildExperienceRoute(regionName || exp.city, domainId),
+            };
         }));
 
         // Domain profiles query (depends on usersWithDomains result from parallel block)
@@ -965,6 +1082,13 @@ export class RegionsService {
 
         const domains = (domainProfiles as any[]).map(profile => {
             const user = profile.userId as any;
+            const location = {
+                latitude: user?.domainLatitude || null,
+                longitude: user?.domainLongitude || null,
+                address: user?.address || null,
+                city: user?.city || null,
+                region: user?.region || null,
+            };
             return {
                 domainId: profile._id,
                 userId: user?._id || null,
@@ -973,13 +1097,11 @@ export class RegionsService {
                 colorCode: profile.colorCode,
                 domainProfilePictureUrl: profile.domainProfilePictureUrl ? `${backendUrl}${profile.domainProfilePictureUrl}` : null,
                 domainLogoUrl: profile.domainLogoUrl ? `${backendUrl}${profile.domainLogoUrl}` : null,
-                location: {
-                    latitude: user?.domainLatitude || null,
-                    longitude: user?.domainLongitude || null,
-                    address: user?.address || null,
-                    city: user?.city || null,
-                    region: user?.region || null,
-                }
+                location,
+                experienceRoute: this.buildExperienceRoute(
+                    location.region || location.city || user?.domainName,
+                    profile._id.toString(),
+                ),
             };
         });
 
@@ -1003,107 +1125,74 @@ export class RegionsService {
         const hasStaticExperiences = staticExperienceResults.length > 0;
         const totalResults = [hasServices, hasDomains, hasRegions, hasStaticExperiences].filter(Boolean).length;
 
+        const pickBestService = () => {
+            const exactService = services.find(s => normalizeStr(s.serviceName) === normalizedQuery);
+            return exactService || services[0];
+        };
+
+        const pickBestDomain = () => {
+            const exactDomain = domains.find(d => d.domainName && normalizeStr(d.domainName) === normalizedQuery);
+            return exactDomain || domains[0];
+        };
+
+        const pickBestStaticExperience = () => {
+            const exactExperience = staticExperienceResults.find(exp => normalizeStr(exp.name) === normalizedQuery);
+            return exactExperience || staticExperienceResults[0];
+        };
+
+        const buildServiceRoute = (service: (typeof services)[number]) =>
+            this.buildExperienceRoute(
+                service.domain.region || service.domain.city || service.domain.domainName,
+                service.domain.domainId,
+            );
+
+        const buildDomainRoute = (domain: (typeof domains)[number]) =>
+            this.buildExperienceRoute(
+                domain.location?.region || domain.location?.city || domain.domainName,
+                domain.domainId,
+            );
+
         if (totalResults === 0) {
             type = null;
         } else if (totalResults === 1) {
             if (hasServices) {
                 type = 'service';
-                suggestedRoute = `/experiences?q=${encodeURIComponent(searchQuery)}`;
+                suggestedRoute = buildServiceRoute(pickBestService());
             } else if (hasDomains) {
                 type = 'domain';
-                if (domains.length === 1 && domains[0].location.region) {
-                    suggestedRoute = `/region/${encodeURIComponent(domains[0].location.region)}`;
-                } else {
-                    // Find the region name that best matches the search query
-                    const exactDomainRegion = domains.find(d => d.location?.region && normalizeStr(d.location.region) === normalizedQuery);
-                    const bestDomainRegion = exactDomainRegion || domains.find(d => d.location?.region);
-                    suggestedRoute = bestDomainRegion?.location?.region
-                        ? `/region/${encodeURIComponent(bestDomainRegion.location.region)}`
-                        : `/region/${encodeURIComponent(searchQuery)}`;
-                }
+                suggestedRoute = buildDomainRoute(pickBestDomain());
             } else if (hasRegions) {
                 type = 'region';
-                // Always go directly to the best matching region page
                 const exactRegion = regionResults.find(r => normalizeStr(r.denom) === normalizedQuery);
                 const bestRegion = exactRegion || regionResults[0];
                 suggestedRoute = `/region/${encodeURIComponent(bestRegion.denom)}`;
             } else if (hasStaticExperiences) {
                 type = 'static-experience';
-                // Try to find region by coordinates first, then by city name
-                let matchedRegion: any = null;
-                
-                // Get coordinates from static experiences
-                const experiencesWithCoords = staticExperienceResults.filter(exp => exp.latitude && exp.longitude);
-                
-                if (experiencesWithCoords.length > 0) {
-                    // Use the first experience with coordinates to find the region
-                    const exp = experiencesWithCoords[0];
-                    
-                    // Find region that contains these coordinates
-                    matchedRegion = await this.regionModel.findOne({
-                        min_lat: { $lte: exp.latitude },
-                        max_lat: { $gte: exp.latitude },
-                        min_lon: { $lte: exp.longitude },
-                        max_lon: { $gte: exp.longitude }
-                    }).exec();
-                }
-                
-                // If no region found by coordinates, try by city name
-                if (!matchedRegion) {
-                    const cities = staticExperienceResults.map(exp => exp.city).filter(Boolean);
-                    const uniqueCities = [...new Set(cities)];
-                    
-                    if (uniqueCities.length === 1 && uniqueCities[0]) {
-                        matchedRegion = await this.regionModel.findOne({
-                            denom: { $regex: uniqueCities[0], $options: 'i' }
-                        }).exec();
-                    }
-                }
-                
-                if (matchedRegion) {
-                    suggestedRoute = `/region/${encodeURIComponent(matchedRegion.denom)}`;
-                } else {
-                    suggestedRoute = `/region/${encodeURIComponent(searchQuery)}`;
-                }
+                suggestedRoute = pickBestStaticExperience().experienceRoute;
             }
         } else {
             type = 'mixed';
-            // Priority: domain > region > service/static-experience
-            if (hasDomains) {
-                const exactDomainRegion = domains.find(d => d.location?.region && normalizeStr(d.location.region) === normalizedQuery);
-                const bestDomainRegion = exactDomainRegion || domains.find(d => d.location?.region);
-                suggestedRoute = bestDomainRegion?.location?.region
-                    ? `/region/${encodeURIComponent(bestDomainRegion.location.region)}`
-                    : `/region/${encodeURIComponent(searchQuery)}`;
+            // Priority: exact service/experience match > domain > service > static experience > region
+            const exactService = services.find(s => normalizeStr(s.serviceName) === normalizedQuery);
+            const exactStaticExperience = staticExperienceResults.find(exp => normalizeStr(exp.name) === normalizedQuery);
+            const exactDomain = domains.find(d => d.domainName && normalizeStr(d.domainName) === normalizedQuery);
+
+            if (exactService) {
+                suggestedRoute = buildServiceRoute(exactService);
+            } else if (exactStaticExperience) {
+                suggestedRoute = exactStaticExperience.experienceRoute;
+            } else if (exactDomain) {
+                suggestedRoute = buildDomainRoute(exactDomain);
+            } else if (hasServices) {
+                suggestedRoute = buildServiceRoute(pickBestService());
+            } else if (hasDomains) {
+                suggestedRoute = buildDomainRoute(pickBestDomain());
+            } else if (hasStaticExperiences) {
+                suggestedRoute = pickBestStaticExperience().experienceRoute;
             } else if (hasRegions) {
-                // Always go directly to the best matching region page
                 const exactRegion = regionResults.find(r => normalizeStr(r.denom) === normalizedQuery);
                 const bestRegion = exactRegion || regionResults[0];
                 suggestedRoute = `/region/${encodeURIComponent(bestRegion.denom)}`;
-            } else if (hasStaticExperiences) {
-                // Try to find region by coordinates for static experiences
-                const experiencesWithCoords = staticExperienceResults.filter(exp => exp.latitude && exp.longitude);
-                
-                if (experiencesWithCoords.length > 0) {
-                    const exp = experiencesWithCoords[0];
-                    const matchedRegion = await this.regionModel.findOne({
-                        min_lat: { $lte: exp.latitude },
-                        max_lat: { $gte: exp.latitude },
-                        min_lon: { $lte: exp.longitude },
-                        max_lon: { $gte: exp.longitude }
-                    }).exec();
-                    
-                    if (matchedRegion) {
-                        suggestedRoute = `/region/${encodeURIComponent(matchedRegion.denom)}`;
-                    } else {
-                        suggestedRoute = `/region/${encodeURIComponent(searchQuery)}`;
-                    }
-                } else {
-                    suggestedRoute = `/region/${encodeURIComponent(searchQuery)}`;
-                }
-            } else {
-                // Services only
-                suggestedRoute = `/experiences?q=${encodeURIComponent(searchQuery)}`;
             }
         }
 
