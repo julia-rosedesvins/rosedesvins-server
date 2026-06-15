@@ -214,15 +214,41 @@ export class UserBookingsService {
   }
 
   /**
+   * Remove accidental line-break / quoted-printable artifacts from URLs.
+   */
+  private sanitizeUrl(value?: string): string {
+    return (value || '')
+      .replace(/=\r?\n/g, '')
+      .replace(/[\r\n\t]/g, '')
+      .trim();
+  }
+
+  private getBackendBaseUrl(): string {
+    return this.sanitizeUrl(this.configService.get<string>('BACKEND_URL')) || 'https://api.rosedesvins.co';
+  }
+
+  private getFrontendBaseUrl(): string {
+    return this.sanitizeUrl(this.configService.get<string>('FRONTEND_URL')) || 'https://rosedesvins.co';
+  }
+
+  private getAppLogoUrl(): string {
+    return this.sanitizeUrl(this.configService.get<string>('APP_LOGO')) || 'https://rosedesvins.co/assets/logo.png';
+  }
+
+  /**
    * Helper method to construct full image URLs for email templates
    */
   private constructImageUrls(domainProfile: any, service: any) {
-    const backendUrl = this.configService.get('BACKEND_URL') || 'http://localhost:3000';
+    const backendUrl = this.getBackendBaseUrl();
+    const appLogoUrl = this.getAppLogoUrl();
 
     return {
-      domainLogoUrl: this.joinUrl(backendUrl, domainProfile?.domainLogoUrl || '/assets/logo.png'),
+      // Prefer explicit app logo as fallback instead of backend/assets/logo.png
+      domainLogoUrl: domainProfile?.domainLogoUrl
+        ? this.joinUrl(backendUrl, domainProfile.domainLogoUrl)
+        : appLogoUrl,
       serviceBannerUrl: this.joinUrl(backendUrl, service?.serviceBannerUrl || '/uploads/default-service-banner.jpg'),
-      appLogoUrl: this.joinUrl(backendUrl, this.configService.get('APP_LOGO') || '/assets/logo.png'),
+      appLogoUrl,
     };
   }
 
@@ -562,22 +588,24 @@ export class UserBookingsService {
               ? `${user.address} - ${user.codePostal} - ${user.city}`
               : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
             domainPhone: user?.phoneNumber || '',
-            domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
+            domainLogoUrl: domainProfile?.domainLogoUrl || this.getAppLogoUrl(),
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
             totalPrice: service?.pricePerPerson ? `${service.pricePerPerson * createBookingDto.participantsAdults} €` : '0 €',
             paymentMethod: formattedPaymentMethods,
-            frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
-            appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
-            backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
+            frontendUrl: this.getFrontendBaseUrl(),
+            appLogoUrl: this.getAppLogoUrl(),
+            backendUrl: this.getBackendBaseUrl(),
             serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
-            cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${savedBooking._id}`,
+            cancelBookingUrl: `${this.getFrontendBaseUrl()}/cancel-booking/${savedBooking._id}`,
             providerTitle: 'Nouvelle réservation reçue !'
           };
 
           // Fix URLs to avoid double slashes
-          bookingEmailData.domainLogoUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', domainProfile?.domainLogoUrl || '/assets/logo.png');
-          bookingEmailData.serviceBannerUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', service?.serviceBannerUrl || '/uploads/default-service-banner.jpg');
+          bookingEmailData.domainLogoUrl = domainProfile?.domainLogoUrl
+            ? this.joinUrl(this.getBackendBaseUrl(), domainProfile.domainLogoUrl)
+            : this.getAppLogoUrl();
+          bookingEmailData.serviceBannerUrl = this.joinUrl(this.getBackendBaseUrl(), service?.serviceBannerUrl || '/uploads/default-service-banner.jpg');
 
           // Send to customer (booking user)
           await this.sendCustomerBookingEmail(bookingEmailData, 'created');
@@ -655,24 +683,23 @@ export class UserBookingsService {
             ? `${user.address} - ${user.codePostal} - ${user.city}`
             : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
         domainPhone: user?.phoneNumber || '',
-        domainLogoUrl: this.joinUrl(
-          this.configService.get('BACKEND_URL') || 'http://localhost:3000',
-          domainProfile?.domainLogoUrl || '/assets/logo.png',
-        ),
+        domainLogoUrl: domainProfile?.domainLogoUrl
+          ? this.joinUrl(this.getBackendBaseUrl(), domainProfile.domainLogoUrl)
+          : this.getAppLogoUrl(),
         serviceName: service?.name || 'Visite de cave et dégustation de vins',
         serviceDescription: (service as any)?.description || '',
         totalPrice: (service as any)?.pricePerPerson
           ? `${(service as any).pricePerPerson * booking.participantsAdults} €`
           : '0 €',
         paymentMethod: formattedPaymentMethods,
-        frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
-        appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
-        backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
+        frontendUrl: this.getFrontendBaseUrl(),
+        appLogoUrl: this.getAppLogoUrl(),
+        backendUrl: this.getBackendBaseUrl(),
         serviceBannerUrl: this.joinUrl(
-          this.configService.get('BACKEND_URL') || 'http://localhost:3000',
+          this.getBackendBaseUrl(),
           (service as any)?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
         ),
-        cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${booking._id}`,
+        cancelBookingUrl: `${this.getFrontendBaseUrl()}/cancel-booking/${booking._id}`,
         providerTitle: 'Nouvelle réservation reçue !',
         eventName: `Réservation : ${booking.userContactFirstname} ${booking.userContactLastname}`,
       };
@@ -1484,21 +1511,23 @@ export class UserBookingsService {
               ? `${user.address} - ${user.codePostal} - ${user.city}`
               : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
             domainPhone: user?.phoneNumber || '',
-            domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
+            domainLogoUrl: domainProfile?.domainLogoUrl || this.getAppLogoUrl(),
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
             totalPrice: service?.pricePerPerson ? `${service.pricePerPerson * updatedBooking.participantsAdults} €` : '0 €',
             paymentMethod: formattedPaymentMethods,
-            frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
-            appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
-            backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
+            frontendUrl: this.getFrontendBaseUrl(),
+            appLogoUrl: this.getAppLogoUrl(),
+            backendUrl: this.getBackendBaseUrl(),
             serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
-            cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${updatedBooking._id}`,
+            cancelBookingUrl: `${this.getFrontendBaseUrl()}/cancel-booking/${updatedBooking._id}`,
           };
 
           // Fix URLs to avoid double slashes
-          bookingEmailData.domainLogoUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', domainProfile?.domainLogoUrl || '/assets/logo.png');
-          bookingEmailData.serviceBannerUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', service?.serviceBannerUrl || '/uploads/default-service-banner.jpg');
+          bookingEmailData.domainLogoUrl = domainProfile?.domainLogoUrl
+            ? this.joinUrl(this.getBackendBaseUrl(), domainProfile.domainLogoUrl)
+            : this.getAppLogoUrl();
+          bookingEmailData.serviceBannerUrl = this.joinUrl(this.getBackendBaseUrl(), service?.serviceBannerUrl || '/uploads/default-service-banner.jpg');
 
           // Send update notification to customer only
           await this.sendCustomerBookingEmail(bookingEmailData, 'updated');
@@ -1925,21 +1954,23 @@ export class UserBookingsService {
               ? `${user.address} - ${user.codePostal} - ${user.city}`
               : '367, Route des Oratoires - 83330 - Sainte-Anne du Castellet',
             domainPhone: user?.phoneNumber || '',
-            domainLogoUrl: domainProfile?.domainLogoUrl || 'https://rosedesvins.co/assets/logo.png',
+            domainLogoUrl: domainProfile?.domainLogoUrl || this.getAppLogoUrl(),
             serviceName: service?.name || 'Visite de cave et dégustation de vins',
             serviceDescription: service?.description || 'Une expérience unique avec la visite libre de notre cave troglodytique sculptée, suivie d\'une dégustation commentée de 5 vins dans notre caveau à l\'ambiance feutrée, éclairé à la bougie.',
             totalPrice: service?.pricePerPerson ? `${service.pricePerPerson * booking.participantsAdults} €` : '0 €',
             paymentMethod: formattedPaymentMethods,
-            frontendUrl: this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co',
-            appLogoUrl: this.configService.get('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png',
-            backendUrl: this.configService.get('BACKEND_URL') || 'http://localhost:3000',
+            frontendUrl: this.getFrontendBaseUrl(),
+            appLogoUrl: this.getAppLogoUrl(),
+            backendUrl: this.getBackendBaseUrl(),
             serviceBannerUrl: service?.serviceBannerUrl || '/uploads/default-service-banner.jpg',
-            cancelBookingUrl: `${this.configService.get('FRONTEND_URL') || 'https://rosedesvins.co'}/cancel-booking/${booking._id}`,
+            cancelBookingUrl: `${this.getFrontendBaseUrl()}/cancel-booking/${booking._id}`,
           };
 
           // Fix URLs to avoid double slashes
-          bookingEmailData.domainLogoUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', domainProfile?.domainLogoUrl || '/assets/logo.png');
-          bookingEmailData.serviceBannerUrl = this.joinUrl(this.configService.get('BACKEND_URL') || 'http://localhost:3000', service?.serviceBannerUrl || '/uploads/default-service-banner.jpg');
+          bookingEmailData.domainLogoUrl = domainProfile?.domainLogoUrl
+            ? this.joinUrl(this.getBackendBaseUrl(), domainProfile.domainLogoUrl)
+            : this.getAppLogoUrl();
+          bookingEmailData.serviceBannerUrl = this.joinUrl(this.getBackendBaseUrl(), service?.serviceBannerUrl || '/uploads/default-service-banner.jpg');
 
           // Send cancellation notification to customer and provider
           await this.sendCustomerBookingEmail(bookingEmailData, 'cancelled');

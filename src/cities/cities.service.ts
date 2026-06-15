@@ -13,6 +13,67 @@ export class CitiesService {
         @InjectModel(City.name) private cityModel: Model<City>,
     ) {}
 
+    private normalizeText(value: string): string {
+        return value
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/['\u2019\u2018\-]/g, ' ')
+            .replace(/\b(le|la|les|des|de|du|d|l|au|aux|en|et|un|une)\b/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    private tokenize(value: string): string[] {
+        return this.normalizeText(value).split(/\s+/).filter(Boolean);
+    }
+
+    private escapeRegex(value: string): string {
+        return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    // Small Levenshtein implementation for typo tolerance
+    private levenshtein(a: string, b: string): number {
+        const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+        for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+        for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+
+        for (let i = 1; i <= a.length; i++) {
+            for (let j = 1; j <= b.length; j++) {
+                const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+                dp[i][j] = Math.min(
+                    dp[i - 1][j] + 1,
+                    dp[i][j - 1] + 1,
+                    dp[i - 1][j - 1] + cost,
+                );
+            }
+        }
+        return dp[a.length][b.length];
+    }
+
+    private allowedDistance(tokenLength: number): number {
+        if (tokenLength >= 10) return 2;
+        if (tokenLength >= 6) return 1;
+        return 0;
+    }
+
+    private tokenMatches(cityTokens: string[], queryToken: string): boolean {
+        // direct substring / prefix
+        if (cityTokens.some(t => t.includes(queryToken) || queryToken.includes(t))) {
+            return true;
+        }
+
+        const maxDist = this.allowedDistance(queryToken.length);
+        if (maxDist === 0) return false;
+
+        // fuzzy token match (for small typos: missing char, swapped char, etc.)
+        return cityTokens.some(t => {
+            // quick pre-filter to avoid expensive distance on unrelated tokens
+            if (t[0] !== queryToken[0]) return false;
+            return this.levenshtein(t, queryToken) <= maxDist;
+        });
+    }
+
     async loadCitiesFromJson(): Promise<{ success: boolean; message: string; count: number }> {
         try {
             // Path to the JSON file
@@ -88,50 +149,72 @@ export class CitiesService {
             }
 
             const searchQuery = query.trim();
-            const searchRegex = new RegExp(searchQuery, 'i');
+            const normalizedQuery = this.normalizeText(searchQuery);
+            const queryTokens = this.tokenize(searchQuery);
 
-            // Search in nom_standard, nom_sans_accent, and nom_standard_majuscule
-            const cities = await this.cityModel
-                .find({
-                    $or: [
-                        { nom_standard: { $regex: searchRegex } },
-                        { nom_sans_accent: { $regex: searchRegex } },
-                        { nom_standard_majuscule: { $regex: searchRegex } }
-                    ]
-                })
-                .limit(10)
-                .lean()
-                .exec();
-
-            // Calculate relevance scores
-            const scoredCities = cities.map((city: any) => {
-                const searchLower = searchQuery.toLowerCase();
-                const nomStandardLower = city.nom_standard.toLowerCase();
-                const nomSansAccentLower = city.nom_sans_accent.toLowerCase();
-
-                let score = 0;
-                
-                // Exact match gets highest score
-                if (nomStandardLower === searchLower || nomSansAccentLower === searchLower) {
-                    score = 100;
-                } else if (nomStandardLower.startsWith(searchLower) || nomSansAccentLower.startsWith(searchLower)) {
-                    score = 90;
-                } else if (nomStandardLower.includes(searchLower) || nomSansAccentLower.includes(searchLower)) {
-                    const position = Math.min(
-                        nomStandardLower.indexOf(searchLower),
-                        nomSansAccentLower.indexOf(searchLower)
-                    );
-                    score = 50 - position;
-                }
-
+            // Broad candidate query: each token contributes a stem condition.
+            // This catches slight typos like missing trailing 's' (fargue -> fargues).
+            const tokenStemConditions = queryTokens.map(token => {
+                const stem = token.length >= 5 ? token.slice(0, token.length - 1) : token;
+                const safeStem = this.escapeRegex(stem);
                 return {
-                    ...city,
-                    score
+                    $or: [
+                        { nom_sans_accent: { $regex: safeStem, $options: 'i' } },
+                        { nom_standard: { $regex: safeStem, $options: 'i' } },
+                    ],
                 };
             });
 
-            // Sort by score descending
-            scoredCities.sort((a, b) => b.score - a.score);
+            const candidateQuery = tokenStemConditions.length > 0
+                ? { $and: tokenStemConditions }
+                : {
+                    $or: [
+                        { nom_standard: { $regex: this.escapeRegex(normalizedQuery), $options: 'i' } },
+                        { nom_sans_accent: { $regex: this.escapeRegex(normalizedQuery), $options: 'i' } },
+                    ],
+                };
+
+            const candidates = await this.cityModel
+                .find(candidateQuery)
+                .limit(120)
+                .lean()
+                .exec();
+
+            const scoredCities = candidates
+                .map((city: any) => {
+                    const nomStandardNorm = this.normalizeText(city.nom_standard || '');
+                    const nomSansAccentNorm = this.normalizeText(city.nom_sans_accent || city.nom_standard || '');
+                    const cityTokens = this.tokenize(nomSansAccentNorm);
+
+                    let score = 0;
+
+                    // Strong exact / prefix / substring scoring
+                    if (nomStandardNorm === normalizedQuery || nomSansAccentNorm === normalizedQuery) {
+                        score = 120;
+                    } else if (nomStandardNorm.startsWith(normalizedQuery) || nomSansAccentNorm.startsWith(normalizedQuery)) {
+                        score = 105;
+                    } else if (nomStandardNorm.includes(normalizedQuery) || nomSansAccentNorm.includes(normalizedQuery)) {
+                        score = 90;
+                    }
+
+                    // Token-level matching (order-independent)
+                    const matchedTokens = queryTokens.filter(t => this.tokenMatches(cityTokens, t)).length;
+                    const tokenRatio = queryTokens.length > 0 ? matchedTokens / queryTokens.length : 0;
+                    score += Math.round(tokenRatio * 80);
+
+                    // Slight bonus for common prefix on first token
+                    if (queryTokens.length > 0 && cityTokens.length > 0 && cityTokens[0].startsWith(queryTokens[0].slice(0, 3))) {
+                        score += 8;
+                    }
+
+                    return {
+                        ...city,
+                        score,
+                    };
+                })
+                .filter((city: any) => city.score >= 40)
+                .sort((a: any, b: any) => b.score - a.score)
+                .slice(0, 10);
 
             this.logger.log(`Found ${scoredCities.length} cities matching query: ${query}`);
 
