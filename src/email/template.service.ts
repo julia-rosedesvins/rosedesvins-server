@@ -151,6 +151,13 @@ export class TemplateService {
     this.loadBaseTemplate();
   }
 
+  private sanitizeUrl(value?: string): string {
+    return (value || '')
+      .replace(/=\r?\n/g, '')
+      .replace(/[\r\n\t]/g, '')
+      .trim();
+  }
+
   private registerHandlebarsHelpers() {
     // Helper for greater than comparison
     handlebars.registerHelper('gt', (a: number, b: number) => {
@@ -196,13 +203,15 @@ export class TemplateService {
   }
 
   private getBaseData(): TemplateData {
+    const appLogo = this.sanitizeUrl(this.configService.get<string>('APP_LOGO')) || 'https://rosedesvins.co/assets/logo.png';
+    const clientUrl = this.sanitizeUrl(this.configService.get<string>('CLIENT_URL')) || 'http://localhost:3000';
     return {
       companyName: 'Rose des Vins',
-      logoUrl: this.configService.get<string>('APP_LOGO'),
+      logoUrl: appLogo,
       currentYear: new Date().getFullYear(),
       supportEmail: this.configService.get<string>('ADMIN_EMAIL') || 'admin@rosedesvins.com',
-      loginUrl: `${this.configService.get<string>('CLIENT_URL') || 'http://localhost:3000'}/login`,
-      adminPanelUrl: `${this.configService.get<string>('CLIENT_URL') || 'http://localhost:3000'}/admin/clients`,
+      loginUrl: `${clientUrl}/login`,
+      adminPanelUrl: `${clientUrl}/admin/clients`,
     };
   }
 
