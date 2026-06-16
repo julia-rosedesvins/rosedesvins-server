@@ -366,7 +366,16 @@ export class ConnectorService {
 
       // Microsoft OAuth 2.0 authorization endpoint
       const baseUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize`;
-      
+
+      // Use 'select_account' for reconnections (avoids conflict with enterprise
+      // tenant admin-consent policies); use 'consent' only on first-time setup.
+      const existingConnector = await this.connectorModel.findOne({
+        userId: new Types.ObjectId(userId),
+        connector_name: 'microsoft',
+        'connector_creds.microsoft.isActive': true,
+      });
+      const promptValue = existingConnector ? 'select_account' : 'consent';
+
       const params = new URLSearchParams({
         client_id: clientId,
         response_type: 'code',
@@ -374,7 +383,7 @@ export class ConnectorService {
         response_mode: 'query',
         scope: scopes,
         state: state,
-        prompt: 'consent'
+        prompt: promptValue,
       });
 
       const authUrl = `${baseUrl}?${params.toString()}`;
