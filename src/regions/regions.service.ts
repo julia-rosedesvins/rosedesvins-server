@@ -1105,15 +1105,28 @@ export class RegionsService {
             };
         });
 
-        const regionResults = (regions as any[]).map(region => ({
-            denom: region.denom,
-            min_lat: region.min_lat,
-            min_lon: region.min_lon,
-            max_lat: region.max_lat,
-            max_lon: region.max_lon,
-            thumbnailUrl: region.thumbnailUrl ? `${backendUrl}${region.thumbnailUrl}` : null,
-            isParent: region.isParent,
-        }));
+        const seenRegionKeys = new Set<string>();
+        const regionResults = (regions as any[]).reduce((acc, region) => {
+            const normalizedDenom = normalizeStr(region?.denom || '');
+            const dedupeKey = normalizedDenom || (region?.denom || '').trim().toLowerCase();
+
+            if (!dedupeKey || seenRegionKeys.has(dedupeKey)) {
+                return acc;
+            }
+
+            seenRegionKeys.add(dedupeKey);
+            acc.push({
+                denom: region.denom,
+                min_lat: region.min_lat,
+                min_lon: region.min_lon,
+                max_lat: region.max_lat,
+                max_lon: region.max_lon,
+                thumbnailUrl: region.thumbnailUrl ? `${backendUrl}${region.thumbnailUrl}` : null,
+                isParent: region.isParent,
+            });
+
+            return acc;
+        }, [] as any[]);
 
         // Determine search type and suggested route
         let type: 'service' | 'domain' | 'region' | 'static-experience' | 'mixed' | null = null;
