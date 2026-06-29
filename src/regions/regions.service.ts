@@ -1185,12 +1185,15 @@ export class RegionsService {
             }
         } else {
             type = 'mixed';
-            // Priority: exact service/experience match > domain > service > static experience > region
+            // Priority: exact region match > exact service/experience/domain > best available result
+            const exactRegion = regionResults.find(r => normalizeStr(r.denom) === normalizedQuery);
             const exactService = services.find(s => normalizeStr(s.serviceName) === normalizedQuery);
             const exactStaticExperience = staticExperienceResults.find(exp => normalizeStr(exp.name) === normalizedQuery);
             const exactDomain = domains.find(d => d.domainName && normalizeStr(d.domainName) === normalizedQuery);
 
-            if (exactService) {
+            if (exactRegion) {
+                suggestedRoute = `/region/${encodeURIComponent(exactRegion.denom)}`;
+            } else if (exactService) {
                 suggestedRoute = buildServiceRoute(exactService);
             } else if (exactStaticExperience) {
                 suggestedRoute = exactStaticExperience.experienceRoute;
