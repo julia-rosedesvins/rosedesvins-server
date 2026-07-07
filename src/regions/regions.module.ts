@@ -9,9 +9,11 @@ import { DomainProfile, DomainProfileSchema } from '../schemas/domain-profile.sc
 import { StaticExperience, StaticExperienceSchema } from '../schemas/static-experience.schema';
 import { Availability, AvailabilitySchema } from '../schemas/availability.schema';
 import { S3Service } from '../common/services/s3.service';
+import { CitiesModule } from '../cities/cities.module';
 
 @Module({
   imports: [
+    CitiesModule,
     MongooseModule.forFeature([
       { name: Region.name, schema: RegionSchema },
       { name: User.name, schema: UserSchema },

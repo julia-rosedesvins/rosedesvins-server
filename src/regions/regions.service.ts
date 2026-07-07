@@ -8,6 +8,7 @@ import { DomainProfile } from '../schemas/domain-profile.schema';
 import { StaticExperience } from '../schemas/static-experience.schema';
 import { Availability } from '../schemas/availability.schema';
 import { S3Service } from '../common/services/s3.service';
+import { CitiesService } from '../cities/cities.service';
 import { CreateRegionDto } from './dto/create-region.dto';
 import { UpdateRegionDto } from './dto/update-region.dto';
 import * as fs from 'fs';
@@ -27,6 +28,7 @@ export class RegionsService {
         @InjectModel(Availability.name) private availabilityModel: Model<Availability>,
         private configService: ConfigService,
         private s3Service: S3Service,
+        private citiesService: CitiesService,
     ) { }
 
     async loadRegionsFromJson(): Promise<{ success: boolean; message: string; count: number; parentCount: number; childCount: number }> {
@@ -184,6 +186,7 @@ export class RegionsService {
             languages?: string[];
             categories?: string[];
         },
+        coords?: { lat: number; lon: number },
     ): Promise<{
         region: Region | null;
         domains: Array<{
@@ -206,8 +209,30 @@ export class RegionsService {
         totalPages: number;
     }> {
         // Step 1: Find region by name
-        const region = await this.regionModel.findOne({ denom }).exec();
-        
+        let region: Region | null = await this.regionModel.findOne({ denom }).exec();
+
+        if (!region) {
+            // Resolve coordinates: prefer explicit coords param, then look up denom as a city name
+            let resolvedCoords = coords;
+
+            if (!resolvedCoords) {
+                // Try to find a city whose name matches the denom
+                const cityResult = await this.citiesService.searchCities(denom);
+                const cityData = (cityResult?.data?.[0]) ?? (Array.isArray(cityResult) ? cityResult[0] : null) ?? null;
+                if (cityData?.latitude_centre != null && cityData?.longitude_centre != null) {
+                    resolvedCoords = { lat: cityData.latitude_centre, lon: cityData.longitude_centre };
+                    this.logger.log(`Region "${denom}" not found – resolved city "${cityData.nom_standard}" at (${resolvedCoords.lat}, ${resolvedCoords.lon})`);
+                }
+            }
+
+            if (resolvedCoords) {
+                region = await this.getRegionByCoords(resolvedCoords.lat, resolvedCoords.lon);
+                if (region) {
+                    this.logger.log(`Falling back to closest region "${region.denom}" for "${denom}"`);
+                }
+            }
+        }
+
         if (!region) {
             return { region: null, domains: [], total: 0, page, limit, totalPages: 0 };
         }
@@ -740,6 +765,52 @@ export class RegionsService {
             ]})
             .limit(50)
             .exec();
+    }
+
+    /**
+     * Find the best-matching region for a given coordinate point.
+     * 1. First tries to find a child region (isParent=false) whose bounding box contains the point.
+     * 2. Falls back to a parent region (isParent=true) whose bounding box contains the point.
+     * 3. If still nothing, returns the region with the smallest bounding-box centre distance.
+     */
+    async getRegionByCoords(lat: number, lon: number): Promise<Region | null> {
+        // Try child regions first (more specific), then parent regions
+        for (const parentFlag of [false, true]) {
+            const containing = await this.regionModel.findOne({
+                isParent: parentFlag,
+                min_lat: { $lte: lat },
+                max_lat: { $gte: lat },
+                min_lon: { $lte: lon },
+                max_lon: { $gte: lon },
+            }).exec();
+
+            if (containing) {
+                this.logger.log(`getRegionByCoords(${lat}, ${lon}): found containing region "${containing.denom}" (isParent=${parentFlag})`);
+                return containing;
+            }
+        }
+
+        // Fallback: find region whose centre is closest to the point
+        const allRegions = await this.regionModel.find().exec();
+        if (!allRegions.length) return null;
+
+        let closest: Region | null = null;
+        let minDist = Infinity;
+
+        for (const region of allRegions) {
+            const centerLat = (region.min_lat + region.max_lat) / 2;
+            const centerLon = (region.min_lon + region.max_lon) / 2;
+            const dist = Math.sqrt(Math.pow(centerLat - lat, 2) + Math.pow(centerLon - lon, 2));
+            if (dist < minDist) {
+                minDist = dist;
+                closest = region;
+            }
+        }
+
+        if (closest) {
+            this.logger.log(`getRegionByCoords(${lat}, ${lon}): no containing region, using closest "${(closest as any).denom}"`);
+        }
+        return closest;
     }
 
     /**
