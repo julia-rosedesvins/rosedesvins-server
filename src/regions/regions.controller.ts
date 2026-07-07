@@ -1,13 +1,19 @@
 import { Controller, Post, Get, Query, Param, UseGuards, Put, Delete, Body, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { RegionsService } from './regions.service';
+import { CitiesService } from '../cities/cities.service';
 import { AdminGuard } from '../guards/admin.guard';
 import { CreateRegionDto } from './dto/create-region.dto';
 import { UpdateRegionDto } from './dto/update-region.dto';
 
+@ApiTags('Regions')
 @Controller('regions')
 export class RegionsController {
-  constructor(private readonly regionsService: RegionsService) {}
+  constructor(
+    private readonly regionsService: RegionsService,
+    private readonly citiesService: CitiesService,
+  ) {}
 
   @Post('load-data')
   // @UseGuards(AdminGuard)
@@ -33,6 +39,84 @@ export class RegionsController {
       return [];
     }
     return this.regionsService.searchRegions(query);
+  }
+
+  @Get('by-coords')
+  async getRegionByCoords(
+    @Query('lat') lat: string,
+    @Query('lon') lon: string,
+  ) {
+    const latNum = parseFloat(lat);
+    const lonNum = parseFloat(lon);
+    if (isNaN(latNum) || isNaN(lonNum)) {
+      return { region: null };
+    }
+    const region = await this.regionsService.getRegionByCoords(latNum, lonNum);
+    return { region };
+  }
+
+  @Get('test-city-to-region')
+  @ApiOperation({
+    summary: 'Test: resolve city name → closest region',
+    description:
+      'Looks up the city by name in the cities table, takes its coordinates, then returns the closest/containing region. Useful for debugging city → region resolution.',
+  })
+  @ApiQuery({ name: 'city', required: true, description: 'City name (e.g. Dijon, Tours, Montpellier)', example: 'Dijon' })
+  async testCityToRegion(@Query('city') city: string) {
+    if (!city || city.trim().length < 2) {
+      return { error: 'Please provide a city name (at least 2 characters)' };
+    }
+
+    // Search the cities table for the best match
+    const cityResult = await this.citiesService.searchCities(city.trim());
+    const cityData = cityResult?.data?.[0] ?? cityResult?.[0] ?? null;
+
+    if (!cityData) {
+      return {
+        query: city,
+        city: null,
+        region: null,
+        message: `No city found matching "${city}"`,
+      };
+    }
+
+    const lat: number = cityData.latitude_centre;
+    const lon: number = cityData.longitude_centre;
+
+    if (lat == null || lon == null || isNaN(lat) || isNaN(lon)) {
+      return {
+        query: city,
+        city: cityData,
+        region: null,
+        message: 'City found but has no coordinates',
+      };
+    }
+
+    const region = await this.regionsService.getRegionByCoords(lat, lon);
+
+    return {
+      query: city,
+      city: {
+        name: cityData.nom_standard,
+        latitude: lat,
+        longitude: lon,
+      },
+      region: region
+        ? {
+            denom: region.denom,
+            isParent: region.isParent,
+            bounds: {
+              min_lat: region.min_lat,
+              min_lon: region.min_lon,
+              max_lat: region.max_lat,
+              max_lon: region.max_lon,
+            },
+          }
+        : null,
+      message: region
+        ? `City "${cityData.nom_standard}" maps to region "${region.denom}"`
+        : 'No matching region found',
+    };
   }
 
   @Get('unified-search')
@@ -69,6 +153,8 @@ export class RegionsController {
     @Query('maxPrice') maxPrice?: string,
     @Query('languages') languages?: string,
     @Query('categories') categories?: string,
+    @Query('lat') lat?: string,
+    @Query('lon') lon?: string,
   ) {
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 20;
@@ -94,7 +180,8 @@ export class RegionsController {
       filters.categories = categories.split(',').map(c => c.trim());
     }
     
-    return this.regionsService.getRegionByName(name, pageNum, limitNum, searchQuery, filters);
+    const coords = lat && lon ? { lat: parseFloat(lat), lon: parseFloat(lon) } : undefined;
+    return this.regionsService.getRegionByName(name, pageNum, limitNum, searchQuery, filters, coords);
   }
 
   // Admin CRUD endpoints
