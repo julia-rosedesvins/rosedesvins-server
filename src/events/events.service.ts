@@ -807,9 +807,26 @@ export class EventsService {
 
       this.logger.log(`📊 Found ${googleEvents.length} raw event(s) in Google Calendar`);
 
+      // Strip out Google Tasks and cancelled items before any further processing.
+      // Google Tasks scheduled to a time appear as eventType='focusTime' with a
+      // focusTimeProperties field and a description linking to tasks.google.com.
+      // Filtering here (not just in the parser) ensures that task IDs are excluded
+      // from liveExternalIds so previously-synced tasks get pruned from the DB.
+      const isGoogleTask = (e: any): boolean => {
+        if (e.kind === 'tasks#task' || e.eventType === 'task') return true;
+        if (e.description && e.description.includes('tasks.google.com')) return true;
+        if (e.focusTimeProperties) return true;
+        return false;
+      };
+      const calendarEventsOnly = googleEvents.filter(e =>
+        !isGoogleTask(e) &&
+        e.status !== 'cancelled'
+      );
+      this.logger.log(`📊 After filtering tasks/cancelled: ${calendarEventsOnly.length} event(s) remain`);
+
       // Parse Google Calendar events to our format
       const events: any[] = [];
-      for (const gEvent of googleEvents) {
+      for (const gEvent of calendarEventsOnly) {
         try {
           const parsedEvents = this.parseGoogleCalendarEvent(gEvent);
           if (parsedEvents) {
@@ -825,7 +842,7 @@ export class EventsService {
         }
       }
 
-      this.logger.log(`📋 Successfully parsed ${events.length} out of ${googleEvents.length} events`);
+      this.logger.log(`📋 Successfully parsed ${events.length} out of ${calendarEventsOnly.length} events`);
 
       if (events.length === 0) {
         return {
@@ -840,8 +857,9 @@ export class EventsService {
       // Save events to database with conflict prevention
       const syncedEvents = await this.saveEventsToDatabase(events, connector.userId, 'google');
 
-      // Remove any events in our DB that no longer exist in Google Calendar
-      const liveExternalIds = googleEvents.map(e => e.id).filter(Boolean);
+      // Remove any events in our DB that no longer exist in Google Calendar.
+      // Use the filtered list so previously-synced task events are pruned.
+      const liveExternalIds = calendarEventsOnly.map(e => e.id).filter(Boolean);
       const deletedCount = await this.pruneDeletedExternalEvents(connector.userId, 'google', liveExternalIds);
       if (deletedCount > 0) {
         this.logger.log(`🗑️ Pruned ${deletedCount} event(s) deleted from Google Calendar`);
@@ -911,6 +929,19 @@ export class EventsService {
    */
   private parseGoogleCalendarEvent(gEvent: any): any[] | null {
     try {
+      // Skip Google Tasks and cancelled events.
+      // Tasks appear as eventType='focusTime' with focusTimeProperties and a
+      // tasks.google.com link in the description — NOT as eventType='task'.
+      const isTask =
+        gEvent.kind === 'tasks#task' ||
+        gEvent.eventType === 'task' ||
+        !!(gEvent.description && gEvent.description.includes('tasks.google.com')) ||
+        !!gEvent.focusTimeProperties;
+      if (isTask || gEvent.status === 'cancelled') {
+        this.logger.log(`⏭️ Skipping Google task/cancelled: ${gEvent.summary || gEvent.title}`);
+        return null;
+      }
+
       const eventInfo: any = {};
 
       // Extract event title
