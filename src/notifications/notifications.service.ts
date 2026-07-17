@@ -8,6 +8,7 @@ import { User } from '../schemas/user.schema';
 import { UserBooking } from '../schemas/user-bookings.schema';
 import { DomainProfile } from '../schemas/domain-profile.schema';
 import { PaymentMethods } from '../schemas/payment-methods.schema';
+import { ConfigService } from '@nestjs/config';
 import { EmailService, EmailJob } from '../email/email.service';
 import { TemplateService } from '../email/template.service';
 
@@ -47,7 +48,12 @@ export class NotificationsService {
         @InjectModel(PaymentMethods.name) private paymentMethodsModel: Model<PaymentMethods>,
         private emailService: EmailService,
         private templateService: TemplateService,
+        private configService: ConfigService,
     ) { }
+
+    private getAppLogoUrl(): string {
+        return this.configService.get<string>('APP_LOGO') || 'https://rosedesvins.co/assets/logo.png';
+    }
 
     private joinUrl(baseUrl: string, path: string): string {
         if (!baseUrl || !path) return baseUrl || path || '';
@@ -377,7 +383,7 @@ export class NotificationsService {
                 totalPrice: service?.pricePerPerson ? `${service.pricePerPerson * (booking.participantsAdults + booking.participantsEnfants || 0)}€` : '0€',
                 paymentMethod: paymentMethod,
                 frontendUrl: frontendUrl,
-                appLogoUrl: this.joinUrl(backendUrl, '/assets/logo.png'),
+                appLogoUrl: this.getAppLogoUrl(),
                 backendUrl: backendUrl,
                 serviceBannerUrl: this.joinUrl(backendUrl, service?.serviceBannerUrl || '/uploads/default-service-banner.jpg'),
                 cancelBookingUrl: cancelBookingUrl,
@@ -501,7 +507,7 @@ export class NotificationsService {
                 totalPrice: service?.pricePerPerson ? `${service.pricePerPerson * (booking.participantsAdults + booking.participantsEnfants || 0)}€` : '0€',
                 paymentMethod: paymentMethod,
                 frontendUrl: frontendUrl,
-                appLogoUrl: this.joinUrl(backendUrl, '/assets/logo.png'),
+                appLogoUrl: this.getAppLogoUrl(),
                 backendUrl: backendUrl,
                 serviceBannerUrl: this.joinUrl(backendUrl, service?.serviceBannerUrl || '/uploads/default-service-banner.jpg'),
                 additionalNotes: booking.additionalNotes || null,
@@ -913,7 +919,7 @@ export class NotificationsService {
                     totalPrice: '45€ par personne',
                     paymentMethod: 'Paiement sur place (Carte bancaire, Chèques, Espèces)',
                     frontendUrl: frontendUrl,
-                    appLogoUrl: `${backendUrl}/assets/logo.png`,
+                    appLogoUrl: this.getAppLogoUrl(),
                     backendUrl: backendUrl,
                     serviceBannerUrl: `${backendUrl}/uploads/default-service-banner.jpg`,
                     cancelBookingUrl: `${frontendUrl}/cancel-booking/mock-booking-id`,
@@ -986,7 +992,7 @@ export class NotificationsService {
                     totalPrice: '45€ par personne',
                     paymentMethod: 'Paiement sur place (Carte bancaire, Chèques, Espèces)',
                     frontendUrl: frontendUrl,
-                    appLogoUrl: `${backendUrl}/assets/logo.png`,
+                    appLogoUrl: this.getAppLogoUrl(),
                     backendUrl: backendUrl,
                     serviceBannerUrl: `${backendUrl}/uploads/default-service-banner.jpg`,
                     customerEmail: email,
