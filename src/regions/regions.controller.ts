@@ -141,6 +141,20 @@ export class RegionsController {
     return this.regionsService.unifiedSearch(trimmedQuery);
   }
 
+  @Get('sitemap-paths')
+  @ApiOperation({
+    summary: 'All public region/experience slug paths (for sitemap.xml generation)',
+    description:
+      'Returns every currently reachable `/region/{slug}` and `/experience/{regionSlug}/{domainSlug}` path, ' +
+      'covering ALL Regions, DomainProfiles and StaticExperiences that have a slug — including domains with no ' +
+      'active services, which are otherwise invisible to the services-listing endpoint. Only slug-based paths are ' +
+      'returned (never a raw Mongo ID), so consumers can build the sitemap directly from this list.',
+  })
+  @ApiResponse({ status: 200, description: 'Lists of region and experience paths with their last-modified date.' })
+  async getSitemapPaths() {
+    return this.regionsService.getAllPublicSlugPaths();
+  }
+
   @Get(':name')
   async getRegionByName(
     @Param('name') name: string,

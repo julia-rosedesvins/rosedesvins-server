@@ -1705,4 +1705,91 @@ export class RegionsService {
             staticExperiences: { total: staticExperiencesWithoutSlug.length, updated: staticExperiencesUpdated },
         };
     }
+
+    /**
+     * Every publicly reachable `/experience/{regionSlug}/{domainSlug}` and
+     * `/region/{regionSlug}` path, for sitemap generation. Only entries with a
+     * real (already-backfilled) slug are included — nothing here ever falls
+     * back to a raw Mongo ID, so the sitemap never leaks legacy ID-based URLs.
+     * Covers ALL DomainProfiles and StaticExperiences regardless of whether
+     * they currently have any active services (fixes gaps where a domain
+     * without services was previously missing from the sitemap entirely).
+     */
+    async getAllPublicSlugPaths(): Promise<{
+        regions: Array<{ path: string; updatedAt?: Date }>;
+        experiences: Array<{ path: string; updatedAt?: Date }>;
+    }> {
+        const [regions, domainProfiles, staticExperiences] = await Promise.all([
+            this.regionModel
+                .find({ slug: { $nin: [null, ''] } })
+                .select('slug denom updatedAt min_lat max_lat min_lon max_lon')
+                .lean()
+                .exec(),
+            this.domainProfileModel
+                .find({ slug: { $nin: [null, ''] } })
+                .populate('userId', 'domainName region city')
+                .select('slug updatedAt userId')
+                .lean()
+                .exec(),
+            this.staticExperienceModel
+                .find({ slug: { $nin: [null, ''] } })
+                .select('slug updatedAt name city latitude longitude')
+                .lean()
+                .exec(),
+        ]);
+
+        const seenRegionPaths = new Set<string>();
+        const regionPaths = (regions as any[]).reduce((acc, region) => {
+            const path = `/region/${region.slug}`;
+            if (seenRegionPaths.has(path)) return acc;
+            seenRegionPaths.add(path);
+            acc.push({ path, updatedAt: region.updatedAt });
+            return acc;
+        }, [] as Array<{ path: string; updatedAt?: Date }>);
+
+        const seenExperiencePaths = new Set<string>();
+        const experiencePaths: Array<{ path: string; updatedAt?: Date }> = [];
+
+        for (const profile of domainProfiles as any[]) {
+            const user = profile.userId as any;
+            const regionName = user?.region || user?.city || user?.domainName;
+            const regionSlug = slugify(regionName?.trim() || '') || 'domaine';
+            const path = `/experience/${regionSlug}/${profile.slug}`;
+            if (seenExperiencePaths.has(path)) continue;
+            seenExperiencePaths.add(path);
+            experiencePaths.push({ path, updatedAt: profile.updatedAt });
+        }
+
+        // Resolve each static experience's region in-memory against the
+        // already-fetched region list (mirrors resolveRegionNameForStaticExperience,
+        // but avoids a per-document DB round-trip — there can be thousands of
+        // static experiences, which made the sequential-await version time out).
+        const regionByCoords = (lat?: number | null, lon?: number | null): string | null => {
+            if (lat == null || lon == null) return null;
+            const match = (regions as any[]).find(
+                (r) => r.min_lat <= lat && r.max_lat >= lat && r.min_lon <= lon && r.max_lon >= lon,
+            );
+            return match?.denom || null;
+        };
+        const regionByCity = (city?: string | null): string | null => {
+            if (!city) return null;
+            try {
+                const re = new RegExp(city, 'i');
+                return (regions as any[]).find((r) => re.test(r.denom))?.denom || null;
+            } catch {
+                return null;
+            }
+        };
+
+        for (const exp of staticExperiences as any[]) {
+            const regionName = regionByCoords(exp.latitude, exp.longitude) || regionByCity(exp.city);
+            const regionSlug = slugify((regionName || exp.city || '').trim()) || 'domaine';
+            const path = `/experience/${regionSlug}/${exp.slug}`;
+            if (seenExperiencePaths.has(path)) continue;
+            seenExperiencePaths.add(path);
+            experiencePaths.push({ path, updatedAt: exp.updatedAt });
+        }
+
+        return { regions: regionPaths, experiences: experiencePaths };
+    }
 }
