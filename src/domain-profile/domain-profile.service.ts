@@ -8,6 +8,7 @@ import { StaticExperience } from '../schemas/static-experience.schema';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { S3Service } from '../common/services/s3.service';
+import { slugify, ensureUniqueSlug } from '../common/utils/slug.util';
 
 export interface CreateOrUpdateDomainProfileServiceDto {
   domainName?: string;
@@ -53,6 +54,14 @@ export class DomainProfileService {
   }> {
     const userObjectId = new Types.ObjectId(userId);
 
+    // Check if domain profile already exists for file cleanup
+    const existingDomainProfile = await this.domainProfileModel.findOne({
+      userId: userObjectId
+    });
+
+    const existingUser = await this.userModel.findById(userObjectId).select('domainName').lean().exec();
+    const domainNameChanged = !!domainProfileDto.domainName && domainProfileDto.domainName !== existingUser?.domainName;
+
     // Update user's domain name if provided
     if (domainProfileDto.domainName) {
       await this.userModel.findByIdAndUpdate(
@@ -62,10 +71,28 @@ export class DomainProfileService {
       );
     }
 
-    // Check if domain profile already exists for file cleanup
-    const existingDomainProfile = await this.domainProfileModel.findOne({
-      userId: userObjectId
-    });
+    // Recompute the slug only when the domain name actually changes (or the
+    // profile doesn't have one yet) — keeps SEO URLs stable across unrelated edits.
+    const needsSlug =
+      domainNameChanged ||
+      (!!existingDomainProfile && !existingDomainProfile.slug) ||
+      (!existingDomainProfile && !!domainProfileDto.domainName);
+
+    let slugToSet: string | undefined;
+    if (needsSlug) {
+      const baseName = domainProfileDto.domainName || existingUser?.domainName || 'domaine';
+      const baseSlug = slugify(baseName) || 'domaine';
+      slugToSet = await ensureUniqueSlug(baseSlug, async (candidate) => {
+        const [takenByProfile, takenByExperience] = await Promise.all([
+          this.domainProfileModel.exists({
+            slug: candidate,
+            ...(existingDomainProfile ? { _id: { $ne: existingDomainProfile._id } } : {}),
+          }),
+          this.staticExperienceModel.exists({ slug: candidate }),
+        ]);
+        return !!takenByProfile || !!takenByExperience;
+      });
+    }
 
     // Handle file uploads
     let domainProfilePictureUrl = domainProfileDto.domainProfilePictureUrl;
@@ -131,6 +158,9 @@ export class DomainProfileService {
       if (domainProfileDto.services !== undefined) {
         updateData.services = domainProfileDto.services;
       }
+      if (slugToSet) {
+        updateData.slug = slugToSet;
+      }
 
       const updatedDomainProfile = await this.domainProfileModel.findByIdAndUpdate(
         existingDomainProfile._id,
@@ -151,6 +181,7 @@ export class DomainProfileService {
       // Create new domain profile - include services with default empty array
       const newDomainProfile = new this.domainProfileModel({
         ...profileData,
+        slug: slugToSet,
         services: domainProfileDto.services || [] // Default to empty array for new profiles
       });
       const savedDomainProfile = await newDomainProfile.save();
@@ -187,6 +218,115 @@ export class DomainProfileService {
    * @param domainId - Domain profile ID
    * @returns Domain profile with location data
    */
+  /** Build a full absolute URL from a possibly-relative uploaded-file path. */
+  private buildFullMediaUrl(url: string | undefined | null): string | null {
+    if (!url) return null;
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    const backendUrl = this.configService.get<string>('BACKEND_URL') || 'http://localhost:5001';
+    return `${backendUrl}${url.startsWith('/') ? '' : '/'}${url}`;
+  }
+
+  private formatStaticExperiencePublicResponse(staticExperience: StaticExperience): {
+    domainProfile: any;
+    location: {
+      domainLatitude: number | null;
+      domainLongitude: number | null;
+      address: string | null;
+      city: string | null;
+      codePostal: string | null;
+    };
+  } {
+    return {
+      domainProfile: {
+        _id: staticExperience._id,
+        slug: (staticExperience as any).slug || null,
+        userId: '',
+        domainDescription: staticExperience.domain_description || staticExperience.about || staticExperience.category || '',
+        domainProfilePictureUrl: this.buildFullMediaUrl(staticExperience.domain_profile_pic_url || staticExperience.main_image),
+        domainLogoUrl: this.buildFullMediaUrl(staticExperience.domain_logo_url),
+        mainImage: this.buildFullMediaUrl(staticExperience.main_image),
+        colorCode: '#3A7B59',
+        services: [],
+        domainName: staticExperience.domain_name || staticExperience.name,
+        siteWeb: staticExperience.website || null,
+        phone: staticExperience.phone || null,
+        openingHours: staticExperience.opening_hours || null,
+        createdAt: staticExperience.createdAt,
+        updatedAt: staticExperience.updatedAt,
+        producer: 'non-client',
+        staticExperienceId: staticExperience._id,
+      },
+      location: {
+        domainLatitude: staticExperience.latitude || null,
+        domainLongitude: staticExperience.longitude || null,
+        address: staticExperience.address || null,
+        city: staticExperience.city || null,
+        codePostal: null,
+      }
+    };
+  }
+
+  private formatDomainProfilePublicResponse(domainProfile: DomainProfile): {
+    domainProfile: any;
+    location: {
+      domainLatitude: number | null;
+      domainLongitude: number | null;
+      address: string | null;
+      city: string | null;
+      codePostal: string | null;
+    };
+  } {
+    const user = domainProfile.userId as any;
+
+    // Map services with full URLs for service banners
+    const servicesWithFullUrls = domainProfile.services.map(service => {
+      const serviceObj = service['_doc'] || service;
+      return {
+        _id: serviceObj._id,
+        name: serviceObj.name,
+        description: serviceObj.description,
+        numberOfPeople: serviceObj.numberOfPeople,
+        pricePerPerson: serviceObj.pricePerPerson,
+        timeOfServiceInMinutes: serviceObj.timeOfServiceInMinutes,
+        numberOfWinesTasted: serviceObj.numberOfWinesTasted,
+        languagesOffered: serviceObj.languagesOffered,
+        serviceBannerUrl: this.buildFullMediaUrl(serviceObj.serviceBannerUrl),
+        isActive: serviceObj.isActive,
+        bookingRestrictionActive: serviceObj.bookingRestrictionActive,
+        bookingRestrictionTime: serviceObj.bookingRestrictionTime,
+        multipleBookings: serviceObj.multipleBookings,
+        hasCustomAvailability: serviceObj.hasCustomAvailability,
+        dateAvailability: serviceObj.dateAvailability
+      };
+    });
+
+    return {
+      domainProfile: {
+        _id: domainProfile._id,
+        slug: (domainProfile as any).slug || null,
+        userId: user?._id,
+        domainDescription: domainProfile.domainDescription || '',
+        domainProfilePictureUrl: this.buildFullMediaUrl(domainProfile.domainProfilePictureUrl),
+        domainLogoUrl: this.buildFullMediaUrl(domainProfile.domainLogoUrl),
+        colorCode: domainProfile.colorCode,
+        services: servicesWithFullUrls,
+        domainName: user?.domainName,
+        siteWeb: user?.siteWeb,
+        createdAt: domainProfile.createdAt,
+        updatedAt: domainProfile.updatedAt
+      },
+      location: {
+        domainLatitude: user?.domainLatitude || null,
+        domainLongitude: user?.domainLongitude || null,
+        address: user?.address || null,
+        city: user?.city || null,
+        codePostal: user?.codePostal || null
+      }
+    };
+  }
+
   async getPublicDomainProfileById(domainId: string): Promise<{
     domainProfile: any;
     location: {
@@ -203,24 +343,12 @@ export class DomainProfileService {
       }
 
       const domainObjectId = new Types.ObjectId(domainId);
-      const backendUrl = this.configService.get<string>('BACKEND_URL') || 'http://localhost:5001';
-      
+
       // Find domain profile and populate user data
       const domainProfile = await this.domainProfileModel
         .findById(domainObjectId)
         .populate('userId', 'domainName domainLatitude domainLongitude address city codePostal siteWeb')
         .exec();
-
-      // Helper function to build full URL
-      const buildFullUrl = (url: string | undefined | null): string | null => {
-        if (!url) return null;
-        // If URL already starts with http:// or https://, return as is
-        if (url.startsWith('http://') || url.startsWith('https://')) {
-          return url;
-        }
-        // Otherwise prepend BACKEND_URL
-        return `${backendUrl}${url.startsWith('/') ? '' : '/'}${url}`;
-      };
 
       if (!domainProfile) {
         // Fallback for non-client domain route: static experience by ID
@@ -228,84 +356,51 @@ export class DomainProfileService {
         if (!staticExperience) {
           return null;
         }
-
-        return {
-          domainProfile: {
-            _id: staticExperience._id,
-            userId: '',
-            domainDescription: staticExperience.domain_description || staticExperience.about || staticExperience.category || '',
-            domainProfilePictureUrl: buildFullUrl(staticExperience.domain_profile_pic_url || staticExperience.main_image),
-            domainLogoUrl: buildFullUrl(staticExperience.domain_logo_url),
-            mainImage: buildFullUrl(staticExperience.main_image),
-            colorCode: '#3A7B59',
-            services: [],
-            domainName: staticExperience.domain_name || staticExperience.name,
-            siteWeb: staticExperience.website || null,
-            phone: staticExperience.phone || null,
-            openingHours: staticExperience.opening_hours || null,
-            createdAt: staticExperience.createdAt,
-            updatedAt: staticExperience.updatedAt,
-            producer: 'non-client',
-            staticExperienceId: staticExperience._id,
-          },
-          location: {
-            domainLatitude: staticExperience.latitude || null,
-            domainLongitude: staticExperience.longitude || null,
-            address: staticExperience.address || null,
-            city: staticExperience.city || null,
-            codePostal: null,
-          }
-        };
+        return this.formatStaticExperiencePublicResponse(staticExperience);
       }
 
-      const user = domainProfile.userId as any;
-
-      // Map services with full URLs for service banners
-      const servicesWithFullUrls = domainProfile.services.map(service => {
-        const serviceObj = service['_doc'] || service;
-        return {
-          _id: serviceObj._id,
-          name: serviceObj.name,
-          description: serviceObj.description,
-          numberOfPeople: serviceObj.numberOfPeople,
-          pricePerPerson: serviceObj.pricePerPerson,
-          timeOfServiceInMinutes: serviceObj.timeOfServiceInMinutes,
-          numberOfWinesTasted: serviceObj.numberOfWinesTasted,
-          languagesOffered: serviceObj.languagesOffered,
-          serviceBannerUrl: buildFullUrl(serviceObj.serviceBannerUrl),
-          isActive: serviceObj.isActive,
-          bookingRestrictionActive: serviceObj.bookingRestrictionActive,
-          bookingRestrictionTime: serviceObj.bookingRestrictionTime,
-          multipleBookings: serviceObj.multipleBookings,
-          hasCustomAvailability: serviceObj.hasCustomAvailability,
-          dateAvailability: serviceObj.dateAvailability
-        };
-      });
-
-      return {
-        domainProfile: {
-          _id: domainProfile._id,
-          userId: domainProfile.userId._id,
-          domainDescription: domainProfile.domainDescription || '',
-          domainProfilePictureUrl: buildFullUrl(domainProfile.domainProfilePictureUrl),
-          domainLogoUrl: buildFullUrl(domainProfile.domainLogoUrl),
-          colorCode: domainProfile.colorCode,
-          services: servicesWithFullUrls,
-          domainName: user?.domainName,
-          siteWeb: user?.siteWeb,
-          createdAt: domainProfile.createdAt,
-          updatedAt: domainProfile.updatedAt
-        },
-        location: {
-          domainLatitude: user?.domainLatitude || null,
-          domainLongitude: user?.domainLongitude || null,
-          address: user?.address || null,
-          city: user?.city || null,
-          codePostal: user?.codePostal || null
-        }
-      };
+      return this.formatDomainProfilePublicResponse(domainProfile);
     } catch (error) {
       console.error('Error in getPublicDomainProfileById:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Resolve a public domain/experience profile by its SEO slug.
+   * Mirrors getPublicDomainProfileById's dual-lookup (DomainProfile, then
+   * StaticExperience) since both collections share the same slug namespace.
+   */
+  async getPublicDomainProfileBySlug(slug: string): Promise<{
+    domainProfile: any;
+    location: {
+      domainLatitude: number | null;
+      domainLongitude: number | null;
+      address: string | null;
+      city: string | null;
+      codePostal: string | null;
+    };
+  } | null> {
+    try {
+      if (!slug) return null;
+
+      const domainProfile = await this.domainProfileModel
+        .findOne({ slug })
+        .populate('userId', 'domainName domainLatitude domainLongitude address city codePostal siteWeb')
+        .exec();
+
+      if (domainProfile) {
+        return this.formatDomainProfilePublicResponse(domainProfile);
+      }
+
+      const staticExperience = await this.staticExperienceModel.findOne({ slug }).exec();
+      if (staticExperience) {
+        return this.formatStaticExperiencePublicResponse(staticExperience);
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error in getPublicDomainProfileBySlug:', error);
       return null;
     }
   }
@@ -732,6 +827,7 @@ export class DomainProfileService {
           category: service.category,
           domain: {
             domainId: profile._id,
+            slug: profileDoc.slug || null,
             userId: user?._id || null,
             domainName: user?.domainName || null,
             domainDescription: profileDoc.domainDescription,

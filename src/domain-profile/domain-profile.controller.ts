@@ -291,6 +291,56 @@ export class DomainProfileController {
     }
   }
 
+  @Get('public/by-slug/:slug')
+  @ApiOperation({
+    summary: 'Get domain/experience profile by SEO slug with location data (Public)',
+    description:
+      'Resolves a public domain profile or static experience by its clean SEO slug (the last path segment of ' +
+      '/experience/{regionSlug}/{domainSlug}). Tries DomainProfile first, then falls back to StaticExperience, ' +
+      'since both share the same slug namespace.',
+  })
+  @ApiResponse({ status: 200, description: 'Domain profile retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'No domain profile or static experience found for this slug' })
+  async getPublicDomainProfileBySlug(
+    @Param('slug') slug: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: {
+      domainProfile: any;
+      location: {
+        domainLatitude: number | null;
+        domainLongitude: number | null;
+        address: string | null;
+        city: string | null;
+        codePostal: string | null;
+      };
+    } | null;
+  }> {
+    try {
+      const result = await this.domainProfileService.getPublicDomainProfileBySlug(slug);
+
+      if (!result) {
+        throw new HttpException('Domain profile not found', HttpStatus.NOT_FOUND);
+      }
+
+      return {
+        success: true,
+        message: 'Domain profile retrieved successfully',
+        data: result
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        if (error.getStatus() !== HttpStatus.NOT_FOUND) {
+          console.error('Error retrieving public domain profile by slug:', error);
+        }
+        throw error;
+      }
+      console.error('Error retrieving public domain profile by slug:', error);
+      throw new HttpException('Internal server error', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
   @Get('public/:domainId')
   @ApiOperation({ summary: 'Get domain profile by ID with location data (Public)' })
 

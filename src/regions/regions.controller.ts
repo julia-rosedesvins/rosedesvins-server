@@ -1,6 +1,6 @@
 import { Controller, Post, Get, Query, Param, UseGuards, Put, Delete, Body, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { RegionsService } from './regions.service';
 import { CitiesService } from '../cities/cities.service';
 import { AdminGuard } from '../guards/admin.guard';
@@ -229,5 +229,20 @@ export class RegionsController {
   // @UseGuards(AdminGuard)
   async convertThumbnailsToWebp() {
     return this.regionsService.convertThumbnailsToWebp();
+  }
+
+  @Post('admin/backfill-slugs')
+  @UseGuards(AdminGuard)
+  @ApiOperation({
+    summary: 'Backfill SEO slugs (regions, domain profiles, static experiences)',
+    description:
+      'One-off / idempotent migration endpoint: computes and persists a unique `slug` field for every Region, ' +
+      'DomainProfile and StaticExperience document that does not have one yet. Safe to call multiple times — ' +
+      'documents that already have a slug are left untouched. Run this after deploying the slug-URL feature ' +
+      'so existing production data gets clean SEO-friendly URLs (e.g. /region/vouvray, /experience/vouvray/domaine-de-vodanis).',
+  })
+  @ApiResponse({ status: 200, description: 'Backfill summary with counts of documents updated per collection.' })
+  async backfillSlugs() {
+    return this.regionsService.backfillAllSlugs();
   }
 }

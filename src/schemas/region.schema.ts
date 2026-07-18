@@ -14,6 +14,14 @@ export class Region extends Document {
     denom: string;
 
     @Prop({
+        type: String,
+        unique: true,
+        sparse: true,
+        index: true,
+    })
+    slug?: string;
+
+    @Prop({
         type: Number,
         required: true,
     })
