@@ -195,6 +195,18 @@ export class UserBooking extends Document {
   })
   googleEventId?: string; // Google Calendar API event ID for calendar integration
 
+  @Prop({
+    default: false,
+    index: true,
+  })
+  isDeleted?: boolean;
+
+  @Prop({
+    type: Date,
+    required: false,
+  })
+  deletedAt?: Date;
+
   @Prop()
   createdAt?: Date;
 

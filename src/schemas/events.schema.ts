@@ -133,6 +133,18 @@ export class Event extends Document {
   })
   reviewRequestSentAt?: Date; // When review request email was sent
 
+  @Prop({
+    default: false,
+    index: true,
+  })
+  isDeleted?: boolean;
+
+  @Prop({
+    type: Date,
+    required: false,
+  })
+  deletedAt?: Date;
+
   @Prop()
   createdAt?: Date;
 

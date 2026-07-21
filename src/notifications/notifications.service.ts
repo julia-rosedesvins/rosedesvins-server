@@ -101,11 +101,15 @@ export class NotificationsService {
             const upcomingEvents = await this.eventModel.find({
                 eventType: 'booking',
                 eventStatus: 'active',
+                isDeleted: { $ne: true },
                 eventDate: {
                     $gte: today,
                     $lte: tomorrow
                 }
-            }).populate('userId').populate('bookingId').exec();
+            }).populate('userId').populate({
+                path: 'bookingId',
+                match: { isDeleted: { $ne: true } },
+            }).exec();
 
             this.logger.log(`📅 Found ${upcomingEvents.length} upcoming booking events to check`);
 
@@ -1052,12 +1056,16 @@ export class NotificationsService {
             const candidateEvents = await this.eventModel.find({
                 eventType: 'booking',
                 eventStatus: 'active',
+                isDeleted: { $ne: true },
                 reviewRequestSent: { $ne: true },
                 eventDate: {
                     $gte: windowStart,
                     $lte: windowEnd,
                 },
-            }).populate('userId').populate('bookingId').exec();
+            }).populate('userId').populate({
+                path: 'bookingId',
+                match: { isDeleted: { $ne: true } },
+            }).exec();
 
             this.logger.log(`⭐ Found ${candidateEvents.length} booking events to check for review requests`);
 

@@ -149,6 +149,7 @@ export class DashboardAnalyticsService {
           userId,
           createdAt: { $gte: startDate, $lte: endDate },
           bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
+          isDeleted: { $ne: true },
         },
       },
       {
@@ -219,6 +220,7 @@ export class DashboardAnalyticsService {
           userId,
           createdAt: { $gte: startDate, $lte: endDate },
           bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
+          isDeleted: { $ne: true },
         },
       },
       {
@@ -253,6 +255,7 @@ export class DashboardAnalyticsService {
         $lte: endDate,
       },
       bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
+      isDeleted: { $ne: true },
     });
   }
 
@@ -272,6 +275,7 @@ export class DashboardAnalyticsService {
           userId,
           createdAt: { $gte: startDate, $lte: endDate },
           bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
+          isDeleted: { $ne: true },
         },
       },
       {
@@ -306,6 +310,7 @@ export class DashboardAnalyticsService {
           $lte: endDate,
         },
         bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
+        isDeleted: { $ne: true },
       })
       .exec();
 
@@ -334,6 +339,7 @@ export class DashboardAnalyticsService {
         userId,
         bookingDate: { $gte: currentDate },
         bookingStatus: { $in: ['pending', 'confirmed'] },
+        isDeleted: { $ne: true },
       })
       .sort({ bookingDate: 1, bookingTime: 1 })
       .limit(10)
@@ -349,6 +355,7 @@ export class DashboardAnalyticsService {
           bookingId: booking._id,
           eventType: 'booking',
           eventStatus: 'active',
+          isDeleted: { $ne: true },
         })
         .exec();
 
