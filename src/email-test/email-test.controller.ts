@@ -6,6 +6,17 @@ import { ZodValidationPipe } from './zod-validation.pipe';
 
 const emailBodySchema = { schema: { type: 'object', required: ['to'], properties: { to: { type: 'string', format: 'email', example: 'test@example.com' } } } };
 
+const reviewRequestBodySchema = {
+  schema: {
+    type: 'object',
+    required: ['to'],
+    properties: {
+      to: { type: 'string', format: 'email', example: 'test@example.com' },
+      locale: { type: 'string', enum: ['fr', 'en'], example: 'fr', description: 'Email language (default: fr)' },
+    },
+  },
+};
+
 @ApiTags('Email Testing')
 @Controller('v1/email-test')
 @UsePipes(new ZodValidationPipe(SendTestEmailSchema))
@@ -98,5 +109,20 @@ export class EmailTestController {
   async sendSubscriptionExpiryWarning(@Body() dto: SendTestEmailDto) {
     await this.emailTestService.sendSubscriptionExpiryWarningTest(dto.to);
     return { success: true, message: `Subscription expiry warning email sent to ${dto.to}` };
+  }
+
+  @Post('review-request')
+  @ApiOperation({
+    summary: 'Test: Post-experience Google review request email',
+    description: 'Sends a review request email (FR or EN) with mock domain name and Google review link. Use locale=fr or locale=en.',
+  })
+  @ApiBody(reviewRequestBodySchema)
+  async sendReviewRequest(@Body() dto: SendTestEmailDto) {
+    const locale = dto.locale === 'en' ? 'en' : 'fr';
+    await this.emailTestService.sendReviewRequestTest(dto.to, locale);
+    return {
+      success: true,
+      message: `Review request email (${locale}) sent to ${dto.to}`,
+    };
   }
 }

@@ -43,6 +43,7 @@ export class ContactDetailsController {
         codePostal: { type: 'string', example: '37210' },
         city: { type: 'string', example: 'Vouvray' },
         siteWeb: { type: 'string', example: 'www.example.com' },
+        googleReviewUrl: { type: 'string', example: 'https://g.page/r/example/review', nullable: true },
         domainLatitude: { type: 'number', example: 47.4144, nullable: true },
         domainLongitude: { type: 'number', example: 0.6930, nullable: true }
       }

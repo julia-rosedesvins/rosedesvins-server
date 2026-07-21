@@ -73,6 +73,7 @@ export class NotificationsService {
 
         try {
             await this.checkAndSendNotifications();
+            await this.checkAndSendReviewRequests();
             this.logger.log('✅ Notification cron job completed successfully');
         } catch (error) {
             this.logger.error('❌ Error in notification cron job:', error);
@@ -1032,5 +1033,146 @@ export class NotificationsService {
             this.logger.error(`Error sending quick test emails to ${email}:`, error);
             throw error;
         }
+    }
+
+    /**
+     * Find booking events whose experience ended ~24h ago and send review request emails.
+     */
+    async checkAndSendReviewRequests(): Promise<void> {
+        try {
+            const now = this.getCurrentTimeInTimezone(DEFAULT_TIMEZONE);
+
+            const windowStart = new Date(now);
+            windowStart.setDate(windowStart.getDate() - 2);
+            windowStart.setHours(0, 0, 0, 0);
+
+            const windowEnd = new Date(now);
+            windowEnd.setHours(23, 59, 59, 999);
+
+            const candidateEvents = await this.eventModel.find({
+                eventType: 'booking',
+                eventStatus: 'active',
+                reviewRequestSent: { $ne: true },
+                eventDate: {
+                    $gte: windowStart,
+                    $lte: windowEnd,
+                },
+            }).populate('userId').populate('bookingId').exec();
+
+            this.logger.log(`⭐ Found ${candidateEvents.length} booking events to check for review requests`);
+
+            for (const event of candidateEvents) {
+                await this.processReviewRequest(event, now);
+            }
+        } catch (error) {
+            this.logger.error('❌ Error checking review requests:', error);
+            throw error;
+        }
+    }
+
+    private async processReviewRequest(event: any, now: Date): Promise<void> {
+        try {
+            const booking = event.bookingId;
+            if (!booking) {
+                this.logger.debug(`Skipping review request for event ${event._id}: no booking`);
+                return;
+            }
+
+            const locale = this.getReviewEmailLocale(booking.selectedLanguage);
+            if (!locale) {
+                this.logger.debug(`Skipping review request for event ${event._id}: language not FR/EN (${booking.selectedLanguage})`);
+                return;
+            }
+
+            const customerEmail = booking.customerEmail;
+            if (!customerEmail) {
+                this.logger.debug(`Skipping review request for event ${event._id}: no customer email`);
+                return;
+            }
+
+            const provider = event.userId;
+            const providerId = provider?._id || provider;
+            const userInfo = provider?.googleReviewUrl !== undefined
+                ? provider
+                : await this.userModel.findById(providerId).exec();
+
+            const googleReviewUrl = (userInfo?.googleReviewUrl || '').trim();
+            if (!googleReviewUrl) {
+                this.logger.debug(`Skipping review request for event ${event._id}: no googleReviewUrl`);
+                return;
+            }
+
+            const endTime = event.eventEndTime || event.eventTime;
+            if (!endTime) {
+                this.logger.debug(`Skipping review request for event ${event._id}: no end/start time`);
+                return;
+            }
+
+            const experienceEnd = this.combineDateTime(event.eventDate, endTime);
+            const reviewDueTime = new Date(experienceEnd.getTime() + 24 * 60 * 60 * 1000);
+
+            if (!this.shouldSendReviewRequest(now, reviewDueTime)) {
+                return;
+            }
+
+            const domainName = userInfo?.domainName || 'Rose des Vins';
+            const domain = await this.domainProfileModel.findOne({ userId: providerId }).exec();
+            const backendUrl = 'https://api.rosedesvins.co';
+            const domainLogoUrl = domain?.domainLogoUrl
+                ? this.joinUrl(backendUrl, domain.domainLogoUrl)
+                : this.getAppLogoUrl();
+
+            const success = await this.emailService.sendReviewRequestEmail({
+                to: customerEmail,
+                domainName,
+                domainLogoUrl,
+                googleReviewUrl,
+                isFrench: locale === 'fr',
+            });
+
+            if (!success) {
+                this.logger.warn(`Review request email failed for event ${event._id}; will retry next cron`);
+                return;
+            }
+
+            await this.eventModel.findByIdAndUpdate(event._id, {
+                reviewRequestSent: true,
+                reviewRequestSentAt: new Date(),
+            });
+
+            this.logger.log(`✅ Review request sent for event ${event._id} to ${customerEmail} (${locale})`);
+        } catch (error) {
+            this.logger.error(`❌ Error processing review request for event ${event._id}:`, error);
+        }
+    }
+
+    /**
+     * Returns 'fr' | 'en' for supported booking languages, otherwise null (do not send).
+     */
+    private getReviewEmailLocale(language: string | undefined): 'fr' | 'en' | null {
+        if (!language) return null;
+        const lang = language.toLowerCase().trim();
+        if (lang === 'french' || lang === 'français' || lang === 'francais' || lang === 'fr') {
+            return 'fr';
+        }
+        if (lang === 'english' || lang === 'anglais' || lang === 'en') {
+            return 'en';
+        }
+        return null;
+    }
+
+    /**
+     * Edge-triggered window: send only on the first cron run AFTER reviewDueTime.
+     */
+    private shouldSendReviewRequest(now: Date, reviewDueTime: Date): boolean {
+        const cronIntervalMs = 30 * 60 * 1000;
+        const previousRun = new Date(now.getTime() - cronIntervalMs);
+        const withinWindow = reviewDueTime > previousRun && reviewDueTime <= now;
+
+        this.logger.debug(
+            `⭐ Review timing check (${DEFAULT_TIMEZONE}): due=${reviewDueTime.toISOString()} now=${now.toISOString()} withinWindow=${withinWindow}`,
+        );
+
+        return withinWindow;
     }
 }
