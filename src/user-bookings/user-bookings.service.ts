@@ -460,7 +460,7 @@ export class UserBookingsService {
       // Create booking data with proper field mapping
       const parsedDate = createBookingDto.bookingDate;
 
-      const bookingData = {
+      const bookingData: Record<string, unknown> = {
         userId: userObjectId,
         serviceId: serviceObjectId,
         bookingDate: parsedDate,
@@ -476,6 +476,10 @@ export class UserBookingsService {
         paymentMethod: createBookingDto.paymentMethod,
         bookingStatus: 'pending', // Default status
       };
+
+      if (createBookingDto.bookingSource) {
+        bookingData.bookingSource = createBookingDto.bookingSource;
+      }
 
       // Create and save the booking
       const newBooking = new this.userBookingModel(bookingData);

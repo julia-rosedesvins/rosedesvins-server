@@ -153,6 +153,14 @@ export class UserBooking extends Document {
   })
   paymentMethod: PaymentMethodDetails;
 
+  @Prop({
+    type: String,
+    required: false,
+    enum: ['manual', 'widget', 'platform'],
+    index: true,
+  })
+  bookingSource?: string;
+
   @Prop({ 
     required: true,
     enum: [
