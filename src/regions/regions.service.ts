@@ -1648,8 +1648,9 @@ export class RegionsService {
             const baseSlug = slugify(region.denom) || 'region';
             const slug = await ensureUniqueSlug(baseSlug, async (candidate) => existingRegionSlugs.has(candidate));
             existingRegionSlugs.add(slug);
-            region.slug = slug;
-            await region.save();
+            // Use $set so we only write `slug` and skip full-document validation
+            // (legacy docs may have empty required fields that would otherwise fail).
+            await this.regionModel.updateOne({ _id: region._id }, { $set: { slug } }).exec();
             regionsUpdated++;
         }
 
@@ -1673,8 +1674,10 @@ export class RegionsService {
             const baseSlug = slugify(baseName) || 'domaine';
             const slug = await ensureUniqueSlug(baseSlug, async (candidate) => usedDomainSlugs.has(candidate));
             usedDomainSlugs.add(slug);
-            profile.slug = slug;
-            await profile.save();
+            // Avoid profile.save() — production DomainProfiles often have empty
+            // required fields (e.g. domainDescription: '') that fail Mongoose
+            // validation when the whole document is re-saved.
+            await this.domainProfileModel.updateOne({ _id: profile._id }, { $set: { slug } }).exec();
             domainProfilesUpdated++;
         }
 
@@ -1687,8 +1690,7 @@ export class RegionsService {
             const baseSlug = slugify(exp.name) || 'experience';
             const slug = await ensureUniqueSlug(baseSlug, async (candidate) => usedDomainSlugs.has(candidate));
             usedDomainSlugs.add(slug);
-            exp.slug = slug;
-            await exp.save();
+            await this.staticExperienceModel.updateOne({ _id: exp._id }, { $set: { slug } }).exec();
             staticExperiencesUpdated++;
         }
 
