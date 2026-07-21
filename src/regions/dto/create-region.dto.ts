@@ -6,4 +6,6 @@ export class CreateRegionDto {
   max_lon: number;
   isParent?: boolean;
   parent?: string;
+  subtitle?: string;
+  description?: string;
 }

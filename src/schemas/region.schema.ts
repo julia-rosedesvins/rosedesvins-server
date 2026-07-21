@@ -52,6 +52,18 @@ export class Region extends Document {
     thumbnailUrl: string;
 
     @Prop({
+        type: String,
+        default: '',
+    })
+    subtitle: string;
+
+    @Prop({
+        type: String,
+        default: '',
+    })
+    description: string;
+
+    @Prop({
         type: Boolean,
         default: false,
         index: true,

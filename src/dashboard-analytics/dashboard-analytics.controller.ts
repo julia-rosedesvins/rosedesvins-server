@@ -1,6 +1,10 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { DashboardAnalyticsService } from './dashboard-analytics.service';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import {
+  DashboardAnalyticsService,
+  DashboardPeriod,
+  DashboardAnalytics,
+} from './dashboard-analytics.service';
 import { UserGuard } from '../guards/user.guard';
 import { AdminGuard } from '../guards/admin.guard';
 import { CurrentUser } from '../decorators/current-user.decorator';
@@ -15,43 +19,40 @@ export class DashboardAnalyticsController {
   @UseGuards(UserGuard)
   @ApiOperation({ summary: 'Get user dashboard analytics' })
   @ApiBearerAuth('user-token')
-  async getUserDashboardAnalytics(@CurrentUser() user: any): Promise<{
+  @ApiQuery({
+    name: 'period',
+    required: false,
+    enum: ['week', 'month', 'year'],
+    description: 'Time period for KPI metrics (bookingsByMonth is always YTD)',
+  })
+  async getUserDashboardAnalytics(
+    @CurrentUser() user: { sub: string },
+    @Query('period') period?: string,
+  ): Promise<{
     success: boolean;
     message: string;
-    data: {
-      reservationsThisMonth: number;
-      visitors: number;
-      conversionRate: number;
-      turnover: number;
-      nextReservations: {
-        bookingTime: string;
-        bookingDate: string;
-        participantsAdults: number;
-        participantsEnfants: number;
-        eventName: string;
-        customerEmail: string;
-        phoneNo: string;
-      }[];
-    };
+    data: DashboardAnalytics;
   }> {
-    try {
-      const analytics = await this.dashboardAnalyticsService.getUserDashboardAnalytics(user.sub);
-      
-      return {
-        success: true,
-        message: 'Dashboard analytics retrieved successfully',
-        data: analytics,
-      };
-    } catch (error) {
-      throw error;
-    }
+    const normalizedPeriod: DashboardPeriod =
+      period === 'week' || period === 'month' || period === 'year' ? period : 'month';
+
+    const analytics = await this.dashboardAnalyticsService.getUserDashboardAnalytics(
+      user.sub,
+      normalizedPeriod,
+    );
+
+    return {
+      success: true,
+      message: 'Dashboard analytics retrieved successfully',
+      data: analytics,
+    };
   }
 
   @Get('admin')
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Get admin dashboard analytics' })
   @ApiBearerAuth('admin-token')
-  async getAdminAnalytics(@CurrentAdmin() admin: any): Promise<{
+  async getAdminAnalytics(@CurrentAdmin() admin: unknown): Promise<{
     success: boolean;
     message: string;
     data: {
@@ -63,16 +64,12 @@ export class DashboardAnalyticsController {
       totalOpenSupportTickets: number;
     };
   }> {
-    try {
-      const analytics = await this.dashboardAnalyticsService.getAdminAnalytics();
-      
-      return {
-        success: true,
-        message: 'Admin dashboard analytics retrieved successfully',
-        data: analytics,
-      };
-    } catch (error) {
-      throw error;
-    }
+    const analytics = await this.dashboardAnalyticsService.getAdminAnalytics();
+
+    return {
+      success: true,
+      message: 'Admin dashboard analytics retrieved successfully',
+      data: analytics,
+    };
   }
 }
