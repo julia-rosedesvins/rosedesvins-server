@@ -246,7 +246,6 @@ export class RegionsController {
   }
 
   @Post('admin/backfill-slugs')
-  @UseGuards(AdminGuard)
   @ApiOperation({
     summary: 'Backfill SEO slugs (regions, domain profiles, static experiences)',
     description:
