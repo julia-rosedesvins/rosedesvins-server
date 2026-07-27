@@ -78,26 +78,34 @@ export class EventsService {
    * @param userId - User ID to get schedule for
    * @returns Promise with user's event dates and times only
    */
-  async getPublicUserSchedule(userId: string): Promise<{ eventDate: Date; eventTime: string; eventEndTime?: string; eventType?: string; totalParticipants?: number; serviceId?: string; selectedLanguage?: string }[]> {
+  async getPublicUserSchedule(userId: string): Promise<{ eventDate: Date; eventTime: string; eventEndTime?: string; eventType?: string; isAllDay?: boolean; totalParticipants?: number; serviceId?: string; selectedLanguage?: string }[]> {
     try {
       const userObjectId = new Types.ObjectId(userId);
 
       const schedule = await this.eventModel
         .find({
           userId: userObjectId,
-          eventStatus: 'active' // Only return active events
+          eventStatus: 'active', // Only return active events
+          isDeleted: { $ne: true },
         })
-        .select('eventDate eventTime eventEndTime eventType bookingId') // Include eventType to differentiate external events
+        .select('eventDate eventTime eventEndTime eventType isAllDay bookingId') // Include eventType / isAllDay for widget blocking
         .populate({
           path: 'bookingId',
-          select: 'participantsAdults participantsEnfants serviceId selectedLanguage' // Get participant counts, serviceId and language from booking
+          select: 'participantsAdults participantsEnfants serviceId selectedLanguage isDeleted',
+          match: { isDeleted: { $ne: true } },
         })
         .sort({ eventDate: 1, eventTime: 1 }) // Sort by date and time ascending
         .lean()
         .exec();
 
       // Transform the data to include total participants, event type, serviceId and selectedLanguage
-      return schedule.map(event => {
+      return schedule
+        .filter((event) => {
+          // Skip booking events whose booking was soft-deleted
+          if (event.eventType === 'booking' && !event.bookingId) return false;
+          return true;
+        })
+        .map(event => {
         let totalParticipants: number | undefined = undefined;
         let serviceId: string | undefined = undefined;
         let selectedLanguage: string | undefined = undefined;
@@ -117,6 +125,7 @@ export class EventsService {
           eventTime: event.eventTime,
           eventEndTime: event.eventEndTime,
           eventType: event.eventType, // Include eventType to differentiate external events
+          isAllDay: event.isAllDay || false,
           totalParticipants,
           serviceId, // Include serviceId to check if bookings are for the same service
           selectedLanguage // Include language to enforce same-language constraint for multi-bookings
@@ -1505,6 +1514,7 @@ export class EventsService {
   /**
    * Remove external events from our DB that are no longer present in the remote calendar.
    * Only removes events whose externalEventId is NOT in the provided live list.
+   * Multi-day all-day expansions use `{baseId}_dayN` — keep those while `baseId` is still live.
    * Booking-linked events (eventType !== 'external') are never touched.
    */
   private async pruneDeletedExternalEvents(
@@ -1519,11 +1529,38 @@ export class EventsService {
         return 0;
       }
 
+      const liveIdSet = new Set(liveExternalIds);
+
+      const isLiveExternalId = (externalEventId: string | undefined | null): boolean => {
+        if (!externalEventId) return false;
+        if (liveIdSet.has(externalEventId)) return true;
+        // Expanded multi-day all-day rows: `{baseId}_day1`, `{baseId}_day2`, ...
+        const dayMatch = externalEventId.match(/^(.*)_day\d+$/);
+        if (dayMatch && liveIdSet.has(dayMatch[1])) return true;
+        return false;
+      };
+
+      const candidates = await this.eventModel
+        .find({
+          userId,
+          eventType: 'external',
+          externalCalendarSource: source,
+          externalEventId: { $nin: liveExternalIds },
+        })
+        .select('_id externalEventId')
+        .lean()
+        .exec();
+
+      const idsToDelete = candidates
+        .filter((event) => !isLiveExternalId(event.externalEventId))
+        .map((event) => event._id);
+
+      if (!idsToDelete.length) {
+        return 0;
+      }
+
       const result = await this.eventModel.deleteMany({
-        userId,
-        eventType: 'external',
-        externalCalendarSource: source,
-        externalEventId: { $nin: liveExternalIds }
+        _id: { $in: idsToDelete },
       }).exec();
 
       return result.deletedCount ?? 0;
