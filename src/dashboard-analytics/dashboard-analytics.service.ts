@@ -10,6 +10,9 @@ import { SupportContact } from '../schemas/support-contact.schema';
 
 export type DashboardPeriod = 'week' | 'month' | 'year';
 
+export const BOOKING_SOURCE_OPTIONS = ['manual', 'widget', 'platform'] as const;
+export type BookingSourceOption = (typeof BOOKING_SOURCE_OPTIONS)[number];
+
 export interface BookingChartPoint {
   label: string;
   count: number;
@@ -63,6 +66,21 @@ const WEEKDAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
 const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed', 'completed'];
 
+/**
+ * Only restricts by bookingSource when a subset of the canonical sources is
+ * selected. When all 3 are selected (the default "all checked" state), no
+ * condition is added so legacy bookings created before this field existed
+ * (bookingSource undefined) keep showing up exactly as they do today.
+ */
+function buildBookingSourceMatch(
+  bookingSources?: BookingSourceOption[],
+): Record<string, unknown> {
+  if (!bookingSources || bookingSources.length === BOOKING_SOURCE_OPTIONS.length) {
+    return {};
+  }
+  return { bookingSource: { $in: bookingSources } };
+}
+
 @Injectable()
 export class DashboardAnalyticsService {
   constructor(
@@ -77,16 +95,18 @@ export class DashboardAnalyticsService {
   async getUserDashboardAnalytics(
     userId: string,
     period: DashboardPeriod = 'month',
+    bookingSources?: BookingSourceOption[],
   ): Promise<DashboardAnalytics> {
     const userObjectId = new Types.ObjectId(userId);
     const { startDate, endDate } = this.getPeriodRange(period);
+    const bookingSourceMatch = buildBookingSourceMatch(bookingSources);
 
     const [reservations, visitors, turnover, bookingChart, nextReservations] = await Promise.all([
-      this.getReservationsInRange(userObjectId, startDate, endDate),
-      this.getVisitors(userObjectId, startDate, endDate),
-      this.calculateTurnover(userObjectId, startDate, endDate),
-      this.getBookingChartSeries(userObjectId, period, startDate, endDate),
-      this.getNextReservations(userObjectId),
+      this.getReservationsInRange(userObjectId, startDate, endDate, bookingSourceMatch),
+      this.getVisitors(userObjectId, startDate, endDate, bookingSourceMatch),
+      this.calculateTurnover(userObjectId, startDate, endDate, bookingSourceMatch),
+      this.getBookingChartSeries(userObjectId, period, startDate, endDate, bookingSourceMatch),
+      this.getNextReservations(userObjectId, bookingSourceMatch),
     ]);
 
     // Cap at 100%: reservations should not exceed visitors in a valid funnel.
@@ -142,6 +162,7 @@ export class DashboardAnalyticsService {
     userId: Types.ObjectId,
     startDate: Date,
     endDate: Date,
+    bookingSourceMatch: Record<string, unknown>,
   ): Promise<Map<string, number>> {
     const aggregated = await this.userBookingModel.aggregate<{ _id: string; count: number }>([
       {
@@ -150,6 +171,7 @@ export class DashboardAnalyticsService {
           createdAt: { $gte: startDate, $lte: endDate },
           bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
           isDeleted: { $ne: true },
+          ...bookingSourceMatch,
         },
       },
       {
@@ -177,12 +199,13 @@ export class DashboardAnalyticsService {
     period: DashboardPeriod,
     startDate: Date,
     endDate: Date,
+    bookingSourceMatch: Record<string, unknown>,
   ): Promise<BookingChartPoint[]> {
     if (period === 'year') {
-      return this.getYearlyChartSeries(userId, startDate, endDate);
+      return this.getYearlyChartSeries(userId, startDate, endDate, bookingSourceMatch);
     }
 
-    const countsByDay = await this.getBookingCountsByDay(userId, startDate, endDate);
+    const countsByDay = await this.getBookingCountsByDay(userId, startDate, endDate, bookingSourceMatch);
     const points: BookingChartPoint[] = [];
     const cursor = new Date(startDate);
     cursor.setHours(0, 0, 0, 0);
@@ -213,6 +236,7 @@ export class DashboardAnalyticsService {
     userId: Types.ObjectId,
     startDate: Date,
     endDate: Date,
+    bookingSourceMatch: Record<string, unknown>,
   ): Promise<BookingChartPoint[]> {
     const aggregated = await this.userBookingModel.aggregate<{ _id: number; count: number }>([
       {
@@ -221,6 +245,7 @@ export class DashboardAnalyticsService {
           createdAt: { $gte: startDate, $lte: endDate },
           bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
           isDeleted: { $ne: true },
+          ...bookingSourceMatch,
         },
       },
       {
@@ -247,6 +272,7 @@ export class DashboardAnalyticsService {
     userId: Types.ObjectId,
     startDate: Date,
     endDate: Date,
+    bookingSourceMatch: Record<string, unknown>,
   ): Promise<number> {
     return this.userBookingModel.countDocuments({
       userId,
@@ -256,6 +282,7 @@ export class DashboardAnalyticsService {
       },
       bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
       isDeleted: { $ne: true },
+      ...bookingSourceMatch,
     });
   }
 
@@ -268,6 +295,7 @@ export class DashboardAnalyticsService {
     userId: Types.ObjectId,
     startDate: Date,
     endDate: Date,
+    bookingSourceMatch: Record<string, unknown>,
   ): Promise<number> {
     const aggregated = await this.userBookingModel.aggregate<{ total: number }>([
       {
@@ -276,6 +304,7 @@ export class DashboardAnalyticsService {
           createdAt: { $gte: startDate, $lte: endDate },
           bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
           isDeleted: { $ne: true },
+          ...bookingSourceMatch,
         },
       },
       {
@@ -295,6 +324,7 @@ export class DashboardAnalyticsService {
     userId: Types.ObjectId,
     startDate: Date,
     endDate: Date,
+    bookingSourceMatch: Record<string, unknown>,
   ): Promise<number> {
     const domainProfile = await this.domainProfileModel.findOne({ userId }).exec();
 
@@ -311,6 +341,7 @@ export class DashboardAnalyticsService {
         },
         bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
         isDeleted: { $ne: true },
+        ...bookingSourceMatch,
       })
       .exec();
 
@@ -331,7 +362,10 @@ export class DashboardAnalyticsService {
     return totalTurnover;
   }
 
-  private async getNextReservations(userId: Types.ObjectId): Promise<NextReservation[]> {
+  private async getNextReservations(
+    userId: Types.ObjectId,
+    bookingSourceMatch: Record<string, unknown>,
+  ): Promise<NextReservation[]> {
     const currentDate = new Date();
 
     const upcomingBookings = await this.userBookingModel
@@ -340,6 +374,7 @@ export class DashboardAnalyticsService {
         bookingDate: { $gte: currentDate },
         bookingStatus: { $in: ['pending', 'confirmed'] },
         isDeleted: { $ne: true },
+        ...bookingSourceMatch,
       })
       .sort({ bookingDate: 1, bookingTime: 1 })
       .limit(10)

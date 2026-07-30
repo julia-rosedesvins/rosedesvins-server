@@ -4,6 +4,8 @@ import {
   DashboardAnalyticsService,
   DashboardPeriod,
   DashboardAnalytics,
+  BOOKING_SOURCE_OPTIONS,
+  BookingSourceOption,
 } from './dashboard-analytics.service';
 import { UserGuard } from '../guards/user.guard';
 import { AdminGuard } from '../guards/admin.guard';
@@ -25,9 +27,17 @@ export class DashboardAnalyticsController {
     enum: ['week', 'month', 'year'],
     description: 'Time period for KPI metrics (bookingsByMonth is always YTD)',
   })
+  @ApiQuery({
+    name: 'bookingSources',
+    required: false,
+    type: String,
+    description:
+      'Comma-separated booking sources to include (manual, widget, platform). Omit or include all 3 to disable filtering (includes legacy bookings with no bookingSource).',
+  })
   async getUserDashboardAnalytics(
     @CurrentUser() user: { sub: string },
     @Query('period') period?: string,
+    @Query('bookingSources') bookingSourcesParam?: string,
   ): Promise<{
     success: boolean;
     message: string;
@@ -36,9 +46,19 @@ export class DashboardAnalyticsController {
     const normalizedPeriod: DashboardPeriod =
       period === 'week' || period === 'month' || period === 'year' ? period : 'month';
 
+    const bookingSources: BookingSourceOption[] | undefined = bookingSourcesParam
+      ? bookingSourcesParam
+          .split(',')
+          .map((s) => s.trim())
+          .filter((s): s is BookingSourceOption =>
+            (BOOKING_SOURCE_OPTIONS as readonly string[]).includes(s),
+          )
+      : undefined;
+
     const analytics = await this.dashboardAnalyticsService.getUserDashboardAnalytics(
       user.sub,
       normalizedPeriod,
+      bookingSources,
     );
 
     return {
