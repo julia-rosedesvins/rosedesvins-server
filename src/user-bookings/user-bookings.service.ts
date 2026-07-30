@@ -169,15 +169,21 @@ export class UserBookingsService {
       // Find the booking first to validate it exists
       const booking = await this.userBookingModel.findById(bookingId).exec();
 
-      if (!booking) {
+      if (!booking || booking.isDeleted) {
         throw new NotFoundException('Réservation non trouvée');
       }
 
-      // Use the existing deleteBooking function to completely remove the booking
-      // This will delete from bookings table, events table, and calendar
+      // Soft-delete via deleteBooking (retains record, hides from UI/analytics)
       const deleteResult = await this.deleteBooking(bookingId);
 
-      console.log(`✅ Booking ${bookingId} deleted by guest successfully`);
+      // Mark as guest-cancelled for audit clarity
+      if (deleteResult.success) {
+        await this.userBookingModel.findByIdAndUpdate(bookingId, {
+          bookingStatus: 'cancelled_by_guest',
+        });
+      }
+
+      console.log(`✅ Booking ${bookingId} soft-deleted by guest successfully`);
 
       return {
         success: deleteResult.success,
@@ -460,7 +466,7 @@ export class UserBookingsService {
       // Create booking data with proper field mapping
       const parsedDate = createBookingDto.bookingDate;
 
-      const bookingData = {
+      const bookingData: Record<string, unknown> = {
         userId: userObjectId,
         serviceId: serviceObjectId,
         bookingDate: parsedDate,
@@ -476,6 +482,10 @@ export class UserBookingsService {
         paymentMethod: createBookingDto.paymentMethod,
         bookingStatus: 'pending', // Default status
       };
+
+      if (createBookingDto.bookingSource) {
+        bookingData.bookingSource = createBookingDto.bookingSource;
+      }
 
       // Create and save the booking
       const newBooking = new this.userBookingModel(bookingData);
@@ -1340,7 +1350,7 @@ export class UserBookingsService {
 
       // Find the existing booking
       const existingBooking = await this.userBookingModel.findById(bookingObjectId).lean();
-      if (!existingBooking) {
+      if (!existingBooking || existingBooking.isDeleted) {
         throw new NotFoundException('Booking not found');
       }
 
@@ -1854,12 +1864,12 @@ export class UserBookingsService {
   }
 
   /**
-   * Delete a booking from user-bookings, events, and linked calendars
+   * Soft-delete a booking: retain the record, hide from UI/analytics, remove from calendars
    * @param bookingId - The ID of the booking to delete
    */
   async deleteBooking(bookingId: string): Promise<{ success: boolean; message: string }> {
     try {
-      console.log('🗑️ Starting booking deletion process for ID:', bookingId);
+      console.log('🗑️ Starting booking soft-deletion process for ID:', bookingId);
 
       // Validate booking ID format
       if (!Types.ObjectId.isValid(bookingId)) {
@@ -1868,13 +1878,13 @@ export class UserBookingsService {
 
       const bookingObjectId = new Types.ObjectId(bookingId);
 
-      // Find the booking to get details before deletion
+      // Find the booking to get details before soft-deletion
       const booking = await this.userBookingModel.findById(bookingObjectId).lean();
-      if (!booking) {
+      if (!booking || booking.isDeleted) {
         throw new NotFoundException('Booking not found');
       }
 
-      console.log('📋 Found booking to delete:', {
+      console.log('📋 Found booking to soft-delete:', {
         id: booking._id,
         userId: booking.userId,
         serviceId: booking.serviceId,
@@ -1885,28 +1895,49 @@ export class UserBookingsService {
       // Delete from calendar if linked
       await this.deleteFromCalendar(booking);
 
-      // Delete from events table
-      const eventDeleteResult = await this.eventModel.deleteMany({
-        $or: [
-          { bookingId: bookingObjectId },
-          {
-            userId: booking.userId,
-            eventDate: booking.bookingDate,
-            eventTime: booking.bookingTime
-          }
-        ]
-      });
+      const deletedAt = new Date();
 
-      console.log('📅 Deleted events:', eventDeleteResult.deletedCount);
+      // Soft-delete linked events
+      const eventUpdateResult = await this.eventModel.updateMany(
+        {
+          $or: [
+            { bookingId: bookingObjectId },
+            {
+              userId: booking.userId,
+              eventDate: booking.bookingDate,
+              eventTime: booking.bookingTime,
+              eventType: 'booking',
+            },
+          ],
+          isDeleted: { $ne: true },
+        },
+        {
+          $set: {
+            isDeleted: true,
+            deletedAt,
+            eventStatus: 'cancelled',
+          },
+        },
+      );
 
-      // Delete from user-bookings table
-      const bookingDeleteResult = await this.userBookingModel.findByIdAndDelete(bookingObjectId);
+      console.log('📅 Soft-deleted events:', eventUpdateResult.modifiedCount);
 
-      if (!bookingDeleteResult) {
-        throw new InternalServerErrorException('Failed to delete booking from database');
+      // Soft-delete the booking
+      const bookingUpdateResult = await this.userBookingModel.findByIdAndUpdate(
+        bookingObjectId,
+        {
+          isDeleted: true,
+          deletedAt,
+          bookingStatus: 'cancelled',
+        },
+        { new: true },
+      );
+
+      if (!bookingUpdateResult) {
+        throw new InternalServerErrorException('Failed to soft-delete booking from database');
       }
 
-      console.log('✅ Successfully deleted booking:', bookingId);
+      console.log('✅ Successfully soft-deleted booking:', bookingId);
 
       // Send cancellation email to customer only
       // Skip if booking was payment_pending — it was never confirmed, so no cancellation email needed
@@ -1990,7 +2021,7 @@ export class UserBookingsService {
     } catch (error) {
       console.error('❌ Error deleting booking:', error);
 
-      if (error instanceof BadRequestException) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
 
@@ -2478,7 +2509,7 @@ export class UserBookingsService {
       // Find the booking
       const booking = await this.userBookingModel.findById(bookingObjectId).lean();
 
-      if (!booking) {
+      if (!booking || booking.isDeleted) {
         throw new NotFoundException('Réservation introuvable');
       }
 

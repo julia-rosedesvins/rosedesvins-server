@@ -8,11 +8,26 @@ import { User, AccountStatus } from '../schemas/user.schema';
 import { Subscription } from '../schemas/subscriptions.schema';
 import { SupportContact } from '../schemas/support-contact.schema';
 
-interface DashboardAnalytics {
+export type DashboardPeriod = 'week' | 'month' | 'year';
+
+export interface BookingChartPoint {
+  label: string;
+  count: number;
+}
+
+/** @deprecated Use BookingChartPoint */
+export type MonthlyBookingCount = BookingChartPoint;
+
+export interface DashboardAnalytics {
+  period: DashboardPeriod;
+  reservations: number;
   reservationsThisMonth: number;
   visitors: number;
   conversionRate: number;
   turnover: number;
+  bookingChart: BookingChartPoint[];
+  /** @deprecated Use bookingChart */
+  bookingsByMonth: BookingChartPoint[];
   nextReservations: {
     bookingTime: string;
     bookingDate: string;
@@ -43,6 +58,11 @@ interface AdminAnalytics {
   totalOpenSupportTickets: number;
 }
 
+const MONTH_LABELS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
+const WEEKDAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+
+const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed', 'completed'];
+
 @Injectable()
 export class DashboardAnalyticsService {
   constructor(
@@ -54,107 +74,257 @@ export class DashboardAnalyticsService {
     @InjectModel(SupportContact.name) private supportContactModel: Model<SupportContact>,
   ) {}
 
-  async getUserDashboardAnalytics(userId: string): Promise<DashboardAnalytics> {
+  async getUserDashboardAnalytics(
+    userId: string,
+    period: DashboardPeriod = 'month',
+  ): Promise<DashboardAnalytics> {
     const userObjectId = new Types.ObjectId(userId);
-    
-    // Get current month start and end dates
-    const currentDate = new Date();
-    const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-    const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59, 999);
+    const { startDate, endDate } = this.getPeriodRange(period);
 
-    // 1. Get number of reservations this month
-    const reservationsThisMonth = await this.getReservationsThisMonth(userObjectId, startOfMonth, endOfMonth);
+    const [reservations, visitors, turnover, bookingChart, nextReservations] = await Promise.all([
+      this.getReservationsInRange(userObjectId, startDate, endDate),
+      this.getVisitors(userObjectId, startDate, endDate),
+      this.calculateTurnover(userObjectId, startDate, endDate),
+      this.getBookingChartSeries(userObjectId, period, startDate, endDate),
+      this.getNextReservations(userObjectId),
+    ]);
 
-    // 2. Get number of visitors (using events)
-    const visitors = await this.getVisitors(userObjectId, startOfMonth, endOfMonth);
-
-    // 3. Calculate conversion rate (reservations / visitors)
-    const conversionRate = visitors > 0 ? (reservationsThisMonth / visitors) * 100 : 0;
-
-    // 4. Calculate turnover
-    const turnover = await this.calculateTurnover(userObjectId, startOfMonth, endOfMonth);
-
-    // 5. Get next reservations list
-    const nextReservations = await this.getNextReservations(userObjectId);
+    // Cap at 100%: reservations should not exceed visitors in a valid funnel.
+    const conversionRate =
+      visitors > 0 ? Math.min(100, (reservations / visitors) * 100) : 0;
 
     return {
-      reservationsThisMonth,
+      period,
+      reservations,
+      reservationsThisMonth: reservations,
       visitors,
-      conversionRate: Math.round(conversionRate * 100) / 100, // Round to 2 decimal places
-      turnover: Math.round(turnover * 100) / 100, // Round to 2 decimal places
+      conversionRate: Math.round(conversionRate * 100) / 100,
+      turnover: Math.round(turnover * 100) / 100,
+      bookingChart,
+      bookingsByMonth: bookingChart,
       nextReservations,
     };
   }
 
-  private async getReservationsThisMonth(
-    userId: Types.ObjectId, 
-    startOfMonth: Date, 
-    endOfMonth: Date
-  ): Promise<number> {
-    return await this.userBookingModel.countDocuments({
-      userId,
-      bookingDate: {
-        $gte: startOfMonth,
-        $lte: endOfMonth,
+  private getPeriodRange(period: DashboardPeriod): { startDate: Date; endDate: Date } {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+
+    if (period === 'week') {
+      const day = now.getDay();
+      const diffToMonday = day === 0 ? -6 : 1 - day;
+      const startDate = new Date(now);
+      startDate.setHours(0, 0, 0, 0);
+      startDate.setDate(now.getDate() + diffToMonday);
+
+      const endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + 6);
+      endDate.setHours(23, 59, 59, 999);
+
+      return { startDate, endDate };
+    }
+
+    if (period === 'year') {
+      return {
+        startDate: new Date(year, 0, 1, 0, 0, 0, 0),
+        endDate: new Date(year, month + 1, 0, 23, 59, 59, 999),
+      };
+    }
+
+    return {
+      startDate: new Date(year, month, 1, 0, 0, 0, 0),
+      endDate: new Date(year, month + 1, 0, 23, 59, 59, 999),
+    };
+  }
+
+  private async getBookingCountsByDay(
+    userId: Types.ObjectId,
+    startDate: Date,
+    endDate: Date,
+  ): Promise<Map<string, number>> {
+    const aggregated = await this.userBookingModel.aggregate<{ _id: string; count: number }>([
+      {
+        $match: {
+          userId,
+          createdAt: { $gte: startDate, $lte: endDate },
+          bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
+          isDeleted: { $ne: true },
+        },
       },
-      bookingStatus: { $in: ['pending', 'confirmed', 'completed'] }, // Exclude cancelled, etc.
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'Europe/Paris' },
+          },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    return new Map(aggregated.map((entry) => [entry._id, entry.count]));
+  }
+
+  private formatDateKey(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  private async getBookingChartSeries(
+    userId: Types.ObjectId,
+    period: DashboardPeriod,
+    startDate: Date,
+    endDate: Date,
+  ): Promise<BookingChartPoint[]> {
+    if (period === 'year') {
+      return this.getYearlyChartSeries(userId, startDate, endDate);
+    }
+
+    const countsByDay = await this.getBookingCountsByDay(userId, startDate, endDate);
+    const points: BookingChartPoint[] = [];
+    const cursor = new Date(startDate);
+    cursor.setHours(0, 0, 0, 0);
+
+    while (cursor <= endDate) {
+      const key = this.formatDateKey(cursor);
+
+      if (period === 'week') {
+        const weekdayIndex = (cursor.getDay() + 6) % 7;
+        points.push({
+          label: WEEKDAY_LABELS[weekdayIndex],
+          count: countsByDay.get(key) ?? 0,
+        });
+      } else {
+        points.push({
+          label: String(cursor.getDate()),
+          count: countsByDay.get(key) ?? 0,
+        });
+      }
+
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return points;
+  }
+
+  private async getYearlyChartSeries(
+    userId: Types.ObjectId,
+    startDate: Date,
+    endDate: Date,
+  ): Promise<BookingChartPoint[]> {
+    const aggregated = await this.userBookingModel.aggregate<{ _id: number; count: number }>([
+      {
+        $match: {
+          userId,
+          createdAt: { $gte: startDate, $lte: endDate },
+          bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
+          isDeleted: { $ne: true },
+        },
+      },
+      {
+        $group: {
+          _id: { $month: { date: '$createdAt', timezone: 'Europe/Paris' } },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const countsByMonth = new Map(aggregated.map((entry) => [entry._id, entry.count]));
+    const currentMonth = endDate.getMonth() + 1;
+
+    return Array.from({ length: currentMonth }, (_, index) => {
+      const month = index + 1;
+      return {
+        label: MONTH_LABELS[index],
+        count: countsByMonth.get(month) ?? 0,
+      };
     });
   }
 
-  private async getVisitors(
-    userId: Types.ObjectId, 
-    startOfMonth: Date, 
-    endOfMonth: Date
+  private async getReservationsInRange(
+    userId: Types.ObjectId,
+    startDate: Date,
+    endDate: Date,
   ): Promise<number> {
-    // Count all events for this user in the month (visitors/events created)
-    return await this.eventModel.countDocuments({
+    return this.userBookingModel.countDocuments({
       userId,
-      eventDate: {
-        $gte: startOfMonth,
-        $lte: endOfMonth,
+      createdAt: {
+        $gte: startDate,
+        $lte: endDate,
       },
-      eventStatus: 'active',
+      bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
+      isDeleted: { $ne: true },
     });
+  }
+
+  /**
+   * Nombre de visiteurs = total participants (adults + children) from bookings
+   * created in the selected period. Using calendar events previously undercounted
+   * visitors vs reservations and produced impossible conversion rates (e.g. 2000%).
+   */
+  private async getVisitors(
+    userId: Types.ObjectId,
+    startDate: Date,
+    endDate: Date,
+  ): Promise<number> {
+    const aggregated = await this.userBookingModel.aggregate<{ total: number }>([
+      {
+        $match: {
+          userId,
+          createdAt: { $gte: startDate, $lte: endDate },
+          bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
+          isDeleted: { $ne: true },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: {
+            $sum: { $add: ['$participantsAdults', '$participantsEnfants'] },
+          },
+        },
+      },
+    ]);
+
+    return aggregated[0]?.total ?? 0;
   }
 
   private async calculateTurnover(
-    userId: Types.ObjectId, 
-    startOfMonth: Date, 
-    endOfMonth: Date
+    userId: Types.ObjectId,
+    startDate: Date,
+    endDate: Date,
   ): Promise<number> {
-    // Get user's domain profile to access services and their prices
-    const domainProfile = await this.domainProfileModel
-      .findOne({ userId })
-      .exec();
+    const domainProfile = await this.domainProfileModel.findOne({ userId }).exec();
 
-    if (!domainProfile || !domainProfile.services || domainProfile.services.length === 0) {
+    if (!domainProfile?.services?.length) {
       return 0;
     }
 
-    // Get all bookings for this month
     const bookings = await this.userBookingModel
       .find({
         userId,
-        bookingDate: {
-          $gte: startOfMonth,
-          $lte: endOfMonth,
+        createdAt: {
+          $gte: startDate,
+          $lte: endDate,
         },
-        bookingStatus: { $in: ['pending','confirmed', 'completed'] }, // Only confirmed/completed bookings
+        bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
+        isDeleted: { $ne: true },
       })
       .exec();
 
     let totalTurnover = 0;
 
     for (const booking of bookings) {
-      // Find the service in domain profile
       const service = domainProfile.services.find(
-        (s: any) => s._id.toString() === booking.serviceId.toString()
+        (s: { _id?: Types.ObjectId; pricePerPerson?: number }) =>
+          s._id?.toString() === booking.serviceId.toString(),
       );
 
-      if (service) {
+      if (service?.pricePerPerson != null) {
         const totalParticipants = booking.participantsAdults + booking.participantsEnfants;
-        const serviceRevenue = totalParticipants * service.pricePerPerson;
-        totalTurnover += serviceRevenue;
+        totalTurnover += totalParticipants * service.pricePerPerson;
       }
     }
 
@@ -163,15 +333,15 @@ export class DashboardAnalyticsService {
 
   private async getNextReservations(userId: Types.ObjectId): Promise<NextReservation[]> {
     const currentDate = new Date();
-    
-    // Get upcoming bookings (next 10 reservations)
+
     const upcomingBookings = await this.userBookingModel
       .find({
         userId,
         bookingDate: { $gte: currentDate },
         bookingStatus: { $in: ['pending', 'confirmed'] },
+        isDeleted: { $ne: true },
       })
-      .sort({ bookingDate: 1, bookingTime: 1 }) // Sort by date and time ascending
+      .sort({ bookingDate: 1, bookingTime: 1 })
       .limit(10)
       .exec();
 
@@ -179,23 +349,23 @@ export class DashboardAnalyticsService {
 
     for (const booking of upcomingBookings) {
       let eventName = 'Unknown Event';
-      
-      // Find the corresponding event from events table using bookingId
+
       const event = await this.eventModel
-        .findOne({ 
+        .findOne({
           bookingId: booking._id,
           eventType: 'booking',
-          eventStatus: 'active'
+          eventStatus: 'active',
+          isDeleted: { $ne: true },
         })
         .exec();
-      
+
       if (event) {
         eventName = event.eventName;
       }
 
       nextReservations.push({
         bookingTime: booking.bookingTime,
-        bookingDate: booking.bookingDate.toISOString().split('T')[0], // Format as YYYY-MM-DD
+        bookingDate: booking.bookingDate.toISOString().split('T')[0],
         participantsAdults: booking.participantsAdults,
         participantsEnfants: booking.participantsEnfants,
         eventName,
@@ -208,22 +378,18 @@ export class DashboardAnalyticsService {
   }
 
   async getAdminAnalytics(): Promise<AdminAnalytics> {
-    // 1. Total Active Users (users with accountStatus = 'active')
     const totalActiveUsers = await this.userModel.countDocuments({
       accountStatus: AccountStatus.ACTIVE,
     });
 
-    // 2. Total Pending Users (users with accountStatus = 'pending_approval')
     const totalPendingUsers = await this.userModel.countDocuments({
       accountStatus: AccountStatus.PENDING_APPROVAL,
     });
 
-    // 3. Total Rejected Users (users with accountStatus = 'rejected')
     const totalRejectedUsers = await this.userModel.countDocuments({
       accountStatus: AccountStatus.REJECTED,
     });
 
-    // 4. Total Active Subscriptions (subscriptions that are active and within date range)
     const currentDate = new Date();
     const totalActiveSubscriptions = await this.subscriptionModel.countDocuments({
       isActive: true,
@@ -232,12 +398,10 @@ export class DashboardAnalyticsService {
       cancelledById: null,
     });
 
-    // 5. Total Expired Subscriptions (subscriptions where endDate has passed)
     const totalExpiredSubscriptions = await this.subscriptionModel.countDocuments({
       endDate: { $lt: currentDate },
     });
 
-    // 6. Total Open Support Tickets (tickets with status pending or in-progress)
     const totalOpenSupportTickets = await this.supportContactModel.countDocuments({
       status: { $in: ['pending', 'in-progress'] },
     });

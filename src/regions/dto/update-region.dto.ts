@@ -7,4 +7,6 @@ export class UpdateRegionDto {
   thumbnailUrl?: string;
   isParent?: boolean;
   parent?: string;
+  subtitle?: string;
+  description?: string;
 }

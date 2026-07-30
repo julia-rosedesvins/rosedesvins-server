@@ -32,13 +32,52 @@ export class EventsService {
     try {
       const userObjectId = new Types.ObjectId(userId);
 
-      // Get events with populated booking details
+      // Load non-deleted events + soft-deleted booking events (so a restored booking can reappear)
       const events = await this.eventModel
-        .find({ userId: userObjectId })
+        .find({
+          userId: userObjectId,
+          $or: [
+            { isDeleted: { $ne: true } },
+            { eventType: 'booking' },
+          ],
+        })
         .populate('bookingId')
         .sort({ eventDate: 1, eventTime: 1 })
         .lean()
         .exec();
+
+      // Booking events: visibility is driven by booking.isDeleted (not event.isDeleted alone).
+      // If the booking was restored but the event flags were not, heal the event.
+      const visibleEvents: any[] = [];
+      for (const event of events) {
+        if (event.eventType === 'booking') {
+          const booking = event.bookingId as any;
+          if (!booking || booking.isDeleted === true) {
+            continue;
+          }
+
+          if (event.isDeleted === true || event.eventStatus === 'cancelled') {
+            await this.eventModel.updateOne(
+              { _id: event._id },
+              {
+                $set: { isDeleted: false, eventStatus: 'active' },
+                $unset: { deletedAt: 1 },
+              },
+            );
+            event.isDeleted = false;
+            event.eventStatus = 'active';
+            delete (event as any).deletedAt;
+          }
+
+          visibleEvents.push(event);
+          continue;
+        }
+
+        if (event.isDeleted === true) {
+          continue;
+        }
+        visibleEvents.push(event);
+      }
 
       // Get domain profile to access services information
       const domainProfile = await this.domainProfileModel
@@ -47,7 +86,7 @@ export class EventsService {
         .exec();
 
       // Enhance events with service information
-      const eventsWithServices = events.map(event => {
+      const eventsWithServices = visibleEvents.map(event => {
         if (event.bookingId && (event.bookingId as any).serviceId && domainProfile) {
           const serviceId = (event.bookingId as any).serviceId.toString();
           const service = domainProfile.services.find(s => (s as any)._id?.toString() === serviceId);
@@ -85,18 +124,47 @@ export class EventsService {
       const schedule = await this.eventModel
         .find({
           userId: userObjectId,
-          eventStatus: 'active', // Only return active events
-          isDeleted: { $ne: true },
+          $or: [
+            { eventStatus: 'active', isDeleted: { $ne: true } },
+            { eventType: 'booking' },
+          ],
         })
-        .select('eventDate eventTime eventEndTime eventType isAllDay bookingId') // Include eventType / isAllDay for widget blocking
+        .select('eventDate eventTime eventEndTime eventType bookingId isAllDay eventStatus isDeleted')
         .populate({
           path: 'bookingId',
           select: 'participantsAdults participantsEnfants serviceId selectedLanguage isDeleted',
-          match: { isDeleted: { $ne: true } },
         })
-        .sort({ eventDate: 1, eventTime: 1 }) // Sort by date and time ascending
+        .sort({ eventDate: 1, eventTime: 1 })
         .lean()
         .exec();
+
+      const visibleSchedule: typeof schedule = [];
+      for (const event of schedule) {
+        if (event.eventType === 'booking') {
+          const booking = event.bookingId as any;
+          if (!booking || booking.isDeleted === true) {
+            continue;
+          }
+          if (event.isDeleted === true || event.eventStatus === 'cancelled') {
+            await this.eventModel.updateOne(
+              { _id: (event as any)._id },
+              {
+                $set: { isDeleted: false, eventStatus: 'active' },
+                $unset: { deletedAt: 1 },
+              },
+            );
+            event.isDeleted = false;
+            event.eventStatus = 'active';
+          }
+          visibleSchedule.push(event);
+          continue;
+        }
+
+        if (event.isDeleted === true || event.eventStatus !== 'active') {
+          continue;
+        }
+        visibleSchedule.push(event);
+      }
 
       // Transform the data to include total participants, event type, serviceId and selectedLanguage
       return schedule

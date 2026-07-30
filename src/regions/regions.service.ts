@@ -11,6 +11,7 @@ import { S3Service } from '../common/services/s3.service';
 import { CitiesService } from '../cities/cities.service';
 import { CreateRegionDto } from './dto/create-region.dto';
 import { UpdateRegionDto } from './dto/update-region.dto';
+import { slugify, ensureUniqueSlug } from '../common/utils/slug.util';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as sharp from 'sharp';
@@ -121,9 +122,21 @@ export class RegionsService {
             await this.regionModel.deleteMany({});
             this.logger.log('Cleared existing regions data');
 
-            // Combine and insert all regions
+            // Combine and insert all regions, computing a unique slug for each
             const allRegions = [...parentRegions, ...childRegions];
-            const result = await this.regionModel.insertMany(allRegions);
+            const usedSlugs = new Set<string>();
+            const allRegionsWithSlugs = allRegions.map((region) => {
+                const baseSlug = slugify(region.denom) || 'region';
+                let slug = baseSlug;
+                let suffix = 2;
+                while (usedSlugs.has(slug)) {
+                    slug = `${baseSlug}-${suffix}`;
+                    suffix += 1;
+                }
+                usedSlugs.add(slug);
+                return { ...region, slug };
+            });
+            const result = await this.regionModel.insertMany(allRegionsWithSlugs);
 
             const parentCount = result.filter(r => r.isParent).length;
             const childCount = result.filter(r => !r.isParent).length;
@@ -208,16 +221,21 @@ export class RegionsService {
         limit: number;
         totalPages: number;
     }> {
-        // Step 1: Find region by name
-        let region: Region | null = await this.regionModel.findOne({ denom }).exec();
+        // Step 1: Find region by slug (canonical), then fall back to raw denom (legacy links)
+        let region: Region | null = await this.regionModel.findOne({ slug: denom }).exec();
+        if (!region) {
+            region = await this.regionModel.findOne({ denom }).exec();
+        }
 
         if (!region) {
             // Resolve coordinates: prefer explicit coords param, then look up denom as a city name
             let resolvedCoords = coords;
 
             if (!resolvedCoords) {
-                // Try to find a city whose name matches the denom
-                const cityResult = await this.citiesService.searchCities(denom);
+                // Try to find a city whose name matches the denom (best-effort: slugs use hyphens
+                // in place of spaces, so convert them back before searching the city gazetteer)
+                const citySearchTerm = denom.includes('-') ? denom.replace(/-/g, ' ') : denom;
+                const cityResult = await this.citiesService.searchCities(citySearchTerm);
                 const cityData = (cityResult?.data?.[0]) ?? (Array.isArray(cityResult) ? cityResult[0] : null) ?? null;
                 if (cityData?.latitude_centre != null && cityData?.longitude_centre != null) {
                     resolvedCoords = { lat: cityData.latitude_centre, lon: cityData.longitude_centre };
@@ -369,6 +387,7 @@ export class RegionsService {
                 category: categoryName,
                 categoryId: categoryId,
                 domainId: profile._id.toString(),
+                slug: (profile as any).slug || null,
                 latitude: user?.domainLatitude || null,
                 longitude: user?.domainLongitude || null,
             };
@@ -402,6 +421,7 @@ export class RegionsService {
                 category: categoryName,
                 categoryId: categoryRefId,
                 domainId: exp._id.toString(),
+                slug: (exp as any).slug || null,
                 latitude: exp.latitude || null,
                 longitude: exp.longitude || null,
             };
@@ -886,9 +906,9 @@ export class RegionsService {
         return patterns.length === 1 ? patterns[0] : patterns.map(p => `(?=.*${p})`).join('');
     }
 
-    private buildExperienceRoute(regionName: string | null | undefined, domainId: string): string {
-        const region = regionName?.trim() || 'domaine';
-        return `/experience/${encodeURIComponent(region)}/${domainId}`;
+    private buildExperienceRoute(regionName: string | null | undefined, domainSlugOrId: string): string {
+        const regionSlug = slugify(regionName?.trim() || '') || 'domaine';
+        return `/experience/${regionSlug}/${domainSlugOrId}`;
     }
 
     private async resolveRegionNameForCoordinates(latitude: number, longitude: number): Promise<string | null> {
@@ -1092,6 +1112,7 @@ export class RegionsService {
                 if (matchesName || matchesDescription || matchesLanguage || matchesPrice) {
                     const domain = {
                         domainId: profile._id.toString(),
+                        slug: profileDoc.slug || null,
                         userId: user?._id || null,
                         domainName: user?.domainName || null,
                         domainDescription: profileDoc.domainDescription,
@@ -1109,7 +1130,7 @@ export class RegionsService {
                         domain,
                         experienceRoute: this.buildExperienceRoute(
                             domain.region || domain.city || domain.domainName,
-                            domain.domainId,
+                            domain.slug || domain.domainId,
                         ),
                     });
                 }
@@ -1121,6 +1142,7 @@ export class RegionsService {
             const regionName = await this.resolveRegionNameForStaticExperience(exp);
             return {
                 domainId,
+                slug: exp.slug || null,
                 domainName: exp.domain_name || exp.name,
                 domainDescription: exp.domain_description || exp.about || exp.category || '',
                 domainProfilePictureUrl: exp.domain_profile_pic_url || exp.main_image || null,
@@ -1137,7 +1159,7 @@ export class RegionsService {
                 mainImage: exp.main_image,
                 about: exp.about,
                 type: 'static-experience' as const,
-                experienceRoute: this.buildExperienceRoute(regionName || exp.city, domainId),
+                experienceRoute: this.buildExperienceRoute(regionName || exp.city, exp.slug || domainId),
             };
         }));
 
@@ -1162,6 +1184,7 @@ export class RegionsService {
             };
             return {
                 domainId: profile._id,
+                slug: profile.slug || null,
                 userId: user?._id || null,
                 domainName: user?.domainName || null,
                 domainDescription: profile.domainDescription,
@@ -1171,7 +1194,7 @@ export class RegionsService {
                 location,
                 experienceRoute: this.buildExperienceRoute(
                     location.region || location.city || user?.domainName,
-                    profile._id.toString(),
+                    profile.slug || profile._id.toString(),
                 ),
             };
         });
@@ -1188,6 +1211,7 @@ export class RegionsService {
             seenRegionKeys.add(dedupeKey);
             acc.push({
                 denom: region.denom,
+                slug: region.slug || slugify(region.denom || ''),
                 min_lat: region.min_lat,
                 min_lon: region.min_lon,
                 max_lat: region.max_lat,
@@ -1227,13 +1251,13 @@ export class RegionsService {
         const buildServiceRoute = (service: (typeof services)[number]) =>
             this.buildExperienceRoute(
                 service.domain.region || service.domain.city || service.domain.domainName,
-                service.domain.domainId,
+                service.domain.slug || service.domain.domainId,
             );
 
         const buildDomainRoute = (domain: (typeof domains)[number]) =>
             this.buildExperienceRoute(
                 domain.location?.region || domain.location?.city || domain.domainName,
-                domain.domainId,
+                domain.slug || domain.domainId,
             );
 
         if (totalResults === 0) {
@@ -1249,7 +1273,7 @@ export class RegionsService {
                 type = 'region';
                 const exactRegion = regionResults.find(r => normalizeStr(r.denom) === normalizedQuery);
                 const bestRegion = exactRegion || regionResults[0];
-                suggestedRoute = `/region/${encodeURIComponent(bestRegion.denom)}`;
+                suggestedRoute = `/region/${bestRegion.slug}`;
             } else if (hasStaticExperiences) {
                 type = 'static-experience';
                 suggestedRoute = pickBestStaticExperience().experienceRoute;
@@ -1263,7 +1287,7 @@ export class RegionsService {
             const exactDomain = domains.find(d => d.domainName && normalizeStr(d.domainName) === normalizedQuery);
 
             if (exactRegion) {
-                suggestedRoute = `/region/${encodeURIComponent(exactRegion.denom)}`;
+                suggestedRoute = `/region/${exactRegion.slug}`;
             } else if (exactService) {
                 suggestedRoute = buildServiceRoute(exactService);
             } else if (exactStaticExperience) {
@@ -1279,7 +1303,7 @@ export class RegionsService {
             } else if (hasRegions) {
                 const exactRegion = regionResults.find(r => normalizeStr(r.denom) === normalizedQuery);
                 const bestRegion = exactRegion || regionResults[0];
-                suggestedRoute = `/region/${encodeURIComponent(bestRegion.denom)}`;
+                suggestedRoute = `/region/${bestRegion.slug}`;
             }
         }
 
@@ -1321,10 +1345,14 @@ export class RegionsService {
                 throw new BadRequestException(`Region with name "${createRegionDto.denom}" already exists`);
             }
 
-            const region = new this.regionModel(createRegionDto);
+            const slug = await ensureUniqueSlug(slugify(createRegionDto.denom), async (candidate) =>
+                !!(await this.regionModel.exists({ slug: candidate })),
+            );
+
+            const region = new this.regionModel({ ...createRegionDto, slug });
             await region.save();
             
-            this.logger.log(`Region created: ${region.denom}`);
+            this.logger.log(`Region created: ${region.denom} (slug: ${region.slug})`);
             return region;
         } catch (error) {
             this.logger.error(`Failed to create region: ${error.message}`);
@@ -1340,19 +1368,23 @@ export class RegionsService {
                 throw new NotFoundException(`Region with ID "${id}" not found`);
             }
 
-            // If updating denom, check for duplicates
+            // If updating denom, check for duplicates and recompute the slug
             if (updateRegionDto.denom && updateRegionDto.denom !== region.denom) {
                 const existingRegion = await this.regionModel.findOne({ denom: updateRegionDto.denom }).exec();
                 if (existingRegion) {
                     throw new BadRequestException(`Region with name "${updateRegionDto.denom}" already exists`);
                 }
+
+                region.slug = await ensureUniqueSlug(slugify(updateRegionDto.denom), async (candidate) =>
+                    !!(await this.regionModel.exists({ slug: candidate, _id: { $ne: region._id } })),
+                );
             }
 
             // Update region
             Object.assign(region, updateRegionDto);
             await region.save();
             
-            this.logger.log(`Region updated: ${region.denom}`);
+            this.logger.log(`Region updated: ${region.denom} (slug: ${region.slug})`);
             return region;
         } catch (error) {
             this.logger.error(`Failed to update region: ${error.message}`);
@@ -1585,5 +1617,181 @@ export class RegionsService {
 
         this.logger.log(`Compression complete — compressed: ${compressed}, skipped: ${skipped}, failed: ${failed}`);
         return { success: true, total: regions.length, compressed, skipped, failed, results };
+    }
+
+    /**
+     * One-off backfill: compute & persist a unique `slug` for every Region,
+     * DomainProfile and StaticExperience that doesn't have one yet.
+     * Safe to re-run — documents that already have a slug are left untouched.
+     * DomainProfile/StaticExperience share a single URL namespace (both used
+     * as the last segment of `/experience/{regionSlug}/{domainSlug}`), so
+     * their uniqueness is enforced against each other as well.
+     */
+    async backfillAllSlugs(): Promise<{
+        success: boolean;
+        regions: { total: number; updated: number };
+        domainProfiles: { total: number; updated: number };
+        staticExperiences: { total: number; updated: number };
+    }> {
+        // --- Regions ---------------------------------------------------------
+        const regionsWithoutSlug = await this.regionModel
+            .find({ $or: [{ slug: null }, { slug: { $exists: false } }, { slug: '' }] })
+            .exec();
+
+        const existingRegionSlugs = new Set(
+            (await this.regionModel.find({ slug: { $nin: [null, ''] } }).select('slug').lean().exec())
+                .map((r: any) => r.slug as string),
+        );
+
+        let regionsUpdated = 0;
+        for (const region of regionsWithoutSlug) {
+            const baseSlug = slugify(region.denom) || 'region';
+            const slug = await ensureUniqueSlug(baseSlug, async (candidate) => existingRegionSlugs.has(candidate));
+            existingRegionSlugs.add(slug);
+            // Use $set so we only write `slug` and skip full-document validation
+            // (legacy docs may have empty required fields that would otherwise fail).
+            await this.regionModel.updateOne({ _id: region._id }, { $set: { slug } }).exec();
+            regionsUpdated++;
+        }
+
+        // --- Domain profiles + static experiences (shared namespace) --------
+        const usedDomainSlugs = new Set(
+            [
+                ...(await this.domainProfileModel.find({ slug: { $nin: [null, ''] } }).select('slug').lean().exec()),
+                ...(await this.staticExperienceModel.find({ slug: { $nin: [null, ''] } }).select('slug').lean().exec()),
+            ].map((doc: any) => doc.slug as string),
+        );
+
+        const domainProfilesWithoutSlug = await this.domainProfileModel
+            .find({ $or: [{ slug: null }, { slug: { $exists: false } }, { slug: '' }] })
+            .populate('userId', 'domainName')
+            .exec();
+
+        let domainProfilesUpdated = 0;
+        for (const profile of domainProfilesWithoutSlug) {
+            const user = profile.userId as any;
+            const baseName = user?.domainName || 'domaine';
+            const baseSlug = slugify(baseName) || 'domaine';
+            const slug = await ensureUniqueSlug(baseSlug, async (candidate) => usedDomainSlugs.has(candidate));
+            usedDomainSlugs.add(slug);
+            // Avoid profile.save() — production DomainProfiles often have empty
+            // required fields (e.g. domainDescription: '') that fail Mongoose
+            // validation when the whole document is re-saved.
+            await this.domainProfileModel.updateOne({ _id: profile._id }, { $set: { slug } }).exec();
+            domainProfilesUpdated++;
+        }
+
+        const staticExperiencesWithoutSlug = await this.staticExperienceModel
+            .find({ $or: [{ slug: null }, { slug: { $exists: false } }, { slug: '' }] })
+            .exec();
+
+        let staticExperiencesUpdated = 0;
+        for (const exp of staticExperiencesWithoutSlug) {
+            const baseSlug = slugify(exp.name) || 'experience';
+            const slug = await ensureUniqueSlug(baseSlug, async (candidate) => usedDomainSlugs.has(candidate));
+            usedDomainSlugs.add(slug);
+            await this.staticExperienceModel.updateOne({ _id: exp._id }, { $set: { slug } }).exec();
+            staticExperiencesUpdated++;
+        }
+
+        this.logger.log(
+            `Slug backfill complete — regions: ${regionsUpdated}/${regionsWithoutSlug.length}, ` +
+            `domain profiles: ${domainProfilesUpdated}/${domainProfilesWithoutSlug.length}, ` +
+            `static experiences: ${staticExperiencesUpdated}/${staticExperiencesWithoutSlug.length}`,
+        );
+
+        return {
+            success: true,
+            regions: { total: regionsWithoutSlug.length, updated: regionsUpdated },
+            domainProfiles: { total: domainProfilesWithoutSlug.length, updated: domainProfilesUpdated },
+            staticExperiences: { total: staticExperiencesWithoutSlug.length, updated: staticExperiencesUpdated },
+        };
+    }
+
+    /**
+     * Every publicly reachable `/experience/{regionSlug}/{domainSlug}` and
+     * `/region/{regionSlug}` path, for sitemap generation. Only entries with a
+     * real (already-backfilled) slug are included — nothing here ever falls
+     * back to a raw Mongo ID, so the sitemap never leaks legacy ID-based URLs.
+     * Covers ALL DomainProfiles and StaticExperiences regardless of whether
+     * they currently have any active services (fixes gaps where a domain
+     * without services was previously missing from the sitemap entirely).
+     */
+    async getAllPublicSlugPaths(): Promise<{
+        regions: Array<{ path: string; updatedAt?: Date }>;
+        experiences: Array<{ path: string; updatedAt?: Date }>;
+    }> {
+        const [regions, domainProfiles, staticExperiences] = await Promise.all([
+            this.regionModel
+                .find({ slug: { $nin: [null, ''] } })
+                .select('slug denom updatedAt min_lat max_lat min_lon max_lon')
+                .lean()
+                .exec(),
+            this.domainProfileModel
+                .find({ slug: { $nin: [null, ''] } })
+                .populate('userId', 'domainName region city')
+                .select('slug updatedAt userId')
+                .lean()
+                .exec(),
+            this.staticExperienceModel
+                .find({ slug: { $nin: [null, ''] } })
+                .select('slug updatedAt name city latitude longitude')
+                .lean()
+                .exec(),
+        ]);
+
+        const seenRegionPaths = new Set<string>();
+        const regionPaths = (regions as any[]).reduce((acc, region) => {
+            const path = `/region/${region.slug}`;
+            if (seenRegionPaths.has(path)) return acc;
+            seenRegionPaths.add(path);
+            acc.push({ path, updatedAt: region.updatedAt });
+            return acc;
+        }, [] as Array<{ path: string; updatedAt?: Date }>);
+
+        const seenExperiencePaths = new Set<string>();
+        const experiencePaths: Array<{ path: string; updatedAt?: Date }> = [];
+
+        for (const profile of domainProfiles as any[]) {
+            const user = profile.userId as any;
+            const regionName = user?.region || user?.city || user?.domainName;
+            const regionSlug = slugify(regionName?.trim() || '') || 'domaine';
+            const path = `/experience/${regionSlug}/${profile.slug}`;
+            if (seenExperiencePaths.has(path)) continue;
+            seenExperiencePaths.add(path);
+            experiencePaths.push({ path, updatedAt: profile.updatedAt });
+        }
+
+        // Resolve each static experience's region in-memory against the
+        // already-fetched region list (mirrors resolveRegionNameForStaticExperience,
+        // but avoids a per-document DB round-trip — there can be thousands of
+        // static experiences, which made the sequential-await version time out).
+        const regionByCoords = (lat?: number | null, lon?: number | null): string | null => {
+            if (lat == null || lon == null) return null;
+            const match = (regions as any[]).find(
+                (r) => r.min_lat <= lat && r.max_lat >= lat && r.min_lon <= lon && r.max_lon >= lon,
+            );
+            return match?.denom || null;
+        };
+        const regionByCity = (city?: string | null): string | null => {
+            if (!city) return null;
+            try {
+                const re = new RegExp(city, 'i');
+                return (regions as any[]).find((r) => re.test(r.denom))?.denom || null;
+            } catch {
+                return null;
+            }
+        };
+
+        for (const exp of staticExperiences as any[]) {
+            const regionName = regionByCoords(exp.latitude, exp.longitude) || regionByCity(exp.city);
+            const regionSlug = slugify((regionName || exp.city || '').trim()) || 'domaine';
+            const path = `/experience/${regionSlug}/${exp.slug}`;
+            if (seenExperiencePaths.has(path)) continue;
+            seenExperiencePaths.add(path);
+            experiencePaths.push({ path, updatedAt: exp.updatedAt });
+        }
+
+        return { regions: regionPaths, experiences: experiencePaths };
     }
 }
