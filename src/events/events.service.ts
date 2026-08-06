@@ -1330,13 +1330,21 @@ export class EventsService {
       const firstDayOfCurrentMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
       const lastDayOfNextMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 3, 0, 23, 59, 59);
 
-      // Build Paris-local window strings for Microsoft Graph (no timezone suffix)
-      const startDateTime = this.formatDateTimeForTimezone(firstDayOfCurrentMonth, 'Europe/Paris', '00:00:00');
-      const endDateTime = this.formatDateTimeForTimezone(lastDayOfNextMonth, 'Europe/Paris', '23:59:59');
+      // Graph treats start/end without offset as UTC — always send explicit Paris offset
+      const startDateTime = this.formatDateTimeWithTimezoneOffset(
+        firstDayOfCurrentMonth,
+        'Europe/Paris',
+        '00:00:00',
+      );
+      const endDateTime = this.formatDateTimeWithTimezoneOffset(
+        lastDayOfNextMonth,
+        'Europe/Paris',
+        '23:59:59',
+      );
 
-      this.logger.log(`📅 Fetching Microsoft Calendar events from ${startDateTime} to ${endDateTime} (current + next 2 months)`);
+      this.logger.log(`📅 Fetching Microsoft Calendar events from ${startDateTime} to ${endDateTime} (current + next 2 months, all calendars)`);
 
-      // Fetch all Microsoft events with pagination (@odata.nextLink)
+      // Fetch from every user calendar (default + secondary/holiday), deduped by event.id
       const microsoftEvents = await this.fetchAllMicrosoftEvents(accessToken, startDateTime, endDateTime);
 
       if (microsoftEvents.length === 0) {
@@ -1350,15 +1358,14 @@ export class EventsService {
         };
       }
 
-      this.logger.log(`📊 Found ${microsoftEvents.length} event(s) in Microsoft Calendar`);
+      this.logger.log(`📊 Found ${microsoftEvents.length} unique event(s) across all Microsoft calendars`);
 
-      // Parse Microsoft Calendar events to our format
+      // Parse every returned item — no filtering by showAs / type / isCancelled
       const events: any[] = [];
       for (const msEvent of microsoftEvents) {
         try {
           const parsedEvents = this.parseMicrosoftCalendarEvent(msEvent);
           if (parsedEvents) {
-            // parseMicrosoftCalendarEvent now returns an array of events (for multi-day support)
             const eventsArray = Array.isArray(parsedEvents) ? parsedEvents : [parsedEvents];
             events.push(...eventsArray);
           }
@@ -1380,7 +1387,7 @@ export class EventsService {
       // Save events to database with conflict prevention
       const syncedEvents = await this.saveEventsToDatabase(events, connector.userId, 'microsoft');
 
-      // Remove any events in our DB that no longer exist in Microsoft Calendar
+      // Prune using the full deduped fetch (all calendars), not default-calendar-only
       const liveExternalIds = microsoftEvents.map((e: any) => e.id).filter(Boolean);
       const deletedCount = await this.pruneDeletedExternalEvents(connector.userId, 'microsoft', liveExternalIds);
       if (deletedCount > 0) {
@@ -1429,129 +1436,305 @@ export class EventsService {
   }
 
   /**
-   * Fetch all Microsoft events with pagination via @odata.nextLink
+   * Format date/time with an explicit IANA timezone offset for Graph query params.
+   * Graph treats startDateTime/endDateTime without an offset as UTC.
    */
-  private async fetchAllMicrosoftEvents(
-    accessToken: string,
-    startDateTime: string,
-    endDateTime: string
-  ): Promise<any[]> {
-    let url: string | null = `https://graph.microsoft.com/v1.0/me/calendarView`;
-    const allEvents: any[] = [];
+  private formatDateTimeWithTimezoneOffset(date: Date, timezone: string, time: string): string {
+    const local = this.formatDateTimeForTimezone(date, timezone, time);
+    const offset = this.getTimezoneOffsetString(date, timezone);
+    return `${local}${offset}`;
+  }
+
+  /** e.g. "+02:00" or "+01:00" for Europe/Paris on the given date (DST-aware). */
+  private getTimezoneOffsetString(date: Date, timezone: string): string {
+    try {
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        timeZoneName: 'shortOffset',
+      });
+      const parts = formatter.formatToParts(date);
+      const tzName = parts.find((p) => p.type === 'timeZoneName')?.value || 'GMT';
+      // "GMT+2", "GMT+02:00", "GMT-5", "GMT"
+      const match = tzName.match(/GMT([+-])(\d{1,2})(?::?(\d{2}))?/i);
+      if (!match) return '+00:00';
+      const sign = match[1];
+      const hours = String(parseInt(match[2], 10)).padStart(2, '0');
+      const minutes = match[3] || '00';
+      return `${sign}${hours}:${minutes}`;
+    } catch {
+      return '+00:00';
+    }
+  }
+
+  private getMicrosoftGraphHeaders(accessToken: string) {
+    return {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+      Prefer: 'outlook.timezone="Europe/Paris"',
+    };
+  }
+
+  /** List all calendars for the user (paginated). */
+  private async fetchMicrosoftCalendars(accessToken: string): Promise<Array<{ id: string; name: string }>> {
+    const calendars: Array<{ id: string; name: string }> = [];
+    let url: string | null = 'https://graph.microsoft.com/v1.0/me/calendars';
 
     while (url) {
       const response = await axios.get(url, {
-        params: url.includes('calendarView')
-          ? {
-            startDateTime,
-            endDateTime,
-            $orderby: 'start/dateTime',
-            $top: 1000
-          }
-          : undefined, // when following nextLink, params are already embedded
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/json',
-          Prefer: 'outlook.timezone="Europe/Paris"'
-        },
+        params: url.includes('calendars') && !url.includes('$skiptoken') && !url.includes('skiptoken')
+          ? { $select: 'id,name', $top: 50 }
+          : undefined,
+        headers: this.getMicrosoftGraphHeaders(accessToken),
         timeout: 15000,
         family: 4,
-        proxy: false
+        proxy: false,
+      });
+
+      const data = response.data || {};
+      const page = Array.isArray(data.value) ? data.value : [];
+      for (const cal of page) {
+        if (cal?.id) {
+          calendars.push({ id: cal.id, name: cal.name || 'Untitled calendar' });
+        }
+      }
+
+      url = (data['@odata.nextLink'] as string | undefined) || null;
+    }
+
+    return calendars;
+  }
+
+  /**
+   * Fetch calendarView for one calendar with pagination via @odata.nextLink.
+   */
+  private async fetchMicrosoftCalendarView(
+    accessToken: string,
+    calendarId: string,
+    startDateTime: string,
+    endDateTime: string,
+  ): Promise<any[]> {
+    const encodedId = encodeURIComponent(calendarId);
+    let url: string | null =
+      `https://graph.microsoft.com/v1.0/me/calendars/${encodedId}/calendarView`;
+    const allEvents: any[] = [];
+
+    while (url) {
+      const isInitial = url.includes('/calendarView') && !url.includes('@odata.nextLink') && !url.includes('$skiptoken') && !url.includes('skiptoken');
+      const response = await axios.get(url, {
+        params: isInitial
+          ? {
+              startDateTime,
+              endDateTime,
+              $orderby: 'start/dateTime',
+              $top: 1000,
+            }
+          : undefined,
+        headers: this.getMicrosoftGraphHeaders(accessToken),
+        timeout: 15000,
+        family: 4,
+        proxy: false,
       });
 
       const data = response.data || {};
       const pageEvents = Array.isArray(data.value) ? data.value : [];
       if (pageEvents.length) allEvents.push(...pageEvents);
 
-      const nextLink = data['@odata.nextLink'] as string | undefined;
-      url = nextLink || null;
+      url = (data['@odata.nextLink'] as string | undefined) || null;
     }
 
-    this.logger.log(`🟦 Microsoft pagination gathered ${allEvents.length} event(s)`);
     return allEvents;
   }
 
   /**
-   * Parse Microsoft Calendar event to our event format
+   * Fetch events from every Microsoft calendar in the window, deduped by event.id.
+   */
+  private async fetchAllMicrosoftEvents(
+    accessToken: string,
+    startDateTime: string,
+    endDateTime: string
+  ): Promise<any[]> {
+    let calendars = await this.fetchMicrosoftCalendars(accessToken);
+
+    if (calendars.length === 0) {
+      this.logger.warn('⚠️ No Microsoft calendars returned; falling back to default /me/calendarView');
+      calendars = [{ id: '', name: 'default' }];
+    } else {
+      this.logger.log(
+        `📆 Microsoft calendars (${calendars.length}): ${calendars.map((c) => c.name).join(', ')}`,
+      );
+    }
+
+    const byId = new Map<string, any>();
+
+    for (const calendar of calendars) {
+      try {
+        let pageEvents: any[];
+        if (!calendar.id) {
+          // Fallback: default calendar view
+          pageEvents = await this.fetchMicrosoftDefaultCalendarView(
+            accessToken,
+            startDateTime,
+            endDateTime,
+          );
+        } else {
+          pageEvents = await this.fetchMicrosoftCalendarView(
+            accessToken,
+            calendar.id,
+            startDateTime,
+            endDateTime,
+          );
+        }
+
+        this.logger.log(
+          `🟦 Calendar "${calendar.name}": ${pageEvents.length} event(s) in window`,
+        );
+
+        for (const event of pageEvents) {
+          if (!event?.id) continue;
+          if (!byId.has(event.id)) {
+            byId.set(event.id, {
+              ...event,
+              _calendarName: calendar.name,
+              _calendarId: calendar.id || null,
+            });
+          }
+        }
+      } catch (calError: any) {
+        this.logger.warn(
+          `⚠️ Failed to fetch calendar "${calendar.name}": ${calError?.message || calError}`,
+        );
+      }
+    }
+
+    const allEvents = Array.from(byId.values());
+    this.logger.log(`🟦 Microsoft all-calendars gather: ${allEvents.length} unique event(s)`);
+    return allEvents;
+  }
+
+  /** Default-calendar fallback when /me/calendars is empty. */
+  private async fetchMicrosoftDefaultCalendarView(
+    accessToken: string,
+    startDateTime: string,
+    endDateTime: string,
+  ): Promise<any[]> {
+    let url: string | null = 'https://graph.microsoft.com/v1.0/me/calendarView';
+    const allEvents: any[] = [];
+
+    while (url) {
+      const isInitial = url.includes('calendarView') && !url.includes('skiptoken');
+      const response = await axios.get(url, {
+        params: isInitial
+          ? {
+              startDateTime,
+              endDateTime,
+              $orderby: 'start/dateTime',
+              $top: 1000,
+            }
+          : undefined,
+        headers: this.getMicrosoftGraphHeaders(accessToken),
+        timeout: 15000,
+        family: 4,
+        proxy: false,
+      });
+
+      const data = response.data || {};
+      const pageEvents = Array.isArray(data.value) ? data.value : [];
+      if (pageEvents.length) allEvents.push(...pageEvents);
+      url = (data['@odata.nextLink'] as string | undefined) || null;
+    }
+
+    return allEvents;
+  }
+
+  /** Add calendar days to a YYYY-MM-DD string without timezone conversion. */
+  private addCalendarDays(dateStr: string, days: number): string {
+    const [y, m, d] = dateStr.split('-').map((n) => parseInt(n, 10));
+    const utc = new Date(Date.UTC(y, m - 1, d + days));
+    const yy = utc.getUTCFullYear();
+    const mm = String(utc.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(utc.getUTCDate()).padStart(2, '0');
+    return `${yy}-${mm}-${dd}`;
+  }
+
+  /** Inclusive calendar-day count for Graph all-day events (end is exclusive). */
+  private countExclusiveAllDaySpan(startDateStr: string, endDateStr: string): number {
+    const [ys, ms, ds] = startDateStr.split('-').map((n) => parseInt(n, 10));
+    const [ye, me, de] = endDateStr.split('-').map((n) => parseInt(n, 10));
+    const startUtc = Date.UTC(ys, ms - 1, ds);
+    const endUtc = Date.UTC(ye, me - 1, de);
+    const diff = Math.round((endUtc - startUtc) / (1000 * 60 * 60 * 24));
+    return Math.max(diff, 1);
+  }
+
+  /**
+   * Parse Microsoft Calendar event to our event format.
+   * Syncs every Graph calendar item (any showAs / type / cancelled) that has a start.
    */
   private parseMicrosoftCalendarEvent(msEvent: any): any[] | null {
     try {
       const eventInfo: any = {};
 
-      // Extract event title
       eventInfo.title = msEvent.subject || 'Untitled Event';
-
-      // Extract event ID (base ID for multi-day events)
       eventInfo.uid = msEvent.id;
-
-      // Extract description
       eventInfo.description = msEvent.bodyPreview || msEvent.body?.content || '';
 
-      // Extract start time and date
       const start = msEvent.start?.dateTime;
       const end = msEvent.end?.dateTime;
       const startTimeZone = msEvent.start?.timeZone || 'Europe/Paris';
+      const calendarName = msEvent._calendarName || 'unknown';
+
+      this.logger.log(
+        `📋 Microsoft raw event "${eventInfo.title}" calendar="${calendarName}" ` +
+          `type=${msEvent.type ?? 'n/a'} showAs=${msEvent.showAs ?? 'n/a'} ` +
+          `isAllDay=${!!msEvent.isAllDay} isCancelled=${!!msEvent.isCancelled}`,
+      );
 
       if (!start) {
-        this.logger.warn('⚠️ Microsoft event missing start time');
+        this.logger.warn(`⚠️ Microsoft event missing start time: ${eventInfo.title}`);
         return null;
       }
 
-      // Check if all-day event
-      eventInfo.isAllDay = msEvent.isAllDay || false;
+      eventInfo.isAllDay = !!msEvent.isAllDay;
 
       if (eventInfo.isAllDay) {
-        // All-day event - check if it spans multiple days
-        const startDate = new Date(start);
-        const endDate = new Date(end);
-        
-        // Calculate number of days
-        const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-        
-        if (daysDiff > 1) {
-          // Multi-day event - create separate events for each day
-          this.logger.log(`📅 Multi-day Microsoft event detected: ${eventInfo.title} spans ${daysDiff} days`);
+        // Use string date prefix — never new Date(...).toISOString() (shifts day on non-UTC hosts)
+        const startDateStr = String(start).slice(0, 10);
+        const endDateStr = end ? String(end).slice(0, 10) : startDateStr;
+        const daysCount = this.countExclusiveAllDaySpan(startDateStr, endDateStr);
+
+        if (daysCount > 1) {
+          this.logger.log(
+            `📅 Multi-day Microsoft event detected: ${eventInfo.title} spans ${daysCount} day(s) (${startDateStr} → exclusive ${endDateStr})`,
+          );
           const events: any[] = [];
-          
-          for (let i = 0; i < daysDiff; i++) {
-            const currentDate = new Date(startDate);
-            currentDate.setDate(startDate.getDate() + i);
-            
-            const dayEvent = {
+          for (let i = 0; i < daysCount; i++) {
+            events.push({
               ...eventInfo,
-              uid: `${eventInfo.uid}_day${i + 1}`, // Unique ID for each day
-              startDate: currentDate.toISOString().split('T')[0],
+              uid: `${eventInfo.uid}_day${i + 1}`,
+              startDate: this.addCalendarDays(startDateStr, i),
               startTimeFormatted: '00:00',
               endTimeFormatted: '23:59',
-              isAllDay: true
-            };
-            
-            events.push(dayEvent);
+              isAllDay: true,
+            });
           }
-          
           return events;
-        } else {
-          // Single day all-day event
-          eventInfo.startDate = startDate.toISOString().split('T')[0];
-          eventInfo.startTimeFormatted = '00:00';
-          eventInfo.endTimeFormatted = '23:59';
         }
+
+        eventInfo.startDate = startDateStr;
+        eventInfo.startTimeFormatted = '00:00';
+        eventInfo.endTimeFormatted = '23:59';
       } else {
-        // Timed event
-        // Microsoft returns time in the format: "2024-11-15T14:00:00.0000000"
-        // The timezone is specified separately in start.timeZone
-
-        // Parse the datetime string directly (it's already in the correct timezone)
+        // Timed event — parse datetime string directly (Prefer: Europe/Paris)
         const startDateTimeParts = start.split('T');
-        const startDatePart = startDateTimeParts[0]; // YYYY-MM-DD
-        const startTimePart = startDateTimeParts[1].split('.')[0]; // HH:MM:SS
+        const startDatePart = startDateTimeParts[0];
+        const startTimePart = (startDateTimeParts[1] || '00:00:00').split('.')[0];
 
-        const endDateTimeParts = end.split('T');
-        const endTimePart = endDateTimeParts[1].split('.')[0]; // HH:MM:SS
+        const endDateTimeParts = (end || start).split('T');
+        const endTimePart = (endDateTimeParts[1] || startTimePart).split('.')[0];
 
         eventInfo.startDate = startDatePart;
-        eventInfo.startTimeFormatted = startTimePart.substring(0, 5); // HH:MM
-        eventInfo.endTimeFormatted = endTimePart.substring(0, 5); // HH:MM
+        eventInfo.startTimeFormatted = startTimePart.substring(0, 5);
+        eventInfo.endTimeFormatted = endTimePart.substring(0, 5);
         eventInfo.startTimeLocal = eventInfo.startTimeFormatted;
         eventInfo.startDateLocal = eventInfo.startDate;
         eventInfo.timezone = startTimeZone;
@@ -1559,11 +1742,11 @@ export class EventsService {
         this.logger.log(`📋 Microsoft event time: ${start} to ${end} (timezone: ${startTimeZone})`);
       }
 
-      // Log parsed event
-      this.logger.log(`📋 Parsed Microsoft event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted} - ${eventInfo.endTimeFormatted}`);
+      this.logger.log(
+        `📋 Parsed Microsoft event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted} - ${eventInfo.endTimeFormatted}`,
+      );
 
-      return [eventInfo]; // Return array for consistency
-
+      return [eventInfo];
     } catch (error) {
       this.logger.warn('⚠️ Error parsing Microsoft Calendar event:', error);
       return null;
