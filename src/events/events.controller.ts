@@ -1,5 +1,5 @@
-import { Controller, Get, Post, UseGuards, Param } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
+import { Controller, Get, Post, UseGuards, Param, Body } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam, ApiBody } from '@nestjs/swagger';
 import { EventsService } from './events.service';
 import { UserGuard } from '../guards/user.guard';
 import { CurrentUser } from '../decorators/current-user.decorator';
@@ -64,6 +64,29 @@ export class EventsController {
       const syncResult = await this.eventsService.syncEventsFromConnectors();
       
       return syncResult;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  @Post('sync/user')
+  @ApiOperation({
+    summary: 'Sync events for a single user by email (Public)',
+    description:
+      'Public endpoint. Syncs calendar events only for connectors belonging to the user with the given email. Uses the same sync logic as GET /events/sync.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['email'],
+      properties: {
+        email: { type: 'string', example: 'user@example.com' },
+      },
+    },
+  })
+  async syncEventsForUserByEmail(@Body() body: { email: string }) {
+    try {
+      return await this.eventsService.syncEventsForUserByEmail(body.email);
     } catch (error) {
       throw error;
     }

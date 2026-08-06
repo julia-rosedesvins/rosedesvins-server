@@ -1,9 +1,10 @@
-import { Injectable, Logger, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Event } from '../schemas/events.schema';
 import { Connector } from '../schemas/connector.schema';
 import { DomainProfile } from '../schemas/domain-profile.schema';
+import { User } from '../schemas/user.schema';
 import { EncryptionService } from '../common/encryption.service';
 import { Buffer } from 'buffer';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -21,6 +22,7 @@ export class EventsService {
     @InjectModel(Event.name) private eventModel: Model<Event>,
     @InjectModel(Connector.name) private connectorModel: Model<Connector>,
     @InjectModel(DomainProfile.name) private domainProfileModel: Model<DomainProfile>,
+    @InjectModel(User.name) private userModel: Model<User>,
   ) { }
 
   /**
@@ -424,7 +426,6 @@ export class EventsService {
     try {
       this.logger.log('🔄 Starting calendar sync process...');
 
-      // Get all active connectors
       const connectors = await this.connectorModel.find().exec();
 
       if (!connectors || connectors.length === 0) {
@@ -440,92 +441,7 @@ export class EventsService {
 
       this.logger.log(`📊 Found ${connectors.length} connector(s) to process`);
 
-      const syncResults: any[] = [];
-      let totalProcessed = 0;
-
-      for (const connector of connectors) {
-        try {
-          this.logger.log(`🔗 Processing connector: ${connector.connector_name} for user: ${connector.userId}`);
-
-          let result;
-          switch (connector.connector_name) {
-            case 'orange':
-              if (connector.connector_creds?.orange?.isActive && connector.connector_creds?.orange?.isValid) {
-                result = await this.syncOrangeCalendarEvents(connector);
-                totalProcessed++;
-              } else {
-                this.logger.warn(`⚠️ Orange connector inactive/invalid for user: ${connector.userId}`);
-                result = {
-                  connectorType: 'orange',
-                  userId: connector.userId.toString(),
-                  status: 'skipped',
-                  message: 'Connector inactive or invalid'
-                };
-              }
-              break;
-
-            case 'ovh':
-              this.logger.log(`🔧 OVH connector found for user ${connector.userId} - Not implemented yet`);
-              result = {
-                connectorType: 'ovh',
-                userId: connector.userId.toString(),
-                status: 'not_implemented',
-                message: 'OVH connector sync not implemented yet'
-              };
-              break;
-
-            case 'microsoft':
-              if (connector.connector_creds?.microsoft?.isActive && connector.connector_creds?.microsoft?.isValid) {
-                result = await this.syncMicrosoftCalendarEvents(connector);
-                totalProcessed++;
-              } else {
-                this.logger.warn(`⚠️ Microsoft connector inactive/invalid for user: ${connector.userId}`);
-                result = {
-                  connectorType: 'microsoft',
-                  userId: connector.userId.toString(),
-                  status: 'skipped',
-                  message: 'Connector inactive or invalid'
-                };
-              }
-              break;
-
-            case 'google':
-              if (connector.connector_creds?.google?.isActive && connector.connector_creds?.google?.isValid) {
-                result = await this.syncGoogleCalendarEvents(connector);
-                totalProcessed++;
-              } else {
-                this.logger.warn(`⚠️ Google connector inactive/invalid for user: ${connector.userId}`);
-                result = {
-                  connectorType: 'google',
-                  userId: connector.userId.toString(),
-                  status: 'skipped',
-                  message: 'Connector inactive or invalid'
-                };
-              }
-              break;
-
-            default:
-              this.logger.warn(`❓ Unknown connector type: ${connector.connector_name}`);
-              result = {
-                connectorType: connector.connector_name,
-                userId: connector.userId.toString(),
-                status: 'unknown',
-                message: 'Unknown connector type'
-              };
-          }
-
-          syncResults.push(result);
-
-        } catch (connectorError) {
-          this.logger.error(`❌ Error processing connector ${connector.connector_name}:`, connectorError);
-          syncResults.push({
-            connectorType: connector.connector_name,
-            userId: connector.userId.toString(),
-            status: 'error',
-            message: connectorError.message || 'Unknown error occurred'
-          });
-        }
-      }
+      const { totalProcessed, syncResults } = await this.runConnectorSync(connectors);
 
       this.logger.log(`✅ Sync process completed. Processed ${totalProcessed} active connectors`);
 
@@ -542,6 +458,172 @@ export class EventsService {
       this.logger.error('❌ Calendar sync error:', error);
       throw new InternalServerErrorException('Failed to sync calendar events');
     }
+  }
+
+  /**
+   * Sync calendar events for a single user identified by email.
+   */
+  async syncEventsForUserByEmail(email: string): Promise<{
+    success: boolean;
+    message: string;
+    data: {
+      totalProcessed: number;
+      syncResults: any[];
+    };
+  }> {
+    const normalizedEmail = email?.trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new BadRequestException('Email is required');
+    }
+
+    try {
+      this.logger.log(`🔄 Starting calendar sync for user: ${normalizedEmail}`);
+
+      const user = await this.userModel.findOne({ email: normalizedEmail }).exec();
+      if (!user) {
+        throw new NotFoundException(`User not found for email: ${normalizedEmail}`);
+      }
+
+      const connectors = await this.connectorModel.find({ userId: user._id }).exec();
+
+      if (!connectors || connectors.length === 0) {
+        return {
+          success: true,
+          message: `No calendar connectors found for ${normalizedEmail}`,
+          data: {
+            totalProcessed: 0,
+            syncResults: []
+          }
+        };
+      }
+
+      this.logger.log(`📊 Found ${connectors.length} connector(s) for ${normalizedEmail}`);
+
+      const { totalProcessed, syncResults } = await this.runConnectorSync(connectors);
+
+      this.logger.log(`✅ Sync completed for ${normalizedEmail}. Processed ${totalProcessed} active connector(s)`);
+
+      return {
+        success: true,
+        message: `Calendar sync completed for ${normalizedEmail}. Processed ${totalProcessed} active connectors.`,
+        data: {
+          totalProcessed,
+          syncResults
+        }
+      };
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(`❌ Calendar sync error for ${normalizedEmail}:`, error);
+      throw new InternalServerErrorException('Failed to sync calendar events for user');
+    }
+  }
+
+  private async runConnectorSync(connectors: Connector[]): Promise<{
+    totalProcessed: number;
+    syncResults: any[];
+  }> {
+    const syncResults: any[] = [];
+    let totalProcessed = 0;
+
+    for (const connector of connectors) {
+      try {
+        this.logger.log(`🔗 Processing connector: ${connector.connector_name} for user: ${connector.userId}`);
+
+        const { result, processed } = await this.processConnectorSync(connector);
+        if (processed) {
+          totalProcessed++;
+        }
+        syncResults.push(result);
+      } catch (connectorError) {
+        this.logger.error(`❌ Error processing connector ${connector.connector_name}:`, connectorError);
+        syncResults.push({
+          connectorType: connector.connector_name,
+          userId: connector.userId.toString(),
+          status: 'error',
+          message: connectorError.message || 'Unknown error occurred'
+        });
+      }
+    }
+
+    return { totalProcessed, syncResults };
+  }
+
+  private async processConnectorSync(connector: Connector): Promise<{
+    result: any;
+    processed: boolean;
+  }> {
+    let result;
+    let processed = false;
+
+    switch (connector.connector_name) {
+      case 'orange':
+        if (connector.connector_creds?.orange?.isActive && connector.connector_creds?.orange?.isValid) {
+          result = await this.syncOrangeCalendarEvents(connector);
+          processed = true;
+        } else {
+          this.logger.warn(`⚠️ Orange connector inactive/invalid for user: ${connector.userId}`);
+          result = {
+            connectorType: 'orange',
+            userId: connector.userId.toString(),
+            status: 'skipped',
+            message: 'Connector inactive or invalid'
+          };
+        }
+        break;
+
+      case 'ovh':
+        this.logger.log(`🔧 OVH connector found for user ${connector.userId} - Not implemented yet`);
+        result = {
+          connectorType: 'ovh',
+          userId: connector.userId.toString(),
+          status: 'not_implemented',
+          message: 'OVH connector sync not implemented yet'
+        };
+        break;
+
+      case 'microsoft':
+        if (connector.connector_creds?.microsoft?.isActive && connector.connector_creds?.microsoft?.isValid) {
+          result = await this.syncMicrosoftCalendarEvents(connector);
+          processed = true;
+        } else {
+          this.logger.warn(`⚠️ Microsoft connector inactive/invalid for user: ${connector.userId}`);
+          result = {
+            connectorType: 'microsoft',
+            userId: connector.userId.toString(),
+            status: 'skipped',
+            message: 'Connector inactive or invalid'
+          };
+        }
+        break;
+
+      case 'google':
+        if (connector.connector_creds?.google?.isActive && connector.connector_creds?.google?.isValid) {
+          result = await this.syncGoogleCalendarEvents(connector);
+          processed = true;
+        } else {
+          this.logger.warn(`⚠️ Google connector inactive/invalid for user: ${connector.userId}`);
+          result = {
+            connectorType: 'google',
+            userId: connector.userId.toString(),
+            status: 'skipped',
+            message: 'Connector inactive or invalid'
+          };
+        }
+        break;
+
+      default:
+        this.logger.warn(`❓ Unknown connector type: ${connector.connector_name}`);
+        result = {
+          connectorType: connector.connector_name,
+          userId: connector.userId.toString(),
+          status: 'unknown',
+          message: 'Unknown connector type'
+        };
+    }
+
+    return { result, processed };
   }
 
   /**
