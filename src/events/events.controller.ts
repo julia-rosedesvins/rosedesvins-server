@@ -91,4 +91,28 @@ export class EventsController {
       throw error;
     }
   }
+
+  @Post('connector/fetch')
+  @ApiOperation({
+    summary: 'Fetch connector calendar events for a user by email (no DB write)',
+    description:
+      'Public endpoint. Given a user email, looks up their linked connector (orange/microsoft/google) and fetches events directly from that provider. Data is returned as-is and is NOT saved to the database.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['email'],
+      properties: {
+        email: { type: 'string', example: 'user@example.com' },
+      },
+    },
+  })
+  async fetchConnectorEventsForUserByEmail(@Body() body: { email: string }) {
+    try {
+      return await this.eventsService.fetchConnectorEventsForUserByEmail(body.email);
+    } catch (error) {
+      throw error;
+    }
+  }
 }
+

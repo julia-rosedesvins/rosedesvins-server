@@ -520,6 +520,68 @@ export class EventsService {
     }
   }
 
+  /**
+   * Fetch (do NOT persist) calendar events for a single user identified by email,
+   * using whichever connector is currently linked to that user (orange/microsoft/google).
+   */
+  async fetchConnectorEventsForUserByEmail(email: string): Promise<{
+    success: boolean;
+    message: string;
+    data: {
+      connectorType: string;
+      events: any[];
+    };
+  }> {
+    const normalizedEmail = email?.trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new BadRequestException('Email is required');
+    }
+
+    try {
+      this.logger.log(`🔎 Fetching connector calendar events (no DB write) for user: ${normalizedEmail}`);
+
+      const user = await this.userModel.findOne({ email: normalizedEmail }).exec();
+      if (!user) {
+        throw new NotFoundException(`User not found for email: ${normalizedEmail}`);
+      }
+
+      const connector = await this.connectorModel.findOne({ userId: user._id }).exec();
+
+      if (!connector || connector.connector_name === 'none') {
+        return {
+          success: true,
+          message: `No calendar connector linked for ${normalizedEmail}`,
+          data: { connectorType: connector?.connector_name || 'none', events: [] }
+        };
+      }
+
+      const { result, processed } = await this.processConnectorSync(connector, true);
+
+      if (!processed) {
+        return {
+          success: true,
+          message: result?.message || `Connector ${connector.connector_name} is inactive or not implemented`,
+          data: { connectorType: connector.connector_name, events: [] }
+        };
+      }
+
+      return {
+        success: true,
+        message: result.message,
+        data: {
+          connectorType: connector.connector_name,
+          events: result.eventsData || []
+        }
+      };
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(`❌ Fetch connector events error for ${normalizedEmail}:`, error);
+      throw new InternalServerErrorException('Failed to fetch calendar events for user');
+    }
+  }
+
   private async runConnectorSync(connectors: Connector[]): Promise<{
     totalProcessed: number;
     syncResults: any[];
@@ -550,7 +612,7 @@ export class EventsService {
     return { totalProcessed, syncResults };
   }
 
-  private async processConnectorSync(connector: Connector): Promise<{
+  private async processConnectorSync(connector: Connector, dryRun = false): Promise<{
     result: any;
     processed: boolean;
   }> {
@@ -560,7 +622,7 @@ export class EventsService {
     switch (connector.connector_name) {
       case 'orange':
         if (connector.connector_creds?.orange?.isActive && connector.connector_creds?.orange?.isValid) {
-          result = await this.syncOrangeCalendarEvents(connector);
+          result = await this.syncOrangeCalendarEvents(connector, dryRun);
           processed = true;
         } else {
           this.logger.warn(`⚠️ Orange connector inactive/invalid for user: ${connector.userId}`);
@@ -585,7 +647,7 @@ export class EventsService {
 
       case 'microsoft':
         if (connector.connector_creds?.microsoft?.isActive && connector.connector_creds?.microsoft?.isValid) {
-          result = await this.syncMicrosoftCalendarEvents(connector);
+          result = await this.syncMicrosoftCalendarEvents(connector, dryRun);
           processed = true;
         } else {
           this.logger.warn(`⚠️ Microsoft connector inactive/invalid for user: ${connector.userId}`);
@@ -600,7 +662,7 @@ export class EventsService {
 
       case 'google':
         if (connector.connector_creds?.google?.isActive && connector.connector_creds?.google?.isValid) {
-          result = await this.syncGoogleCalendarEvents(connector);
+          result = await this.syncGoogleCalendarEvents(connector, dryRun);
           processed = true;
         } else {
           this.logger.warn(`⚠️ Google connector inactive/invalid for user: ${connector.userId}`);
@@ -628,8 +690,9 @@ export class EventsService {
 
   /**
    * Sync events from Orange Mail calendar
+   * @param dryRun - when true, only fetches and parses events without writing to the database
    */
-  private async syncOrangeCalendarEvents(connector: any): Promise<any> {
+  private async syncOrangeCalendarEvents(connector: any, dryRun = false): Promise<any> {
     try {
       this.logger.log(`🍊 Starting Orange calendar sync for user: ${connector.userId}`);
 
@@ -897,6 +960,10 @@ export class EventsService {
         return { connectorType: 'orange', userId: connector.userId.toString(), status: 'success', message: 'No events found to sync (current + next 2 months)', eventsSynced: 0 };
       }
 
+      if (dryRun) {
+        return { connectorType: 'orange', userId: connector.userId.toString(), status: 'success', message: `Fetched ${events.length} events`, eventsSynced: 0, eventsData: events };
+      }
+
       const syncedEvents = await this.saveEventsToDatabase(events, connector.userId, 'orange');
       this.logger.log(`✅ Successfully synced ${syncedEvents} events from Orange calendar`);
       return { connectorType: 'orange', userId: connector.userId.toString(), status: 'success', message: `Successfully synced ${syncedEvents} events`, eventsSynced: syncedEvents, eventsData: events };
@@ -909,8 +976,9 @@ export class EventsService {
 
   /**
    * Sync events from Google Calendar
+   * @param dryRun - when true, only fetches and parses events without writing to the database
    */
-  private async syncGoogleCalendarEvents(connector: any): Promise<any> {
+  private async syncGoogleCalendarEvents(connector: any, dryRun = false): Promise<any> {
     try {
       this.logger.log(`🔵 Starting Google Calendar sync for user: ${connector.userId}`);
 
@@ -1010,6 +1078,17 @@ export class EventsService {
           status: 'success',
           message: 'No valid events found to sync (current + next 2 months)',
           eventsSynced: 0
+        };
+      }
+
+      if (dryRun) {
+        return {
+          connectorType: 'google',
+          userId: connector.userId.toString(),
+          status: 'success',
+          message: `Fetched ${events.length} events`,
+          eventsSynced: 0,
+          eventsData: events
         };
       }
 
@@ -1298,7 +1377,7 @@ export class EventsService {
   /**
    * Sync events from Microsoft Calendar
    */
-  private async syncMicrosoftCalendarEvents(connector: any): Promise<any> {
+  private async syncMicrosoftCalendarEvents(connector: any, dryRun = false): Promise<any> {
     try {
       this.logger.log(`🟦 Starting Microsoft Calendar sync for user: ${connector.userId}`);
 
@@ -1381,6 +1460,17 @@ export class EventsService {
           status: 'success',
           message: 'No valid events found to sync (current + next 2 months)',
           eventsSynced: 0
+        };
+      }
+
+      if (dryRun) {
+        return {
+          connectorType: 'microsoft',
+          userId: connector.userId.toString(),
+          status: 'success',
+          message: `Fetched ${events.length} events`,
+          eventsSynced: 0,
+          eventsData: events
         };
       }
 
@@ -1903,6 +1993,19 @@ export class EventsService {
     }
   }
 
+  /**
+   * Truncate a description to the Event schema's maxlength (1000 chars) so that
+   * long HTML/CSS bodies from Outlook/Word (e.g. "JPO", "Fermé") don't silently
+   * fail Mongoose validation and get skipped during save.
+   */
+  private truncateDescription(description: string | undefined | null, maxLength = 1000): string {
+    const value = description || '';
+    if (value.length <= maxLength) {
+      return value;
+    }
+    return value.substring(0, maxLength - 3) + '...';
+  }
+
   private async saveEventsToDatabase(events: any[], userId: any, source: string): Promise<number> {
     try {
       let savedCount = 0;
@@ -1966,8 +2069,9 @@ export class EventsService {
             if (existingExternalEvent.eventName !== eventName) {
               updateFields.eventName = eventName;
             }
-            if (existingExternalEvent.eventDescription !== (eventInfo.description || '')) {
-              updateFields.eventDescription = eventInfo.description || '';
+            const truncatedDescription = this.truncateDescription(eventInfo.description);
+            if (existingExternalEvent.eventDescription !== truncatedDescription) {
+              updateFields.eventDescription = truncatedDescription;
             }
             // Normalize isAllDay to boolean
             const incomingAllDay = !!(eventInfo.isAllDay || false);
@@ -2066,7 +2170,7 @@ export class EventsService {
             eventDate: new Date(eventInfo.startDate),
             eventTime: finalEventTime,
             eventEndTime: finalEventEndTime, // Save the end time
-            eventDescription: eventInfo.description || '',
+            eventDescription: this.truncateDescription(eventInfo.description),
             eventType: 'external',
             externalCalendarSource: source,
             externalEventId: eventInfo.uid,
