@@ -94,7 +94,7 @@ export class DashboardAnalyticsService {
 
   async getUserDashboardAnalytics(
     userId: string,
-    period: DashboardPeriod = 'month',
+    period: DashboardPeriod = 'year',
     bookingSources?: BookingSourceOption[],
   ): Promise<DashboardAnalytics> {
     const userObjectId = new Types.ObjectId(userId);
@@ -148,7 +148,7 @@ export class DashboardAnalyticsService {
     if (period === 'year') {
       return {
         startDate: new Date(year, 0, 1, 0, 0, 0, 0),
-        endDate: new Date(year, month + 1, 0, 23, 59, 59, 999),
+        endDate: new Date(year, 11, 31, 23, 59, 59, 999),
       };
     }
 
@@ -168,7 +168,7 @@ export class DashboardAnalyticsService {
       {
         $match: {
           userId,
-          createdAt: { $gte: startDate, $lte: endDate },
+          bookingDate: { $gte: startDate, $lte: endDate },
           bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
           isDeleted: { $ne: true },
           ...bookingSourceMatch,
@@ -177,7 +177,7 @@ export class DashboardAnalyticsService {
       {
         $group: {
           _id: {
-            $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'Europe/Paris' },
+            $dateToString: { format: '%Y-%m-%d', date: '$bookingDate', timezone: 'Europe/Paris' },
           },
           count: { $sum: 1 },
         },
@@ -242,7 +242,7 @@ export class DashboardAnalyticsService {
       {
         $match: {
           userId,
-          createdAt: { $gte: startDate, $lte: endDate },
+          bookingDate: { $gte: startDate, $lte: endDate },
           bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
           isDeleted: { $ne: true },
           ...bookingSourceMatch,
@@ -250,19 +250,18 @@ export class DashboardAnalyticsService {
       },
       {
         $group: {
-          _id: { $month: { date: '$createdAt', timezone: 'Europe/Paris' } },
+          _id: { $month: { date: '$bookingDate', timezone: 'Europe/Paris' } },
           count: { $sum: 1 },
         },
       },
     ]);
 
     const countsByMonth = new Map(aggregated.map((entry) => [entry._id, entry.count]));
-    const currentMonth = endDate.getMonth() + 1;
 
-    return Array.from({ length: currentMonth }, (_, index) => {
+    return MONTH_LABELS.map((label, index) => {
       const month = index + 1;
       return {
-        label: MONTH_LABELS[index],
+        label,
         count: countsByMonth.get(month) ?? 0,
       };
     });
@@ -276,7 +275,7 @@ export class DashboardAnalyticsService {
   ): Promise<number> {
     return this.userBookingModel.countDocuments({
       userId,
-      createdAt: {
+      bookingDate: {
         $gte: startDate,
         $lte: endDate,
       },
@@ -288,8 +287,7 @@ export class DashboardAnalyticsService {
 
   /**
    * Nombre de visiteurs = total participants (adults + children) from bookings
-   * created in the selected period. Using calendar events previously undercounted
-   * visitors vs reservations and produced impossible conversion rates (e.g. 2000%).
+   * scheduled in the selected period (bookingDate, not createdAt).
    */
   private async getVisitors(
     userId: Types.ObjectId,
@@ -301,7 +299,7 @@ export class DashboardAnalyticsService {
       {
         $match: {
           userId,
-          createdAt: { $gte: startDate, $lte: endDate },
+          bookingDate: { $gte: startDate, $lte: endDate },
           bookingStatus: { $in: ACTIVE_BOOKING_STATUSES },
           isDeleted: { $ne: true },
           ...bookingSourceMatch,
@@ -335,7 +333,7 @@ export class DashboardAnalyticsService {
     const bookings = await this.userBookingModel
       .find({
         userId,
-        createdAt: {
+        bookingDate: {
           $gte: startDate,
           $lte: endDate,
         },

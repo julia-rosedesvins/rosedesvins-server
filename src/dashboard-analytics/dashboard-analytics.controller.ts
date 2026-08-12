@@ -25,7 +25,7 @@ export class DashboardAnalyticsController {
     name: 'period',
     required: false,
     enum: ['week', 'month', 'year'],
-    description: 'Time period for KPI metrics (bookingsByMonth is always YTD)',
+    description: 'Time period for KPI metrics (filtered by scheduled booking date)',
   })
   @ApiQuery({
     name: 'bookingSources',
@@ -44,7 +44,7 @@ export class DashboardAnalyticsController {
     data: DashboardAnalytics;
   }> {
     const normalizedPeriod: DashboardPeriod =
-      period === 'week' || period === 'month' || period === 'year' ? period : 'month';
+      period === 'week' || period === 'month' || period === 'year' ? period : 'year';
 
     const bookingSources: BookingSourceOption[] | undefined = bookingSourcesParam
       ? bookingSourcesParam
