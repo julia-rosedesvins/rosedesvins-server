@@ -14,7 +14,7 @@ import { UpdateRegionDto } from './dto/update-region.dto';
 import { slugify, ensureUniqueSlug } from '../common/utils/slug.util';
 import { buildFullMediaUrl } from '../common/utils/media-url.util';
 import { regionDenomMatchesShortName, resolveRegionSlugAlias } from '../common/utils/region-slug.util';
-import { compareSearchMatch } from '../common/utils/search-relevance.util';
+import { compareSearchMatch, scoreSearchMatch } from '../common/utils/search-relevance.util';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as sharp from 'sharp';
@@ -996,6 +996,121 @@ export class RegionsService {
         return null;
     }
 
+    private async pickSuggestedRoute(
+        searchQuery: string,
+        services: any[],
+        domains: any[],
+        regionResults: any[],
+        staticExperienceResults: any[],
+        builders: {
+            buildServiceRoute: (service: any) => string;
+            buildDomainRoute: (domain: any) => string;
+        },
+    ): Promise<{
+        route: string;
+        type: 'city' | 'service' | 'domain' | 'region' | 'static-experience' | 'mixed' | null;
+    }> {
+        type CandidateKind = 'city' | 'region' | 'domain' | 'service' | 'static-experience';
+        type Candidate = { score: number; route: string; kind: CandidateKind; label: string };
+
+        const TYPE_PRIORITY: Record<CandidateKind, number> = {
+            city: 5,
+            region: 4,
+            domain: 3,
+            'static-experience': 2,
+            service: 1,
+        };
+
+        const candidates: Candidate[] = [];
+
+        try {
+            const cityResult = await this.citiesService.searchCities(searchQuery);
+            const cities = cityResult?.data ?? [];
+            for (const city of cities.slice(0, 8)) {
+                const score = scoreSearchMatch(searchQuery, city.nom_standard);
+                if (score <= 0) continue;
+
+                const lat = city.latitude_centre;
+                const lon = city.longitude_centre;
+                const coords = lat != null && lon != null ? `?lat=${lat}&lon=${lon}` : '';
+
+                candidates.push({
+                    score,
+                    route: `/region/${encodeURIComponent(city.nom_standard)}${coords}`,
+                    kind: 'city',
+                    label: city.nom_standard,
+                });
+            }
+        } catch (error) {
+            this.logger.warn(`City lookup failed during suggested-route resolution: ${(error as Error).message}`);
+        }
+
+        for (const region of regionResults) {
+            const score = scoreSearchMatch(searchQuery, region.denom, region.slug);
+            if (score <= 0) continue;
+            candidates.push({
+                score,
+                route: `/region/${region.slug}`,
+                kind: 'region',
+                label: region.denom,
+            });
+        }
+
+        for (const domain of domains) {
+            const score = scoreSearchMatch(searchQuery, domain.domainName || '', domain.slug);
+            if (score <= 0) continue;
+            candidates.push({
+                score,
+                route: builders.buildDomainRoute(domain),
+                kind: 'domain',
+                label: domain.domainName || '',
+            });
+        }
+
+        for (const exp of staticExperienceResults) {
+            const score = scoreSearchMatch(searchQuery, exp.name, exp.slug);
+            if (score <= 0) continue;
+            candidates.push({
+                score,
+                route: exp.experienceRoute,
+                kind: 'static-experience',
+                label: exp.name,
+            });
+        }
+
+        for (const service of services) {
+            const score = scoreSearchMatch(searchQuery, service.serviceName);
+            if (score <= 0) continue;
+            candidates.push({
+                score,
+                route: builders.buildServiceRoute(service),
+                kind: 'service',
+                label: service.serviceName,
+            });
+        }
+
+        if (candidates.length === 0) {
+            return { route: '', type: null };
+        }
+
+        candidates.sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            const kindDiff = TYPE_PRIORITY[b.kind] - TYPE_PRIORITY[a.kind];
+            if (kindDiff !== 0) return kindDiff;
+            return a.label.localeCompare(b.label, 'fr');
+        });
+
+        const best = candidates[0];
+        const hasMultipleKinds = new Set(candidates.map((candidate) => candidate.kind)).size > 1;
+        const resultType = hasMultipleKinds ? 'mixed' : best.kind;
+
+        this.logger.log(
+            `Suggested route for "${searchQuery}": ${best.route} (${best.kind}, score=${best.score})`,
+        );
+
+        return { route: best.route, type: resultType };
+    }
+
     async unifiedSearch(query: string): Promise<{
         success: boolean;
         data: {
@@ -1294,89 +1409,29 @@ export class RegionsService {
             compareSearchMatch(searchQuery, a.name, b.name, a.slug, b.slug),
         );
 
-        // Determine search type and suggested route
-        let type: 'service' | 'domain' | 'region' | 'static-experience' | 'mixed' | null = null;
-        let suggestedRoute = '';
+        staticExperienceResults.sort((a, b) =>
+            compareSearchMatch(searchQuery, a.name, b.name, a.slug, b.slug),
+        );
 
-        const hasServices = services.length > 0;
-        const hasDomains = domains.length > 0;
-        const hasRegions = regionResults.length > 0;
-        const hasStaticExperiences = staticExperienceResults.length > 0;
-        const totalResults = [hasServices, hasDomains, hasRegions, hasStaticExperiences].filter(Boolean).length;
-
-        const pickBestService = () => {
-            const exactService = services.find(s => normalizeStr(s.serviceName) === normalizedQuery);
-            return exactService || services[0];
-        };
-
-        const pickBestDomain = () => {
-            const exactDomain = domains.find(d => d.domainName && normalizeStr(d.domainName) === normalizedQuery);
-            return exactDomain || domains[0];
-        };
-
-        const pickBestStaticExperience = () => {
-            const exactExperience = staticExperienceResults.find(exp => normalizeStr(exp.name) === normalizedQuery);
-            return exactExperience || staticExperienceResults[0];
-        };
-
-        const buildServiceRoute = (service: (typeof services)[number]) =>
-            this.buildExperienceRoute(
-                service.domain.region || service.domain.city || service.domain.domainName,
-                service.domain.slug || service.domain.domainId,
-            );
-
-        const buildDomainRoute = (domain: (typeof domains)[number]) =>
-            this.buildExperienceRoute(
-                domain.location?.region || domain.location?.city || domain.domainName,
-                domain.slug || domain.domainId,
-            );
-
-        if (totalResults === 0) {
-            type = null;
-        } else if (totalResults === 1) {
-            if (hasServices) {
-                type = 'service';
-                suggestedRoute = buildServiceRoute(pickBestService());
-            } else if (hasDomains) {
-                type = 'domain';
-                suggestedRoute = buildDomainRoute(pickBestDomain());
-            } else if (hasRegions) {
-                type = 'region';
-                const exactRegion = regionResults.find(r => normalizeStr(r.denom) === normalizedQuery);
-                const bestRegion = exactRegion || regionResults[0];
-                suggestedRoute = `/region/${bestRegion.slug}`;
-            } else if (hasStaticExperiences) {
-                type = 'static-experience';
-                suggestedRoute = pickBestStaticExperience().experienceRoute;
-            }
-        } else {
-            type = 'mixed';
-            // Priority: exact region match > exact service/experience/domain > best available result
-            const exactRegion = regionResults.find(r => normalizeStr(r.denom) === normalizedQuery);
-            const exactService = services.find(s => normalizeStr(s.serviceName) === normalizedQuery);
-            const exactStaticExperience = staticExperienceResults.find(exp => normalizeStr(exp.name) === normalizedQuery);
-            const exactDomain = domains.find(d => d.domainName && normalizeStr(d.domainName) === normalizedQuery);
-
-            if (exactRegion) {
-                suggestedRoute = `/region/${exactRegion.slug}`;
-            } else if (exactService) {
-                suggestedRoute = buildServiceRoute(exactService);
-            } else if (exactStaticExperience) {
-                suggestedRoute = exactStaticExperience.experienceRoute;
-            } else if (exactDomain) {
-                suggestedRoute = buildDomainRoute(exactDomain);
-            } else if (hasServices) {
-                suggestedRoute = buildServiceRoute(pickBestService());
-            } else if (hasDomains) {
-                suggestedRoute = buildDomainRoute(pickBestDomain());
-            } else if (hasStaticExperiences) {
-                suggestedRoute = pickBestStaticExperience().experienceRoute;
-            } else if (hasRegions) {
-                const exactRegion = regionResults.find(r => normalizeStr(r.denom) === normalizedQuery);
-                const bestRegion = exactRegion || regionResults[0];
-                suggestedRoute = `/region/${bestRegion.slug}`;
-            }
-        }
+        const { route: suggestedRoute, type } = await this.pickSuggestedRoute(
+            searchQuery,
+            services,
+            domains,
+            regionResults,
+            staticExperienceResults,
+            {
+                buildServiceRoute: (service) =>
+                    this.buildExperienceRoute(
+                        service.domain.region || service.domain.city || service.domain.domainName,
+                        service.domain.slug || service.domain.domainId,
+                    ),
+                buildDomainRoute: (domain) =>
+                    this.buildExperienceRoute(
+                        domain.location?.region || domain.location?.city || domain.domainName,
+                        domain.slug || domain.domainId,
+                    ),
+            },
+        );
 
         this.logger.log(`Search results: ${services.length} services, ${domains.length} domains, ${regionResults.length} regions, ${staticExperienceResults.length} static experiences`);
 
