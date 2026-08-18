@@ -1114,7 +1114,7 @@ export class RegionsService {
     async unifiedSearch(query: string): Promise<{
         success: boolean;
         data: {
-            type: 'service' | 'domain' | 'region' | 'static-experience' | 'mixed' | null;
+            type: 'city' | 'service' | 'domain' | 'region' | 'static-experience' | 'mixed' | null;
             services?: any[];
             domains?: any[];
             regions?: any[];
