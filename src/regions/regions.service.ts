@@ -360,17 +360,10 @@ export class RegionsService {
         const backendUrl = this.configService.get<string>('BACKEND_URL') || 'http://localhost:5001';
         const domainsFromProfiles = domainProfiles.map(profile => {
             const user = profile.userId as any;
-            const firstActiveService = profile.services.find(s => s.isActive);
-            
-            // Extract category ID and name from populated category field
-            let categoryName: string | null = null;
-            let categoryId: string | null = null;
-            if (firstActiveService?.category) {
-                const categoryObj = firstActiveService.category as any;
-                categoryName = categoryObj.category_name || null;
-                categoryId = categoryObj._id?.toString() || firstActiveService.category.toString();
-            }
-            
+            const { domainPrice, categoryName, categoryId } = this.getClientDomainListingMeta(
+                profile.services as any[],
+            );
+
             return {
                 domainName: user?.domainName || 'Unknown Domain',
                 domainDescription: profile.domainDescription,
@@ -381,7 +374,7 @@ export class RegionsService {
                     ? `${backendUrl}${profile.domainLogoUrl}`
                     : null,
                 producer: 'client' as const,
-                domainPrice: firstActiveService?.pricePerPerson || null,
+                domainPrice,
                 siteUrl: null,
                 location: user?.city || null,
                 category: categoryName,
@@ -449,6 +442,48 @@ export class RegionsService {
     }
 
     /**
+     * Client domains list one row per domain, not per service. Show the lowest
+     * bookable price ("à partir de") across active services — same services as
+     * the public experience page. Treat missing isActive as active (schema default).
+     */
+    private getClientDomainListingMeta(services: any[] | undefined): {
+        domainPrice: number | null;
+        categoryName: string | null;
+        categoryId: string | null;
+    } {
+        if (!services?.length) {
+            return { domainPrice: null, categoryName: null, categoryId: null };
+        }
+
+        const activeServices = services.filter((s) => s?.isActive !== false);
+        if (!activeServices.length) {
+            return { domainPrice: null, categoryName: null, categoryId: null };
+        }
+
+        const priced = activeServices.filter(
+            (s) => s.pricePerPerson != null && !Number.isNaN(Number(s.pricePerPerson)),
+        );
+
+        const domainPrice = priced.length
+            ? Math.min(...priced.map((s) => Number(s.pricePerPerson)))
+            : null;
+
+        const categorySource =
+            [...priced].sort((a, b) => Number(a.pricePerPerson) - Number(b.pricePerPerson))[0] ||
+            activeServices.find((s) => s.category);
+
+        let categoryName: string | null = null;
+        let categoryId: string | null = null;
+        if (categorySource?.category) {
+            const categoryObj = categorySource.category as any;
+            categoryName = categoryObj.category_name || null;
+            categoryId = categoryObj._id?.toString() || categorySource.category.toString();
+        }
+
+        return { domainPrice, categoryName, categoryId };
+    }
+
+    /**
      * Helper method to filter domains based on filter criteria
      */
     private async filterDomains(
@@ -491,7 +526,7 @@ export class RegionsService {
                 let hasMatchingService = false;
 
                 for (const service of profile.services) {
-                    if (!service.isActive) continue;
+                    if (service.isActive === false) continue;
 
                     let matchesFilters = true;
 
