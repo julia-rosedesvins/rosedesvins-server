@@ -12,6 +12,7 @@ import { CitiesService } from '../cities/cities.service';
 import { CreateRegionDto } from './dto/create-region.dto';
 import { UpdateRegionDto } from './dto/update-region.dto';
 import { slugify, ensureUniqueSlug } from '../common/utils/slug.util';
+import { buildFullMediaUrl } from '../common/utils/media-url.util';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as sharp from 'sharp';
@@ -367,12 +368,8 @@ export class RegionsService {
             return {
                 domainName: user?.domainName || 'Unknown Domain',
                 domainDescription: profile.domainDescription,
-                domainProfilePictureUrl: profile.domainProfilePictureUrl 
-                    ? `${backendUrl}${profile.domainProfilePictureUrl}` 
-                    : null,
-                domainLogoUrl: profile.domainLogoUrl
-                    ? `${backendUrl}${profile.domainLogoUrl}`
-                    : null,
+                domainProfilePictureUrl: buildFullMediaUrl(profile.domainProfilePictureUrl, backendUrl),
+                domainLogoUrl: buildFullMediaUrl(profile.domainLogoUrl, backendUrl),
                 producer: 'client' as const,
                 domainPrice,
                 siteUrl: null,
@@ -1161,7 +1158,7 @@ export class RegionsService {
                         serviceDescription: service.description,
                         pricePerPerson: service.pricePerPerson,
                         languagesOffered: service.languagesOffered,
-                        serviceBannerUrl: service.serviceBannerUrl ? `${backendUrl}${service.serviceBannerUrl}` : null,
+                        serviceBannerUrl: buildFullMediaUrl(service.serviceBannerUrl, backendUrl),
                         domain,
                         experienceRoute: this.buildExperienceRoute(
                             domain.region || domain.city || domain.domainName,
@@ -1224,8 +1221,8 @@ export class RegionsService {
                 domainName: user?.domainName || null,
                 domainDescription: profile.domainDescription,
                 colorCode: profile.colorCode,
-                domainProfilePictureUrl: profile.domainProfilePictureUrl ? `${backendUrl}${profile.domainProfilePictureUrl}` : null,
-                domainLogoUrl: profile.domainLogoUrl ? `${backendUrl}${profile.domainLogoUrl}` : null,
+                domainProfilePictureUrl: buildFullMediaUrl(profile.domainProfilePictureUrl, backendUrl),
+                domainLogoUrl: buildFullMediaUrl(profile.domainLogoUrl, backendUrl),
                 location,
                 experienceRoute: this.buildExperienceRoute(
                     location.region || location.city || user?.domainName,
@@ -1251,7 +1248,7 @@ export class RegionsService {
                 min_lon: region.min_lon,
                 max_lat: region.max_lat,
                 max_lon: region.max_lon,
-                thumbnailUrl: region.thumbnailUrl ? `${backendUrl}${region.thumbnailUrl}` : null,
+                thumbnailUrl: buildFullMediaUrl(region.thumbnailUrl, backendUrl),
                 isParent: region.isParent,
             });
 
