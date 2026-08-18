@@ -231,7 +231,10 @@ export class RegionsService {
             region = await this.regionModel.findOne({ slug: denom }).exec();
         }
         if (!region) {
-            region = await this.regionModel.findOne({ denom }).exec();
+            const escaped = denom.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            region = await this.regionModel.findOne({
+                denom: { $regex: `^${escaped}$`, $options: 'i' },
+            }).exec();
         }
         if (!region) {
             region = await this.findParentRegionByShortName(denom);
@@ -837,6 +840,12 @@ export class RegionsService {
      */
     private async findParentRegionByShortName(name: string): Promise<Region | null> {
         const parentRegions = await this.regionModel.find({ isParent: true }).exec();
+        const querySlug = slugify(name);
+        const exact = parentRegions.find((region) =>
+            slugify(region.denom) === querySlug || (region.slug || '').toLowerCase() === querySlug,
+        );
+        if (exact) return exact;
+
         const matches = parentRegions.filter((region) => regionDenomMatchesShortName(region.denom, name));
         if (matches.length === 0) return null;
 
