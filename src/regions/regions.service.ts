@@ -13,6 +13,7 @@ import { CreateRegionDto } from './dto/create-region.dto';
 import { UpdateRegionDto } from './dto/update-region.dto';
 import { slugify, ensureUniqueSlug } from '../common/utils/slug.util';
 import { buildFullMediaUrl } from '../common/utils/media-url.util';
+import { regionDenomMatchesShortName, resolveRegionSlugAlias } from '../common/utils/region-slug.util';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as sharp from 'sharp';
@@ -222,10 +223,17 @@ export class RegionsService {
         limit: number;
         totalPages: number;
     }> {
-        // Step 1: Find region by slug (canonical), then fall back to raw denom (legacy links)
-        let region: Region | null = await this.regionModel.findOne({ slug: denom }).exec();
+        // Step 1: Find region by slug (canonical + short aliases), then raw denom (legacy links)
+        const slugCandidate = resolveRegionSlugAlias(denom);
+        let region: Region | null = await this.regionModel.findOne({ slug: slugCandidate }).exec();
+        if (!region && slugCandidate !== denom) {
+            region = await this.regionModel.findOne({ slug: denom }).exec();
+        }
         if (!region) {
             region = await this.regionModel.findOne({ denom }).exec();
+        }
+        if (!region) {
+            region = await this.findParentRegionByShortName(denom);
         }
 
         if (!region) {
@@ -817,6 +825,18 @@ export class RegionsService {
             ]})
             .limit(50)
             .exec();
+    }
+
+    /**
+     * Resolve short region names (e.g. "corse") to a parent wine region record.
+     */
+    private async findParentRegionByShortName(name: string): Promise<Region | null> {
+        const parentRegions = await this.regionModel.find({ isParent: true }).exec();
+        const matches = parentRegions.filter((region) => regionDenomMatchesShortName(region.denom, name));
+        if (matches.length === 0) return null;
+
+        matches.sort((a, b) => a.denom.length - b.denom.length);
+        return matches[0];
     }
 
     /**
