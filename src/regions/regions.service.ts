@@ -14,6 +14,7 @@ import { UpdateRegionDto } from './dto/update-region.dto';
 import { slugify, ensureUniqueSlug } from '../common/utils/slug.util';
 import { buildFullMediaUrl } from '../common/utils/media-url.util';
 import { regionDenomMatchesShortName, resolveRegionSlugAlias } from '../common/utils/region-slug.util';
+import { compareSearchMatch } from '../common/utils/search-relevance.util';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as sharp from 'sharp';
@@ -818,13 +819,17 @@ export class RegionsService {
     async searchRegions(query: string): Promise<Region[]> {
         const pattern = this.buildAccentInsensitivePattern(query);
         const plain = query.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        return this.regionModel
+        const regions = await this.regionModel
             .find({ $or: [
                 { denom: { $regex: pattern, $options: 'i' } },
                 { denom: { $regex: plain, $options: 'i' } },
             ]})
             .limit(50)
             .exec();
+
+        return regions.sort((a, b) =>
+            compareSearchMatch(query, a.denom, b.denom, a.slug, b.slug),
+        );
     }
 
     /**
@@ -1273,7 +1278,21 @@ export class RegionsService {
             });
 
             return acc;
-        }, [] as any[]);
+        }, [] as any[]).sort((a, b) =>
+            compareSearchMatch(searchQuery, a.denom, b.denom, a.slug, b.slug),
+        );
+
+        services.sort((a, b) =>
+            compareSearchMatch(searchQuery, a.serviceName, b.serviceName),
+        );
+
+        domains.sort((a, b) =>
+            compareSearchMatch(searchQuery, a.domainName || '', b.domainName || '', a.slug, b.slug),
+        );
+
+        staticExperienceResults.sort((a, b) =>
+            compareSearchMatch(searchQuery, a.name, b.name, a.slug, b.slug),
+        );
 
         // Determine search type and suggested route
         let type: 'service' | 'domain' | 'region' | 'static-experience' | 'mixed' | null = null;
