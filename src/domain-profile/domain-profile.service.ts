@@ -761,7 +761,7 @@ export class DomainProfileService {
 
   private async uploadDomainImageToS3(file: Express.Multer.File, folder: string): Promise<string> {
     const buffer = file.buffer ? file.buffer : await fs.readFile(file.path);
-    const { url } = await this.s3Service.uploadFile(buffer, file.originalname, folder);
+    const { url } = await this.s3Service.uploadFile(buffer, undefined, folder);
 
     // Best effort cleanup for disk storage temp file
     if (file.path) {
