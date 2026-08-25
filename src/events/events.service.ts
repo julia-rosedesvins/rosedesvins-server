@@ -169,10 +169,12 @@ export class EventsService {
       }
 
       // Transform the data to include total participants, event type, serviceId and selectedLanguage
-      return schedule
+      return visibleSchedule
         .filter((event) => {
-          // Skip booking events whose booking was soft-deleted
-          if (event.eventType === 'booking' && !event.bookingId) return false;
+          if (event.eventType === 'booking') {
+            const booking = event.bookingId as any;
+            if (!booking || booking.isDeleted === true) return false;
+          }
           return true;
         })
         .map(event => {
