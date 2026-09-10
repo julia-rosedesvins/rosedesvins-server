@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ConflictException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Event } from '../schemas/events.schema';
@@ -206,6 +206,144 @@ export class EventsService {
     } catch (error) {
       throw error;
     }
+  }
+
+  /**
+   * Reject a new booking when it overlaps a busy slot.
+   * External / personal / blocked events always block (even with multi-slot).
+   * Multi-slot applies only to internal bookings of the same service.
+   * Bookings mirrored to Google stay eventType 'booking' and are not treated as external.
+   */
+  async assertSlotAvailable(params: {
+    userId: Types.ObjectId;
+    serviceId: string;
+    bookingDate: Date;
+    bookingTime: string;
+    durationMinutes: number;
+    participants: number;
+    selectedLanguage?: string;
+    multipleBookings: boolean;
+    maxParticipants: number;
+  }): Promise<void> {
+    const dateKey = new Date(params.bookingDate).toISOString().slice(0, 10);
+    const dayStart = new Date(`${dateKey}T00:00:00.000Z`);
+    const dayEnd = new Date(`${dateKey}T23:59:59.999Z`);
+
+    const slotStart = this.parseTimeToMinutes(params.bookingTime);
+    const slotEnd = slotStart + params.durationMinutes;
+
+    const events = await this.eventModel
+      .find({
+        userId: params.userId,
+        eventDate: { $gte: dayStart, $lte: dayEnd },
+        $or: [
+          { eventStatus: 'active', isDeleted: { $ne: true } },
+          { eventType: 'booking' },
+        ],
+      })
+      .select('eventDate eventTime eventEndTime eventType bookingId isAllDay eventStatus isDeleted')
+      .populate({
+        path: 'bookingId',
+        select: 'participantsAdults participantsEnfants serviceId selectedLanguage isDeleted',
+      })
+      .lean()
+      .exec();
+
+    const sameServiceBookings: Array<{
+      participants: number;
+      language?: string;
+    }> = [];
+
+    for (const event of events) {
+      if (event.eventType === 'booking') {
+        const booking = event.bookingId as any;
+        if (!booking || booking.isDeleted === true) continue;
+        if (event.isDeleted === true || event.eventStatus === 'cancelled') continue;
+      } else if (event.isDeleted === true || event.eventStatus !== 'active') {
+        continue;
+      }
+
+      const eventDateKey = new Date(event.eventDate).toISOString().slice(0, 10);
+      if (eventDateKey !== dateKey) continue;
+
+      const isHardBlockType =
+        event.eventType === 'external' ||
+        event.eventType === 'personal' ||
+        event.eventType === 'blocked';
+
+      const allDay =
+        event.isAllDay === true ||
+        (event.eventTime === '00:00' &&
+          (event.eventEndTime === '23:59' || event.eventEndTime === '23:59:59'));
+
+      if (isHardBlockType && allDay) {
+        throw new ConflictException(
+          'This time slot is unavailable due to an external calendar event',
+        );
+      }
+
+      const eventStart = this.parseTimeToMinutes(event.eventTime);
+      let eventEnd = eventStart + params.durationMinutes;
+      if (event.eventEndTime) {
+        eventEnd = this.parseTimeToMinutes(event.eventEndTime);
+        if (eventEnd < eventStart) eventEnd += 24 * 60;
+      }
+
+      if (!(slotStart < eventEnd && slotEnd > eventStart)) continue;
+
+      if (isHardBlockType) {
+        throw new ConflictException(
+          'This time slot is unavailable due to an external calendar event',
+        );
+      }
+
+      const booking = event.bookingId as any;
+      const existingServiceId = booking?.serviceId?.toString();
+      if (!existingServiceId || existingServiceId !== params.serviceId) {
+        throw new ConflictException(
+          'This time slot is unavailable because another experience is already booked',
+        );
+      }
+
+      if (!params.multipleBookings) {
+        throw new ConflictException('A booking already exists for this time slot');
+      }
+
+      sameServiceBookings.push({
+        participants: (booking.participantsAdults || 0) + (booking.participantsEnfants || 0),
+        language: booking.selectedLanguage,
+      });
+    }
+
+    if (!sameServiceBookings.length) return;
+
+    const existingParticipants = sameServiceBookings.reduce(
+      (sum, b) => sum + b.participants,
+      0,
+    );
+    if (existingParticipants + params.participants > params.maxParticipants) {
+      throw new ConflictException(
+        'This time slot does not have enough remaining capacity',
+      );
+    }
+
+    const requiredLanguage = sameServiceBookings.find(
+      (b) => b.language && String(b.language).trim() !== '',
+    )?.language;
+    if (
+      requiredLanguage &&
+      params.selectedLanguage &&
+      params.selectedLanguage !== requiredLanguage
+    ) {
+      throw new ConflictException(
+        'This time slot is already booked in a different language',
+      );
+    }
+  }
+
+  private parseTimeToMinutes(time: string): number {
+    const [hours, minutes] = String(time || '00:00').split(':').map(Number);
+    return (hours || 0) * 60 + (minutes || 0);
   }
 
   /**

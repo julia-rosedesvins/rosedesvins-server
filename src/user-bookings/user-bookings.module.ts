@@ -14,11 +14,13 @@ import { EncryptionService } from '../common/encryption.service';
 import { ConnectorService } from '../connector/connector.service';
 import { PaymentMethods, PaymentMethodsSchema } from 'src/schemas/payment-methods.schema';
 import { GoogleEventsApiService } from './utils/google-events-apis.utils';
+import { EventsModule } from '../events/events.module';
 
 @Module({
   imports: [
     ConfigModule,
     EmailModule, // Import the EmailModule instead of individual services
+    EventsModule,
     MongooseModule.forFeature([
       { name: UserBooking.name, schema: UserBookingSchema },
       { name: User.name, schema: UserSchema },

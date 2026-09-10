@@ -19,6 +19,7 @@ import { EmailService } from '../email/email.service';
 import { TemplateService } from '../email/template.service';
 import { ConnectorService } from '../connector/connector.service';
 import { GoogleEventsApiService } from './utils/google-events-apis.utils';
+import { EventsService } from '../events/events.service';
 
 const dav = require('dav');
 
@@ -81,6 +82,7 @@ export class UserBookingsService {
     private connectorService: ConnectorService,
     private configService: ConfigService,
     private googleEventsApiService: GoogleEventsApiService,
+    private eventsService: EventsService,
   ) { }
 
   /**
@@ -463,8 +465,24 @@ export class UserBookingsService {
       const userObjectId = new Types.ObjectId(createBookingDto.userId);
       const serviceObjectId = new Types.ObjectId(createBookingDto.serviceId);
 
-      // Create booking data with proper field mapping
       const parsedDate = createBookingDto.bookingDate;
+      const service = await this.getServiceForBooking(userObjectId, createBookingDto.serviceId);
+      const durationMinutes = service?.timeOfServiceInMinutes || 60;
+      const maxParticipants = this.parseMaxParticipants(service?.numberOfPeople);
+      const participants =
+        (createBookingDto.participantsAdults || 0) + (createBookingDto.participantsEnfants || 0);
+
+      await this.eventsService.assertSlotAvailable({
+        userId: userObjectId,
+        serviceId: createBookingDto.serviceId,
+        bookingDate: parsedDate,
+        bookingTime: createBookingDto.bookingTime,
+        durationMinutes,
+        participants,
+        selectedLanguage: createBookingDto.selectedLanguage,
+        multipleBookings: service?.multipleBookings === true,
+        maxParticipants,
+      });
 
       const bookingData: Record<string, unknown> = {
         userId: userObjectId,
@@ -902,6 +920,34 @@ export class UserBookingsService {
       console.warn('Could not fetch service duration, using default:', error);
     }
     return 60; // Default 1 hour
+  }
+
+  private async getServiceForBooking(
+    userId: Types.ObjectId,
+    serviceId: string,
+  ): Promise<{
+    timeOfServiceInMinutes?: number;
+    numberOfPeople?: string;
+    multipleBookings?: boolean;
+  } | null> {
+    const domainProfile = await this.domainProfileModel
+      .findOne({ userId })
+      .select('services')
+      .lean()
+      .exec();
+    if (!domainProfile?.services) return null;
+    return (
+      domainProfile.services.find((s) => (s as any)._id?.toString() === serviceId) || null
+    );
+  }
+
+  private parseMaxParticipants(numberOfPeople?: string): number {
+    if (!numberOfPeople) return 20;
+    if (numberOfPeople.includes('-')) {
+      const parts = numberOfPeople.split('-');
+      return parseInt(parts[parts.length - 1], 10) || 20;
+    }
+    return parseInt(numberOfPeople, 10) || 20;
   }
 
   /**
