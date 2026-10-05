@@ -1407,6 +1407,34 @@ export class UserBookingsService {
         currentTime: existingBooking.bookingTime
       });
 
+      const service = await this.getServiceForBooking(
+        existingBooking.userId,
+        (updateData.serviceId || existingBooking.serviceId).toString(),
+      );
+      const durationMinutes = service?.timeOfServiceInMinutes || 60;
+      const maxParticipants = this.parseMaxParticipants(service?.numberOfPeople);
+      const nextAdults =
+        updateData.participantsAdults !== undefined
+          ? updateData.participantsAdults
+          : existingBooking.participantsAdults;
+      const nextChildren =
+        updateData.participantsEnfants !== undefined
+          ? updateData.participantsEnfants
+          : existingBooking.participantsEnfants;
+
+      await this.eventsService.assertSlotAvailable({
+        userId: existingBooking.userId,
+        serviceId: (updateData.serviceId || existingBooking.serviceId).toString(),
+        bookingDate: updateData.bookingDate || existingBooking.bookingDate,
+        bookingTime: updateData.bookingTime || existingBooking.bookingTime,
+        durationMinutes,
+        participants: (nextAdults || 0) + (nextChildren || 0),
+        selectedLanguage: updateData.selectedLanguage || existingBooking.selectedLanguage,
+        multipleBookings: service?.multipleBookings === true,
+        maxParticipants,
+        excludeBookingId: bookingObjectId,
+      });
+
       // Prepare update data (only include provided fields)
       const updateFields: any = {};
 

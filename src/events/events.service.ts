@@ -211,7 +211,8 @@ export class EventsService {
   /**
    * Reject a new booking when it overlaps a busy slot.
    * External / personal / blocked events always block (even with multi-slot).
-   * Multi-slot applies only to internal bookings of the same service.
+   * Multi-slot applies only to internal bookings of the same service AND the same start time.
+   * Overlapping starts (e.g. 15:30 vs 16:00) are always blocked.
    * Bookings mirrored to Google stay eventType 'booking' and are not treated as external.
    */
   async assertSlotAvailable(params: {
@@ -224,6 +225,7 @@ export class EventsService {
     selectedLanguage?: string;
     multipleBookings: boolean;
     maxParticipants: number;
+    excludeBookingId?: Types.ObjectId | string;
   }): Promise<void> {
     const dateKey = new Date(params.bookingDate).toISOString().slice(0, 10);
     const dayStart = new Date(`${dateKey}T00:00:00.000Z`);
@@ -254,11 +256,15 @@ export class EventsService {
       language?: string;
     }> = [];
 
+    const excludeId = params.excludeBookingId?.toString();
+
     for (const event of events) {
       if (event.eventType === 'booking') {
         const booking = event.bookingId as any;
         if (!booking || booking.isDeleted === true) continue;
         if (event.isDeleted === true || event.eventStatus === 'cancelled') continue;
+        const existingBookingId = (booking._id || event.bookingId)?.toString();
+        if (excludeId && existingBookingId === excludeId) continue;
       } else if (event.isDeleted === true || event.eventStatus !== 'active') {
         continue;
       }
@@ -302,6 +308,13 @@ export class EventsService {
       if (!existingServiceId || existingServiceId !== params.serviceId) {
         throw new ConflictException(
           'This time slot is unavailable because another experience is already booked',
+        );
+      }
+
+      const sameStart = this.parseTimeToMinutes(event.eventTime) === slotStart;
+      if (!sameStart) {
+        throw new ConflictException(
+          'This time slot overlaps another booking for the same experience',
         );
       }
 
