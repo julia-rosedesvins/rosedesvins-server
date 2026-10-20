@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { ExperienceCategoriesService } from './experience-categories.service';
 import { ExperienceCategoriesController } from './experience-categories.controller';
 import { ExperienceCategory, ExperienceCategorySchema } from '../schemas/experience-category.schema';
+import { S3Service } from '../common/services/s3.service';
 
 @Module({
   imports: [
@@ -11,7 +12,7 @@ import { ExperienceCategory, ExperienceCategorySchema } from '../schemas/experie
     JwtModule.register({}),
   ],
   controllers: [ExperienceCategoriesController],
-  providers: [ExperienceCategoriesService],
+  providers: [ExperienceCategoriesService, S3Service],
   exports: [ExperienceCategoriesService],
 })
 export class ExperienceCategoriesModule {}
