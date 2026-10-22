@@ -20,6 +20,30 @@ import * as path from 'path';
 import * as sharp from 'sharp';
 import axios from 'axios';
 
+/**
+ * Client domains pinned to the top of their region listing (matched on the domain name,
+ * ignoring case, accents and punctuation).
+ */
+const PINNED_DOMAIN_NAMES = [
+    'Domaine Vodanis',
+    'Domaine de la Poilane',
+    'Domaine Paris Père et fils',
+    'Domaine Haute-Févrie',
+];
+
+const normalizeDomainName = (name: unknown): string =>
+    String(name ?? '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+
+const PINNED_DOMAIN_KEYS = new Set(PINNED_DOMAIN_NAMES.map(normalizeDomainName));
+
+const isPinnedDomainProfile = (profile: any): boolean =>
+    PINNED_DOMAIN_KEYS.has(normalizeDomainName(profile?.userId?.domainName));
+
 @Injectable()
 export class RegionsService {
     private readonly logger = new Logger(RegionsService.name);
@@ -341,12 +365,17 @@ export class RegionsService {
         if (skip < totalDomainProfiles) {
             // Still fetching from domain profiles
             const profilesLimit = Math.min(remainingLimit, totalDomainProfiles - skip);
-            domainProfiles = await this.domainProfileModel.find(domainProfileQuery)
+            // A region only has a handful of client profiles: load them all so pinned
+            // domains can be sorted first before paging (Array.sort is stable, so the
+            // remaining profiles keep their previous order).
+            const allProfiles = await this.domainProfileModel.find(domainProfileQuery)
             .populate('userId', 'domainName siteWeb city domainLatitude domainLongitude')
             .populate('services.category', 'category_name')
-            .skip(skip)
-            .limit(profilesLimit)
             .exec();
+            allProfiles.sort(
+                (a, b) => Number(isPinnedDomainProfile(b)) - Number(isPinnedDomainProfile(a)),
+            );
+            domainProfiles = allProfiles.slice(skip, skip + profilesLimit);
 
             remainingLimit -= domainProfiles.length;
 
