@@ -257,6 +257,37 @@ export class EmailService {
     this.logger.log(`Subscription expiry warning sent to admin for user ${data.userEmail}`);
   }
 
+  async sendReviewRequestEmail(data: {
+    to: string;
+    domainName: string;
+    domainLogoUrl?: string;
+    googleReviewUrl: string;
+    isFrench: boolean;
+  }): Promise<boolean> {
+    const subject = data.isFrench
+      ? 'Parce que votre avis compte'
+      : 'We want to hear what you think';
+
+    const emailJob: EmailJob = {
+      to: data.to,
+      subject,
+      html: this.templateService.generateReviewRequestEmail({
+        domainName: data.domainName,
+        domainLogoUrl: data.domainLogoUrl,
+        googleReviewUrl: data.googleReviewUrl,
+        isFrench: data.isFrench,
+        locale: data.isFrench ? 'fr' : 'en',
+        subject,
+      }),
+    };
+
+    const success = await this.sendEmail(emailJob);
+    if (success) {
+      this.logger.log(`Review request email sent to ${data.to}`);
+    }
+    return success;
+  }
+
   async sendEmail(emailData: EmailJob): Promise<boolean> {
     try {
       const mailgunOptions = {

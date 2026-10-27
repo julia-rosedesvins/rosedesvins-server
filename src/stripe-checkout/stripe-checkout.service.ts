@@ -88,7 +88,7 @@ export class StripeCheckoutService {
 
     // 1. Validate booking exists
     const booking = await this.userBookingModel.findById(bookingId).exec();
-    if (!booking) throw new NotFoundException('Booking not found');
+    if (!booking || booking.isDeleted) throw new NotFoundException('Booking not found');
 
     // 2. Get vendor stripe account
     const stripeAccountId = await this.getVendorStripeAccountId(vendorUserId);
@@ -334,7 +334,7 @@ export class StripeCheckoutService {
     } = dto;
 
     const booking = await this.userBookingModel.findById(bookingId).exec();
-    if (!booking) throw new NotFoundException('Booking not found');
+    if (!booking || booking.isDeleted) throw new NotFoundException('Booking not found');
 
     const stripeAccountId = await this.getVendorStripeAccountId(vendorUserId);
     const amountCents = Math.round(amountEur * 100);

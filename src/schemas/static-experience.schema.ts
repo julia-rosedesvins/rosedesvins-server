@@ -14,6 +14,14 @@ export class StaticExperience extends Document {
 
   @Prop({
     type: String,
+    unique: true,
+    sparse: true,
+    index: true,
+  })
+  slug?: string;
+
+  @Prop({
+    type: String,
     required: false,
     default: null
   })

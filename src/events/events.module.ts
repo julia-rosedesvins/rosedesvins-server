@@ -6,6 +6,7 @@ import { EventsController } from './events.controller';
 import { Event, EventSchema } from '../schemas/events.schema';
 import { UserBooking, UserBookingSchema } from '../schemas/user-bookings.schema';
 import { Connector, ConnectorSchema } from '../schemas/connector.schema';
+import { User, UserSchema } from '../schemas/user.schema';
 import { UserGuard } from '../guards/user.guard';
 import { DomainProfile, DomainProfileSchema } from 'src/schemas/domain-profile.schema';
 
@@ -15,6 +16,7 @@ import { DomainProfile, DomainProfileSchema } from 'src/schemas/domain-profile.s
       { name: Event.name, schema: EventSchema },
       { name: UserBooking.name, schema: UserBookingSchema }, // For populating booking details
       { name: Connector.name, schema: ConnectorSchema }, // For calendar connector sync
+      { name: User.name, schema: UserSchema }, // For per-user sync by email
       { name: DomainProfile.name, schema: DomainProfileSchema }, // For domain profile related data
     ]),
     JwtModule.register({

@@ -546,6 +546,45 @@ export class UsersController {
     }
   }
 
+  @Post('admin/quick-login')
+  @ApiOperation({ summary: 'Admin quick login with email only (public endpoint)' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        email: { type: 'string', example: 'admin@rosedesvins.com' }
+      },
+      required: ['email']
+    }
+  })
+  async adminQuickLogin(
+    @Body() body: { email: string },
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    try {
+      const loginResult = await this.usersService.quickAdminLoginByEmail(body.email);
+
+      response.cookie('admin_token', loginResult.token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
+        maxAge: 24 * 60 * 60 * 1000,
+        domain: process.env.NODE_ENV === 'production' ? process.env.COOKIE_DOMAIN : undefined,
+        path: '/',
+      });
+
+      return {
+        success: true,
+        message: 'Admin quick login successful',
+        data: {
+          user: loginResult.user,
+        },
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
   @Post('quick-login')
   @ApiOperation({ summary: 'Quick login with email only (public endpoint)' })
   @ApiBody({

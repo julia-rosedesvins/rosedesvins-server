@@ -102,6 +102,13 @@ export class User extends Document {
   siteWeb: string | null;
 
   @Prop({
+    type: String,
+    required: false,
+    default: null
+  })
+  googleReviewUrl: string | null;
+
+  @Prop({
     type: Number,
     required: false,
     default: null

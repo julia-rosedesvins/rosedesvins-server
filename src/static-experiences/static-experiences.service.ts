@@ -2,9 +2,11 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { StaticExperience } from '../schemas/static-experience.schema';
+import { DomainProfile } from '../schemas/domain-profile.schema';
 import { CreateStaticExperienceDto } from './dto/create-static-experience.dto';
 import { UpdateStaticExperienceDto } from './dto/update-static-experience.dto';
 import { S3Service } from '../common/services/s3.service';
+import { slugify, ensureUniqueSlug } from '../common/utils/slug.util';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -14,8 +16,23 @@ export class StaticExperiencesService {
 
   constructor(
     @InjectModel(StaticExperience.name) private staticExperienceModel: Model<StaticExperience>,
+    @InjectModel(DomainProfile.name) private domainProfileModel: Model<DomainProfile>,
     private readonly s3Service: S3Service,
   ) {}
+
+  private async generateUniqueSlug(name: string, excludeId?: string): Promise<string> {
+    const baseSlug = slugify(name) || 'experience';
+    return ensureUniqueSlug(baseSlug, async (candidate) => {
+      const [takenByExperience, takenByProfile] = await Promise.all([
+        this.staticExperienceModel.exists({
+          slug: candidate,
+          ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+        }),
+        this.domainProfileModel.exists({ slug: candidate }),
+      ]);
+      return !!takenByExperience || !!takenByProfile;
+    });
+  }
 
   async loadDataFromJson(): Promise<string[]> {
     try {
@@ -160,13 +177,23 @@ export class StaticExperiencesService {
   }
 
   async create(createDto: CreateStaticExperienceDto) {
-    const newExperience = new this.staticExperienceModel(createDto);
+    const slug = await this.generateUniqueSlug(createDto.name);
+    const newExperience = new this.staticExperienceModel({ ...createDto, slug });
     return newExperience.save();
   }
 
   async update(id: string, updateDto: UpdateStaticExperienceDto) {
+    const updatePayload: UpdateStaticExperienceDto & { slug?: string } = { ...updateDto };
+
+    if (updateDto.name) {
+      const existing = await this.staticExperienceModel.findById(id).select('name slug').lean().exec();
+      if (existing && (existing.name !== updateDto.name || !existing.slug)) {
+        updatePayload.slug = await this.generateUniqueSlug(updateDto.name, id);
+      }
+    }
+
     const updatedExperience = await this.staticExperienceModel
-      .findByIdAndUpdate(id, updateDto, { new: true })
+      .findByIdAndUpdate(id, updatePayload, { new: true })
       .exec();
     if (!updatedExperience) {
       throw new NotFoundException(`Static experience with ID ${id} not found`);

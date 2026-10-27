@@ -153,6 +153,14 @@ export class UserBooking extends Document {
   })
   paymentMethod: PaymentMethodDetails;
 
+  @Prop({
+    type: String,
+    required: false,
+    enum: ['manual', 'widget', 'platform'],
+    index: true,
+  })
+  bookingSource?: string;
+
   @Prop({ 
     required: true,
     enum: [
@@ -186,6 +194,18 @@ export class UserBooking extends Document {
     trim: true
   })
   googleEventId?: string; // Google Calendar API event ID for calendar integration
+
+  @Prop({
+    default: false,
+    index: true,
+  })
+  isDeleted?: boolean;
+
+  @Prop({
+    type: Date,
+    required: false,
+  })
+  deletedAt?: Date;
 
   @Prop()
   createdAt?: Date;

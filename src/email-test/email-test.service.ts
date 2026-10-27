@@ -208,4 +208,23 @@ export class EmailTestService {
       expiryDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     });
   }
+
+  async sendReviewRequestTest(to: string, locale: 'fr' | 'en' = 'fr'): Promise<void> {
+    const isFrench = locale === 'fr';
+    const subject = isFrench
+      ? '[TEST] Parce que votre avis compte'
+      : '[TEST] We want to hear what you think';
+
+    const html = this.templateService.generateReviewRequestEmail({
+      domainName: 'Domaine de la Rose',
+      domainLogoUrl: MOCK_IMAGE,
+      googleReviewUrl: 'https://g.page/r/mock-google-review/review',
+      isFrench,
+      locale,
+      subject,
+      appLogoUrl: MOCK_APP_LOGO,
+    });
+
+    await this.emailService.sendEmail({ to, subject, html });
+  }
 }

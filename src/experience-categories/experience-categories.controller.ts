@@ -1,4 +1,8 @@
-import { Controller, Post, Get, Put, Delete, Body, Param, Query, UseGuards, Patch } from '@nestjs/common';
+import {
+  Controller, Post, Get, Put, Delete, Body, Param, Query, UseGuards, Patch,
+  UseInterceptors, UploadedFile, ParseFilePipe, MaxFileSizeValidator, FileTypeValidator,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ExperienceCategoriesService } from './experience-categories.service';
 import { CreateExperienceCategoryDto } from './dto/create-experience-category.dto';
@@ -54,6 +58,32 @@ export class ExperienceCategoriesController {
   @ApiOperation({ summary: 'Delete an experience category' })
   async remove(@Param('id') id: string) {
     return this.experienceCategoriesService.remove(id);
+  }
+
+  @Post('admin/:id/image')
+  @UseGuards(AdminGuard)
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Upload/replace the category image (converted to webp and stored on S3)' })
+  async uploadImage(
+    @Param('id') id: string,
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB
+          new FileTypeValidator({ fileType: /(jpg|jpeg|png|webp)$/ }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    return this.experienceCategoriesService.uploadImage(id, file);
+  }
+
+  @Delete('admin/:id/image')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Remove the category image' })
+  async deleteImage(@Param('id') id: string) {
+    return this.experienceCategoriesService.deleteImage(id);
   }
 
   @Patch('admin/:id/toggle-active')

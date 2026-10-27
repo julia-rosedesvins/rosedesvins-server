@@ -146,6 +146,7 @@ export const UpdateUserSchema = z.object({
   codePostal: z.string().optional().nullable(),
   city: z.string().optional().nullable(),
   siteWeb: z.string().optional().nullable(),
+  googleReviewUrl: z.string().optional().nullable(),
 });
 
 export type UpdateUserDto = z.infer<typeof UpdateUserSchema>;

@@ -107,6 +107,16 @@ export interface SubscriptionExpiryWarningEmailData {
   expiryDate: string;
 }
 
+export interface ReviewRequestEmailData {
+  domainName: string;
+  domainLogoUrl?: string;
+  googleReviewUrl: string;
+  isFrench: boolean;
+  locale: 'fr' | 'en';
+  subject: string;
+  appLogoUrl?: string;
+}
+
 export interface BookingEmailTemplateData {
   customerName: string;
   customerEmail?: string;
@@ -325,5 +335,15 @@ export class TemplateService {
   generateProviderCancellationEmail(data: BookingEmailTemplateData): string {
     const providerCancellationTemplate = this.loadTemplate('provider-cancellation');
     return providerCancellationTemplate(data);
+  }
+
+  generateReviewRequestEmail(data: ReviewRequestEmailData): string {
+    const reviewRequestTemplate = this.loadTemplate('review-request');
+    return reviewRequestTemplate({
+      ...data,
+      googleReviewUrl: this.sanitizeUrl(data.googleReviewUrl),
+      domainLogoUrl: this.sanitizeUrl(data.domainLogoUrl),
+      appLogoUrl: this.sanitizeUrl(data.appLogoUrl || this.getBaseData().appLogoUrl),
+    });
   }
 }

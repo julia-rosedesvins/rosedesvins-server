@@ -99,6 +99,14 @@ export class DomainProfile extends Document {
   })
   userId: Types.ObjectId;
 
+  @Prop({
+    type: String,
+    unique: true,
+    sparse: true,
+    index: true,
+  })
+  slug?: string;
+
   @Prop({ required: true, trim: true })
   domainDescription: string;
 

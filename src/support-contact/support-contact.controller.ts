@@ -20,6 +20,31 @@ import {
 export class SupportContactController {
   constructor(private readonly supportContactService: SupportContactService) {}
 
+  private formatTicketUser(userId: any): {
+    _id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    domainName?: string;
+  } {
+    if (userId && typeof userId === 'object' && userId._id) {
+      return {
+        _id: userId._id.toString(),
+        firstName: userId.firstName,
+        lastName: userId.lastName,
+        email: userId.email,
+        domainName: userId.domainName,
+      };
+    }
+
+    return {
+      _id: userId?.toString?.() || '',
+      firstName: 'Utilisateur',
+      lastName: 'supprimé',
+      email: '',
+    };
+  }
+
   @Post()
   @UseGuards(UserGuard)
   @ApiOperation({ summary: 'Create a new support ticket' })
@@ -175,13 +200,7 @@ export class SupportContactController {
       
       const formattedTickets = result.tickets.map(ticket => ({
         _id: (ticket._id as any).toString(),
-        userId: {
-          _id: (ticket.userId as any)._id.toString(),
-          firstName: (ticket.userId as any).firstName,
-          lastName: (ticket.userId as any).lastName,
-          email: (ticket.userId as any).email,
-          domainName: (ticket.userId as any).domainName,
-        },
+        userId: this.formatTicketUser(ticket.userId),
         subject: ticket.subject,
         message: ticket.message,
         status: ticket.status,
@@ -247,13 +266,7 @@ export class SupportContactController {
         message: `Ticket status updated to ${updateTicketStatusDto.status} successfully`,
         data: {
           _id: (updatedTicket._id as any).toString(),
-          userId: {
-            _id: (updatedTicket.userId as any)._id.toString(),
-            firstName: (updatedTicket.userId as any).firstName,
-            lastName: (updatedTicket.userId as any).lastName,
-            email: (updatedTicket.userId as any).email,
-            domainName: (updatedTicket.userId as any).domainName,
-          },
+          userId: this.formatTicketUser(updatedTicket.userId),
           subject: updatedTicket.subject,
           message: updatedTicket.message,
           status: updatedTicket.status,

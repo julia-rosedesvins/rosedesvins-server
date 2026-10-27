@@ -1,9 +1,10 @@
-import { Injectable, Logger, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ConflictException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Event } from '../schemas/events.schema';
 import { Connector } from '../schemas/connector.schema';
 import { DomainProfile } from '../schemas/domain-profile.schema';
+import { User } from '../schemas/user.schema';
 import { EncryptionService } from '../common/encryption.service';
 import { Buffer } from 'buffer';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -21,6 +22,7 @@ export class EventsService {
     @InjectModel(Event.name) private eventModel: Model<Event>,
     @InjectModel(Connector.name) private connectorModel: Model<Connector>,
     @InjectModel(DomainProfile.name) private domainProfileModel: Model<DomainProfile>,
+    @InjectModel(User.name) private userModel: Model<User>,
   ) { }
 
   /**
@@ -32,13 +34,52 @@ export class EventsService {
     try {
       const userObjectId = new Types.ObjectId(userId);
 
-      // Get events with populated booking details
+      // Load non-deleted events + soft-deleted booking events (so a restored booking can reappear)
       const events = await this.eventModel
-        .find({ userId: userObjectId })
+        .find({
+          userId: userObjectId,
+          $or: [
+            { isDeleted: { $ne: true } },
+            { eventType: 'booking' },
+          ],
+        })
         .populate('bookingId')
         .sort({ eventDate: 1, eventTime: 1 })
         .lean()
         .exec();
+
+      // Booking events: visibility is driven by booking.isDeleted (not event.isDeleted alone).
+      // If the booking was restored but the event flags were not, heal the event.
+      const visibleEvents: any[] = [];
+      for (const event of events) {
+        if (event.eventType === 'booking') {
+          const booking = event.bookingId as any;
+          if (!booking || booking.isDeleted === true) {
+            continue;
+          }
+
+          if (event.isDeleted === true || event.eventStatus === 'cancelled') {
+            await this.eventModel.updateOne(
+              { _id: event._id },
+              {
+                $set: { isDeleted: false, eventStatus: 'active' },
+                $unset: { deletedAt: 1 },
+              },
+            );
+            event.isDeleted = false;
+            event.eventStatus = 'active';
+            delete (event as any).deletedAt;
+          }
+
+          visibleEvents.push(event);
+          continue;
+        }
+
+        if (event.isDeleted === true) {
+          continue;
+        }
+        visibleEvents.push(event);
+      }
 
       // Get domain profile to access services information
       const domainProfile = await this.domainProfileModel
@@ -47,7 +88,7 @@ export class EventsService {
         .exec();
 
       // Enhance events with service information
-      const eventsWithServices = events.map(event => {
+      const eventsWithServices = visibleEvents.map(event => {
         if (event.bookingId && (event.bookingId as any).serviceId && domainProfile) {
           const serviceId = (event.bookingId as any).serviceId.toString();
           const service = domainProfile.services.find(s => (s as any)._id?.toString() === serviceId);
@@ -85,24 +126,55 @@ export class EventsService {
       const schedule = await this.eventModel
         .find({
           userId: userObjectId,
-          eventStatus: 'active', // Only return active events
-          isDeleted: { $ne: true },
+          $or: [
+            { eventStatus: 'active', isDeleted: { $ne: true } },
+            { eventType: 'booking' },
+          ],
         })
-        .select('eventDate eventTime eventEndTime eventType isAllDay bookingId') // Include eventType / isAllDay for widget blocking
+        .select('eventDate eventTime eventEndTime eventType bookingId isAllDay eventStatus isDeleted')
         .populate({
           path: 'bookingId',
           select: 'participantsAdults participantsEnfants serviceId selectedLanguage isDeleted',
-          match: { isDeleted: { $ne: true } },
         })
-        .sort({ eventDate: 1, eventTime: 1 }) // Sort by date and time ascending
+        .sort({ eventDate: 1, eventTime: 1 })
         .lean()
         .exec();
 
+      const visibleSchedule: typeof schedule = [];
+      for (const event of schedule) {
+        if (event.eventType === 'booking') {
+          const booking = event.bookingId as any;
+          if (!booking || booking.isDeleted === true) {
+            continue;
+          }
+          if (event.isDeleted === true || event.eventStatus === 'cancelled') {
+            await this.eventModel.updateOne(
+              { _id: (event as any)._id },
+              {
+                $set: { isDeleted: false, eventStatus: 'active' },
+                $unset: { deletedAt: 1 },
+              },
+            );
+            event.isDeleted = false;
+            event.eventStatus = 'active';
+          }
+          visibleSchedule.push(event);
+          continue;
+        }
+
+        if (event.isDeleted === true || event.eventStatus !== 'active') {
+          continue;
+        }
+        visibleSchedule.push(event);
+      }
+
       // Transform the data to include total participants, event type, serviceId and selectedLanguage
-      return schedule
+      return visibleSchedule
         .filter((event) => {
-          // Skip booking events whose booking was soft-deleted
-          if (event.eventType === 'booking' && !event.bookingId) return false;
+          if (event.eventType === 'booking') {
+            const booking = event.bookingId as any;
+            if (!booking || booking.isDeleted === true) return false;
+          }
           return true;
         })
         .map(event => {
@@ -134,6 +206,157 @@ export class EventsService {
     } catch (error) {
       throw error;
     }
+  }
+
+  /**
+   * Reject a new booking when it overlaps a busy slot.
+   * External / personal / blocked events always block (even with multi-slot).
+   * Multi-slot applies only to internal bookings of the same service AND the same start time.
+   * Overlapping starts (e.g. 15:30 vs 16:00) are always blocked.
+   * Bookings mirrored to Google stay eventType 'booking' and are not treated as external.
+   */
+  async assertSlotAvailable(params: {
+    userId: Types.ObjectId;
+    serviceId: string;
+    bookingDate: Date;
+    bookingTime: string;
+    durationMinutes: number;
+    participants: number;
+    selectedLanguage?: string;
+    multipleBookings: boolean;
+    maxParticipants: number;
+    excludeBookingId?: Types.ObjectId | string;
+  }): Promise<void> {
+    const dateKey = new Date(params.bookingDate).toISOString().slice(0, 10);
+    const dayStart = new Date(`${dateKey}T00:00:00.000Z`);
+    const dayEnd = new Date(`${dateKey}T23:59:59.999Z`);
+
+    const slotStart = this.parseTimeToMinutes(params.bookingTime);
+    const slotEnd = slotStart + params.durationMinutes;
+
+    const events = await this.eventModel
+      .find({
+        userId: params.userId,
+        eventDate: { $gte: dayStart, $lte: dayEnd },
+        $or: [
+          { eventStatus: 'active', isDeleted: { $ne: true } },
+          { eventType: 'booking' },
+        ],
+      })
+      .select('eventDate eventTime eventEndTime eventType bookingId isAllDay eventStatus isDeleted')
+      .populate({
+        path: 'bookingId',
+        select: 'participantsAdults participantsEnfants serviceId selectedLanguage isDeleted',
+      })
+      .lean()
+      .exec();
+
+    const sameServiceBookings: Array<{
+      participants: number;
+      language?: string;
+    }> = [];
+
+    const excludeId = params.excludeBookingId?.toString();
+
+    for (const event of events) {
+      if (event.eventType === 'booking') {
+        const booking = event.bookingId as any;
+        if (!booking || booking.isDeleted === true) continue;
+        if (event.isDeleted === true || event.eventStatus === 'cancelled') continue;
+        const existingBookingId = (booking._id || event.bookingId)?.toString();
+        if (excludeId && existingBookingId === excludeId) continue;
+      } else if (event.isDeleted === true || event.eventStatus !== 'active') {
+        continue;
+      }
+
+      const eventDateKey = new Date(event.eventDate).toISOString().slice(0, 10);
+      if (eventDateKey !== dateKey) continue;
+
+      const isHardBlockType =
+        event.eventType === 'external' ||
+        event.eventType === 'personal' ||
+        event.eventType === 'blocked';
+
+      const allDay =
+        event.isAllDay === true ||
+        (event.eventTime === '00:00' &&
+          (event.eventEndTime === '23:59' || event.eventEndTime === '23:59:59'));
+
+      if (isHardBlockType && allDay) {
+        throw new ConflictException(
+          'This time slot is unavailable due to an external calendar event',
+        );
+      }
+
+      const eventStart = this.parseTimeToMinutes(event.eventTime);
+      let eventEnd = eventStart + params.durationMinutes;
+      if (event.eventEndTime) {
+        eventEnd = this.parseTimeToMinutes(event.eventEndTime);
+        if (eventEnd < eventStart) eventEnd += 24 * 60;
+      }
+
+      if (!(slotStart < eventEnd && slotEnd > eventStart)) continue;
+
+      if (isHardBlockType) {
+        throw new ConflictException(
+          'This time slot is unavailable due to an external calendar event',
+        );
+      }
+
+      const booking = event.bookingId as any;
+      const existingServiceId = booking?.serviceId?.toString();
+      if (!existingServiceId || existingServiceId !== params.serviceId) {
+        throw new ConflictException(
+          'This time slot is unavailable because another experience is already booked',
+        );
+      }
+
+      const sameStart = this.parseTimeToMinutes(event.eventTime) === slotStart;
+      if (!sameStart) {
+        throw new ConflictException(
+          'This time slot overlaps another booking for the same experience',
+        );
+      }
+
+      if (!params.multipleBookings) {
+        throw new ConflictException('A booking already exists for this time slot');
+      }
+
+      sameServiceBookings.push({
+        participants: (booking.participantsAdults || 0) + (booking.participantsEnfants || 0),
+        language: booking.selectedLanguage,
+      });
+    }
+
+    if (!sameServiceBookings.length) return;
+
+    const existingParticipants = sameServiceBookings.reduce(
+      (sum, b) => sum + b.participants,
+      0,
+    );
+    if (existingParticipants + params.participants > params.maxParticipants) {
+      throw new ConflictException(
+        'This time slot does not have enough remaining capacity',
+      );
+    }
+
+    const requiredLanguage = sameServiceBookings.find(
+      (b) => b.language && String(b.language).trim() !== '',
+    )?.language;
+    if (
+      requiredLanguage &&
+      params.selectedLanguage &&
+      params.selectedLanguage !== requiredLanguage
+    ) {
+      throw new ConflictException(
+        'This time slot is already booked in a different language',
+      );
+    }
+  }
+
+  private parseTimeToMinutes(time: string): number {
+    const [hours, minutes] = String(time || '00:00').split(':').map(Number);
+    return (hours || 0) * 60 + (minutes || 0);
   }
 
   /**
@@ -356,7 +579,6 @@ export class EventsService {
     try {
       this.logger.log('🔄 Starting calendar sync process...');
 
-      // Get all active connectors
       const connectors = await this.connectorModel.find().exec();
 
       if (!connectors || connectors.length === 0) {
@@ -372,92 +594,7 @@ export class EventsService {
 
       this.logger.log(`📊 Found ${connectors.length} connector(s) to process`);
 
-      const syncResults: any[] = [];
-      let totalProcessed = 0;
-
-      for (const connector of connectors) {
-        try {
-          this.logger.log(`🔗 Processing connector: ${connector.connector_name} for user: ${connector.userId}`);
-
-          let result;
-          switch (connector.connector_name) {
-            case 'orange':
-              if (connector.connector_creds?.orange?.isActive && connector.connector_creds?.orange?.isValid) {
-                result = await this.syncOrangeCalendarEvents(connector);
-                totalProcessed++;
-              } else {
-                this.logger.warn(`⚠️ Orange connector inactive/invalid for user: ${connector.userId}`);
-                result = {
-                  connectorType: 'orange',
-                  userId: connector.userId.toString(),
-                  status: 'skipped',
-                  message: 'Connector inactive or invalid'
-                };
-              }
-              break;
-
-            case 'ovh':
-              this.logger.log(`🔧 OVH connector found for user ${connector.userId} - Not implemented yet`);
-              result = {
-                connectorType: 'ovh',
-                userId: connector.userId.toString(),
-                status: 'not_implemented',
-                message: 'OVH connector sync not implemented yet'
-              };
-              break;
-
-            case 'microsoft':
-              if (connector.connector_creds?.microsoft?.isActive && connector.connector_creds?.microsoft?.isValid) {
-                result = await this.syncMicrosoftCalendarEvents(connector);
-                totalProcessed++;
-              } else {
-                this.logger.warn(`⚠️ Microsoft connector inactive/invalid for user: ${connector.userId}`);
-                result = {
-                  connectorType: 'microsoft',
-                  userId: connector.userId.toString(),
-                  status: 'skipped',
-                  message: 'Connector inactive or invalid'
-                };
-              }
-              break;
-
-            case 'google':
-              if (connector.connector_creds?.google?.isActive && connector.connector_creds?.google?.isValid) {
-                result = await this.syncGoogleCalendarEvents(connector);
-                totalProcessed++;
-              } else {
-                this.logger.warn(`⚠️ Google connector inactive/invalid for user: ${connector.userId}`);
-                result = {
-                  connectorType: 'google',
-                  userId: connector.userId.toString(),
-                  status: 'skipped',
-                  message: 'Connector inactive or invalid'
-                };
-              }
-              break;
-
-            default:
-              this.logger.warn(`❓ Unknown connector type: ${connector.connector_name}`);
-              result = {
-                connectorType: connector.connector_name,
-                userId: connector.userId.toString(),
-                status: 'unknown',
-                message: 'Unknown connector type'
-              };
-          }
-
-          syncResults.push(result);
-
-        } catch (connectorError) {
-          this.logger.error(`❌ Error processing connector ${connector.connector_name}:`, connectorError);
-          syncResults.push({
-            connectorType: connector.connector_name,
-            userId: connector.userId.toString(),
-            status: 'error',
-            message: connectorError.message || 'Unknown error occurred'
-          });
-        }
-      }
+      const { totalProcessed, syncResults } = await this.runConnectorSync(connectors);
 
       this.logger.log(`✅ Sync process completed. Processed ${totalProcessed} active connectors`);
 
@@ -477,9 +614,238 @@ export class EventsService {
   }
 
   /**
-   * Sync events from Orange Mail calendar
+   * Sync calendar events for a single user identified by email.
    */
-  private async syncOrangeCalendarEvents(connector: any): Promise<any> {
+  async syncEventsForUserByEmail(email: string): Promise<{
+    success: boolean;
+    message: string;
+    data: {
+      totalProcessed: number;
+      syncResults: any[];
+    };
+  }> {
+    const normalizedEmail = email?.trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new BadRequestException('Email is required');
+    }
+
+    try {
+      this.logger.log(`🔄 Starting calendar sync for user: ${normalizedEmail}`);
+
+      const user = await this.userModel.findOne({ email: normalizedEmail }).exec();
+      if (!user) {
+        throw new NotFoundException(`User not found for email: ${normalizedEmail}`);
+      }
+
+      const connectors = await this.connectorModel.find({ userId: user._id }).exec();
+
+      if (!connectors || connectors.length === 0) {
+        return {
+          success: true,
+          message: `No calendar connectors found for ${normalizedEmail}`,
+          data: {
+            totalProcessed: 0,
+            syncResults: []
+          }
+        };
+      }
+
+      this.logger.log(`📊 Found ${connectors.length} connector(s) for ${normalizedEmail}`);
+
+      const { totalProcessed, syncResults } = await this.runConnectorSync(connectors);
+
+      this.logger.log(`✅ Sync completed for ${normalizedEmail}. Processed ${totalProcessed} active connector(s)`);
+
+      return {
+        success: true,
+        message: `Calendar sync completed for ${normalizedEmail}. Processed ${totalProcessed} active connectors.`,
+        data: {
+          totalProcessed,
+          syncResults
+        }
+      };
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(`❌ Calendar sync error for ${normalizedEmail}:`, error);
+      throw new InternalServerErrorException('Failed to sync calendar events for user');
+    }
+  }
+
+  /**
+   * Fetch (do NOT persist) calendar events for a single user identified by email,
+   * using whichever connector is currently linked to that user (orange/microsoft/google).
+   */
+  async fetchConnectorEventsForUserByEmail(email: string): Promise<{
+    success: boolean;
+    message: string;
+    data: {
+      connectorType: string;
+      events: any[];
+    };
+  }> {
+    const normalizedEmail = email?.trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new BadRequestException('Email is required');
+    }
+
+    try {
+      this.logger.log(`🔎 Fetching connector calendar events (no DB write) for user: ${normalizedEmail}`);
+
+      const user = await this.userModel.findOne({ email: normalizedEmail }).exec();
+      if (!user) {
+        throw new NotFoundException(`User not found for email: ${normalizedEmail}`);
+      }
+
+      const connector = await this.connectorModel.findOne({ userId: user._id }).exec();
+
+      if (!connector || connector.connector_name === 'none') {
+        return {
+          success: true,
+          message: `No calendar connector linked for ${normalizedEmail}`,
+          data: { connectorType: connector?.connector_name || 'none', events: [] }
+        };
+      }
+
+      const { result, processed } = await this.processConnectorSync(connector, true);
+
+      if (!processed) {
+        return {
+          success: true,
+          message: result?.message || `Connector ${connector.connector_name} is inactive or not implemented`,
+          data: { connectorType: connector.connector_name, events: [] }
+        };
+      }
+
+      return {
+        success: true,
+        message: result.message,
+        data: {
+          connectorType: connector.connector_name,
+          events: result.eventsData || []
+        }
+      };
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(`❌ Fetch connector events error for ${normalizedEmail}:`, error);
+      throw new InternalServerErrorException('Failed to fetch calendar events for user');
+    }
+  }
+
+  private async runConnectorSync(connectors: Connector[]): Promise<{
+    totalProcessed: number;
+    syncResults: any[];
+  }> {
+    const syncResults: any[] = [];
+    let totalProcessed = 0;
+
+    for (const connector of connectors) {
+      try {
+        this.logger.log(`🔗 Processing connector: ${connector.connector_name} for user: ${connector.userId}`);
+
+        const { result, processed } = await this.processConnectorSync(connector);
+        if (processed) {
+          totalProcessed++;
+        }
+        syncResults.push(result);
+      } catch (connectorError) {
+        this.logger.error(`❌ Error processing connector ${connector.connector_name}:`, connectorError);
+        syncResults.push({
+          connectorType: connector.connector_name,
+          userId: connector.userId.toString(),
+          status: 'error',
+          message: connectorError.message || 'Unknown error occurred'
+        });
+      }
+    }
+
+    return { totalProcessed, syncResults };
+  }
+
+  private async processConnectorSync(connector: Connector, dryRun = false): Promise<{
+    result: any;
+    processed: boolean;
+  }> {
+    let result;
+    let processed = false;
+
+    switch (connector.connector_name) {
+      case 'orange':
+        if (connector.connector_creds?.orange?.isActive && connector.connector_creds?.orange?.isValid) {
+          result = await this.syncOrangeCalendarEvents(connector, dryRun);
+          processed = true;
+        } else {
+          this.logger.warn(`⚠️ Orange connector inactive/invalid for user: ${connector.userId}`);
+          result = {
+            connectorType: 'orange',
+            userId: connector.userId.toString(),
+            status: 'skipped',
+            message: 'Connector inactive or invalid'
+          };
+        }
+        break;
+
+      case 'ovh':
+        this.logger.log(`🔧 OVH connector found for user ${connector.userId} - Not implemented yet`);
+        result = {
+          connectorType: 'ovh',
+          userId: connector.userId.toString(),
+          status: 'not_implemented',
+          message: 'OVH connector sync not implemented yet'
+        };
+        break;
+
+      case 'microsoft':
+        if (connector.connector_creds?.microsoft?.isActive && connector.connector_creds?.microsoft?.isValid) {
+          result = await this.syncMicrosoftCalendarEvents(connector, dryRun);
+          processed = true;
+        } else {
+          this.logger.warn(`⚠️ Microsoft connector inactive/invalid for user: ${connector.userId}`);
+          result = {
+            connectorType: 'microsoft',
+            userId: connector.userId.toString(),
+            status: 'skipped',
+            message: 'Connector inactive or invalid'
+          };
+        }
+        break;
+
+      case 'google':
+        if (connector.connector_creds?.google?.isActive && connector.connector_creds?.google?.isValid) {
+          result = await this.syncGoogleCalendarEvents(connector, dryRun);
+          processed = true;
+        } else {
+          this.logger.warn(`⚠️ Google connector inactive/invalid for user: ${connector.userId}`);
+          result = {
+            connectorType: 'google',
+            userId: connector.userId.toString(),
+            status: 'skipped',
+            message: 'Connector inactive or invalid'
+          };
+        }
+        break;
+
+      default:
+        this.logger.warn(`❓ Unknown connector type: ${connector.connector_name}`);
+        result = {
+          connectorType: connector.connector_name,
+          userId: connector.userId.toString(),
+          status: 'unknown',
+          message: 'Unknown connector type'
+        };
+    }
+
+    return { result, processed };
+  }
+
+  /**
+   * Sync events from Orange Mail calendar
+   * @param dryRun - when true, only fetches and parses events without writing to the database
+   */
+  private async syncOrangeCalendarEvents(connector: any, dryRun = false): Promise<any> {
     try {
       this.logger.log(`🍊 Starting Orange calendar sync for user: ${connector.userId}`);
 
@@ -747,6 +1113,10 @@ export class EventsService {
         return { connectorType: 'orange', userId: connector.userId.toString(), status: 'success', message: 'No events found to sync (current + next 2 months)', eventsSynced: 0 };
       }
 
+      if (dryRun) {
+        return { connectorType: 'orange', userId: connector.userId.toString(), status: 'success', message: `Fetched ${events.length} events`, eventsSynced: 0, eventsData: events };
+      }
+
       const syncedEvents = await this.saveEventsToDatabase(events, connector.userId, 'orange');
       this.logger.log(`✅ Successfully synced ${syncedEvents} events from Orange calendar`);
       return { connectorType: 'orange', userId: connector.userId.toString(), status: 'success', message: `Successfully synced ${syncedEvents} events`, eventsSynced: syncedEvents, eventsData: events };
@@ -759,8 +1129,9 @@ export class EventsService {
 
   /**
    * Sync events from Google Calendar
+   * @param dryRun - when true, only fetches and parses events without writing to the database
    */
-  private async syncGoogleCalendarEvents(connector: any): Promise<any> {
+  private async syncGoogleCalendarEvents(connector: any, dryRun = false): Promise<any> {
     try {
       this.logger.log(`🔵 Starting Google Calendar sync for user: ${connector.userId}`);
 
@@ -860,6 +1231,17 @@ export class EventsService {
           status: 'success',
           message: 'No valid events found to sync (current + next 2 months)',
           eventsSynced: 0
+        };
+      }
+
+      if (dryRun) {
+        return {
+          connectorType: 'google',
+          userId: connector.userId.toString(),
+          status: 'success',
+          message: `Fetched ${events.length} events`,
+          eventsSynced: 0,
+          eventsData: events
         };
       }
 
@@ -1148,7 +1530,7 @@ export class EventsService {
   /**
    * Sync events from Microsoft Calendar
    */
-  private async syncMicrosoftCalendarEvents(connector: any): Promise<any> {
+  private async syncMicrosoftCalendarEvents(connector: any, dryRun = false): Promise<any> {
     try {
       this.logger.log(`🟦 Starting Microsoft Calendar sync for user: ${connector.userId}`);
 
@@ -1180,13 +1562,21 @@ export class EventsService {
       const firstDayOfCurrentMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
       const lastDayOfNextMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 3, 0, 23, 59, 59);
 
-      // Build Paris-local window strings for Microsoft Graph (no timezone suffix)
-      const startDateTime = this.formatDateTimeForTimezone(firstDayOfCurrentMonth, 'Europe/Paris', '00:00:00');
-      const endDateTime = this.formatDateTimeForTimezone(lastDayOfNextMonth, 'Europe/Paris', '23:59:59');
+      // Graph treats start/end without offset as UTC — always send explicit Paris offset
+      const startDateTime = this.formatDateTimeWithTimezoneOffset(
+        firstDayOfCurrentMonth,
+        'Europe/Paris',
+        '00:00:00',
+      );
+      const endDateTime = this.formatDateTimeWithTimezoneOffset(
+        lastDayOfNextMonth,
+        'Europe/Paris',
+        '23:59:59',
+      );
 
-      this.logger.log(`📅 Fetching Microsoft Calendar events from ${startDateTime} to ${endDateTime} (current + next 2 months)`);
+      this.logger.log(`📅 Fetching Microsoft Calendar events from ${startDateTime} to ${endDateTime} (current + next 2 months, all calendars)`);
 
-      // Fetch all Microsoft events with pagination (@odata.nextLink)
+      // Fetch from every user calendar (default + secondary/holiday), deduped by event.id
       const microsoftEvents = await this.fetchAllMicrosoftEvents(accessToken, startDateTime, endDateTime);
 
       if (microsoftEvents.length === 0) {
@@ -1200,15 +1590,14 @@ export class EventsService {
         };
       }
 
-      this.logger.log(`📊 Found ${microsoftEvents.length} event(s) in Microsoft Calendar`);
+      this.logger.log(`📊 Found ${microsoftEvents.length} unique event(s) across all Microsoft calendars`);
 
-      // Parse Microsoft Calendar events to our format
+      // Parse every returned item — no filtering by showAs / type / isCancelled
       const events: any[] = [];
       for (const msEvent of microsoftEvents) {
         try {
           const parsedEvents = this.parseMicrosoftCalendarEvent(msEvent);
           if (parsedEvents) {
-            // parseMicrosoftCalendarEvent now returns an array of events (for multi-day support)
             const eventsArray = Array.isArray(parsedEvents) ? parsedEvents : [parsedEvents];
             events.push(...eventsArray);
           }
@@ -1227,10 +1616,21 @@ export class EventsService {
         };
       }
 
+      if (dryRun) {
+        return {
+          connectorType: 'microsoft',
+          userId: connector.userId.toString(),
+          status: 'success',
+          message: `Fetched ${events.length} events`,
+          eventsSynced: 0,
+          eventsData: events
+        };
+      }
+
       // Save events to database with conflict prevention
       const syncedEvents = await this.saveEventsToDatabase(events, connector.userId, 'microsoft');
 
-      // Remove any events in our DB that no longer exist in Microsoft Calendar
+      // Prune using the full deduped fetch (all calendars), not default-calendar-only
       const liveExternalIds = microsoftEvents.map((e: any) => e.id).filter(Boolean);
       const deletedCount = await this.pruneDeletedExternalEvents(connector.userId, 'microsoft', liveExternalIds);
       if (deletedCount > 0) {
@@ -1279,129 +1679,305 @@ export class EventsService {
   }
 
   /**
-   * Fetch all Microsoft events with pagination via @odata.nextLink
+   * Format date/time with an explicit IANA timezone offset for Graph query params.
+   * Graph treats startDateTime/endDateTime without an offset as UTC.
    */
-  private async fetchAllMicrosoftEvents(
-    accessToken: string,
-    startDateTime: string,
-    endDateTime: string
-  ): Promise<any[]> {
-    let url: string | null = `https://graph.microsoft.com/v1.0/me/calendarView`;
-    const allEvents: any[] = [];
+  private formatDateTimeWithTimezoneOffset(date: Date, timezone: string, time: string): string {
+    const local = this.formatDateTimeForTimezone(date, timezone, time);
+    const offset = this.getTimezoneOffsetString(date, timezone);
+    return `${local}${offset}`;
+  }
+
+  /** e.g. "+02:00" or "+01:00" for Europe/Paris on the given date (DST-aware). */
+  private getTimezoneOffsetString(date: Date, timezone: string): string {
+    try {
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        timeZoneName: 'shortOffset',
+      });
+      const parts = formatter.formatToParts(date);
+      const tzName = parts.find((p) => p.type === 'timeZoneName')?.value || 'GMT';
+      // "GMT+2", "GMT+02:00", "GMT-5", "GMT"
+      const match = tzName.match(/GMT([+-])(\d{1,2})(?::?(\d{2}))?/i);
+      if (!match) return '+00:00';
+      const sign = match[1];
+      const hours = String(parseInt(match[2], 10)).padStart(2, '0');
+      const minutes = match[3] || '00';
+      return `${sign}${hours}:${minutes}`;
+    } catch {
+      return '+00:00';
+    }
+  }
+
+  private getMicrosoftGraphHeaders(accessToken: string) {
+    return {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+      Prefer: 'outlook.timezone="Europe/Paris"',
+    };
+  }
+
+  /** List all calendars for the user (paginated). */
+  private async fetchMicrosoftCalendars(accessToken: string): Promise<Array<{ id: string; name: string }>> {
+    const calendars: Array<{ id: string; name: string }> = [];
+    let url: string | null = 'https://graph.microsoft.com/v1.0/me/calendars';
 
     while (url) {
       const response = await axios.get(url, {
-        params: url.includes('calendarView')
-          ? {
-            startDateTime,
-            endDateTime,
-            $orderby: 'start/dateTime',
-            $top: 1000
-          }
-          : undefined, // when following nextLink, params are already embedded
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/json',
-          Prefer: 'outlook.timezone="Europe/Paris"'
-        },
+        params: url.includes('calendars') && !url.includes('$skiptoken') && !url.includes('skiptoken')
+          ? { $select: 'id,name', $top: 50 }
+          : undefined,
+        headers: this.getMicrosoftGraphHeaders(accessToken),
         timeout: 15000,
         family: 4,
-        proxy: false
+        proxy: false,
+      });
+
+      const data = response.data || {};
+      const page = Array.isArray(data.value) ? data.value : [];
+      for (const cal of page) {
+        if (cal?.id) {
+          calendars.push({ id: cal.id, name: cal.name || 'Untitled calendar' });
+        }
+      }
+
+      url = (data['@odata.nextLink'] as string | undefined) || null;
+    }
+
+    return calendars;
+  }
+
+  /**
+   * Fetch calendarView for one calendar with pagination via @odata.nextLink.
+   */
+  private async fetchMicrosoftCalendarView(
+    accessToken: string,
+    calendarId: string,
+    startDateTime: string,
+    endDateTime: string,
+  ): Promise<any[]> {
+    const encodedId = encodeURIComponent(calendarId);
+    let url: string | null =
+      `https://graph.microsoft.com/v1.0/me/calendars/${encodedId}/calendarView`;
+    const allEvents: any[] = [];
+
+    while (url) {
+      const isInitial = url.includes('/calendarView') && !url.includes('@odata.nextLink') && !url.includes('$skiptoken') && !url.includes('skiptoken');
+      const response = await axios.get(url, {
+        params: isInitial
+          ? {
+              startDateTime,
+              endDateTime,
+              $orderby: 'start/dateTime',
+              $top: 1000,
+            }
+          : undefined,
+        headers: this.getMicrosoftGraphHeaders(accessToken),
+        timeout: 15000,
+        family: 4,
+        proxy: false,
       });
 
       const data = response.data || {};
       const pageEvents = Array.isArray(data.value) ? data.value : [];
       if (pageEvents.length) allEvents.push(...pageEvents);
 
-      const nextLink = data['@odata.nextLink'] as string | undefined;
-      url = nextLink || null;
+      url = (data['@odata.nextLink'] as string | undefined) || null;
     }
 
-    this.logger.log(`🟦 Microsoft pagination gathered ${allEvents.length} event(s)`);
     return allEvents;
   }
 
   /**
-   * Parse Microsoft Calendar event to our event format
+   * Fetch events from every Microsoft calendar in the window, deduped by event.id.
+   */
+  private async fetchAllMicrosoftEvents(
+    accessToken: string,
+    startDateTime: string,
+    endDateTime: string
+  ): Promise<any[]> {
+    let calendars = await this.fetchMicrosoftCalendars(accessToken);
+
+    if (calendars.length === 0) {
+      this.logger.warn('⚠️ No Microsoft calendars returned; falling back to default /me/calendarView');
+      calendars = [{ id: '', name: 'default' }];
+    } else {
+      this.logger.log(
+        `📆 Microsoft calendars (${calendars.length}): ${calendars.map((c) => c.name).join(', ')}`,
+      );
+    }
+
+    const byId = new Map<string, any>();
+
+    for (const calendar of calendars) {
+      try {
+        let pageEvents: any[];
+        if (!calendar.id) {
+          // Fallback: default calendar view
+          pageEvents = await this.fetchMicrosoftDefaultCalendarView(
+            accessToken,
+            startDateTime,
+            endDateTime,
+          );
+        } else {
+          pageEvents = await this.fetchMicrosoftCalendarView(
+            accessToken,
+            calendar.id,
+            startDateTime,
+            endDateTime,
+          );
+        }
+
+        this.logger.log(
+          `🟦 Calendar "${calendar.name}": ${pageEvents.length} event(s) in window`,
+        );
+
+        for (const event of pageEvents) {
+          if (!event?.id) continue;
+          if (!byId.has(event.id)) {
+            byId.set(event.id, {
+              ...event,
+              _calendarName: calendar.name,
+              _calendarId: calendar.id || null,
+            });
+          }
+        }
+      } catch (calError: any) {
+        this.logger.warn(
+          `⚠️ Failed to fetch calendar "${calendar.name}": ${calError?.message || calError}`,
+        );
+      }
+    }
+
+    const allEvents = Array.from(byId.values());
+    this.logger.log(`🟦 Microsoft all-calendars gather: ${allEvents.length} unique event(s)`);
+    return allEvents;
+  }
+
+  /** Default-calendar fallback when /me/calendars is empty. */
+  private async fetchMicrosoftDefaultCalendarView(
+    accessToken: string,
+    startDateTime: string,
+    endDateTime: string,
+  ): Promise<any[]> {
+    let url: string | null = 'https://graph.microsoft.com/v1.0/me/calendarView';
+    const allEvents: any[] = [];
+
+    while (url) {
+      const isInitial = url.includes('calendarView') && !url.includes('skiptoken');
+      const response = await axios.get(url, {
+        params: isInitial
+          ? {
+              startDateTime,
+              endDateTime,
+              $orderby: 'start/dateTime',
+              $top: 1000,
+            }
+          : undefined,
+        headers: this.getMicrosoftGraphHeaders(accessToken),
+        timeout: 15000,
+        family: 4,
+        proxy: false,
+      });
+
+      const data = response.data || {};
+      const pageEvents = Array.isArray(data.value) ? data.value : [];
+      if (pageEvents.length) allEvents.push(...pageEvents);
+      url = (data['@odata.nextLink'] as string | undefined) || null;
+    }
+
+    return allEvents;
+  }
+
+  /** Add calendar days to a YYYY-MM-DD string without timezone conversion. */
+  private addCalendarDays(dateStr: string, days: number): string {
+    const [y, m, d] = dateStr.split('-').map((n) => parseInt(n, 10));
+    const utc = new Date(Date.UTC(y, m - 1, d + days));
+    const yy = utc.getUTCFullYear();
+    const mm = String(utc.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(utc.getUTCDate()).padStart(2, '0');
+    return `${yy}-${mm}-${dd}`;
+  }
+
+  /** Inclusive calendar-day count for Graph all-day events (end is exclusive). */
+  private countExclusiveAllDaySpan(startDateStr: string, endDateStr: string): number {
+    const [ys, ms, ds] = startDateStr.split('-').map((n) => parseInt(n, 10));
+    const [ye, me, de] = endDateStr.split('-').map((n) => parseInt(n, 10));
+    const startUtc = Date.UTC(ys, ms - 1, ds);
+    const endUtc = Date.UTC(ye, me - 1, de);
+    const diff = Math.round((endUtc - startUtc) / (1000 * 60 * 60 * 24));
+    return Math.max(diff, 1);
+  }
+
+  /**
+   * Parse Microsoft Calendar event to our event format.
+   * Syncs every Graph calendar item (any showAs / type / cancelled) that has a start.
    */
   private parseMicrosoftCalendarEvent(msEvent: any): any[] | null {
     try {
       const eventInfo: any = {};
 
-      // Extract event title
       eventInfo.title = msEvent.subject || 'Untitled Event';
-
-      // Extract event ID (base ID for multi-day events)
       eventInfo.uid = msEvent.id;
-
-      // Extract description
       eventInfo.description = msEvent.bodyPreview || msEvent.body?.content || '';
 
-      // Extract start time and date
       const start = msEvent.start?.dateTime;
       const end = msEvent.end?.dateTime;
       const startTimeZone = msEvent.start?.timeZone || 'Europe/Paris';
+      const calendarName = msEvent._calendarName || 'unknown';
+
+      this.logger.log(
+        `📋 Microsoft raw event "${eventInfo.title}" calendar="${calendarName}" ` +
+          `type=${msEvent.type ?? 'n/a'} showAs=${msEvent.showAs ?? 'n/a'} ` +
+          `isAllDay=${!!msEvent.isAllDay} isCancelled=${!!msEvent.isCancelled}`,
+      );
 
       if (!start) {
-        this.logger.warn('⚠️ Microsoft event missing start time');
+        this.logger.warn(`⚠️ Microsoft event missing start time: ${eventInfo.title}`);
         return null;
       }
 
-      // Check if all-day event
-      eventInfo.isAllDay = msEvent.isAllDay || false;
+      eventInfo.isAllDay = !!msEvent.isAllDay;
 
       if (eventInfo.isAllDay) {
-        // All-day event - check if it spans multiple days
-        const startDate = new Date(start);
-        const endDate = new Date(end);
-        
-        // Calculate number of days
-        const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-        
-        if (daysDiff > 1) {
-          // Multi-day event - create separate events for each day
-          this.logger.log(`📅 Multi-day Microsoft event detected: ${eventInfo.title} spans ${daysDiff} days`);
+        // Use string date prefix — never new Date(...).toISOString() (shifts day on non-UTC hosts)
+        const startDateStr = String(start).slice(0, 10);
+        const endDateStr = end ? String(end).slice(0, 10) : startDateStr;
+        const daysCount = this.countExclusiveAllDaySpan(startDateStr, endDateStr);
+
+        if (daysCount > 1) {
+          this.logger.log(
+            `📅 Multi-day Microsoft event detected: ${eventInfo.title} spans ${daysCount} day(s) (${startDateStr} → exclusive ${endDateStr})`,
+          );
           const events: any[] = [];
-          
-          for (let i = 0; i < daysDiff; i++) {
-            const currentDate = new Date(startDate);
-            currentDate.setDate(startDate.getDate() + i);
-            
-            const dayEvent = {
+          for (let i = 0; i < daysCount; i++) {
+            events.push({
               ...eventInfo,
-              uid: `${eventInfo.uid}_day${i + 1}`, // Unique ID for each day
-              startDate: currentDate.toISOString().split('T')[0],
+              uid: `${eventInfo.uid}_day${i + 1}`,
+              startDate: this.addCalendarDays(startDateStr, i),
               startTimeFormatted: '00:00',
               endTimeFormatted: '23:59',
-              isAllDay: true
-            };
-            
-            events.push(dayEvent);
+              isAllDay: true,
+            });
           }
-          
           return events;
-        } else {
-          // Single day all-day event
-          eventInfo.startDate = startDate.toISOString().split('T')[0];
-          eventInfo.startTimeFormatted = '00:00';
-          eventInfo.endTimeFormatted = '23:59';
         }
+
+        eventInfo.startDate = startDateStr;
+        eventInfo.startTimeFormatted = '00:00';
+        eventInfo.endTimeFormatted = '23:59';
       } else {
-        // Timed event
-        // Microsoft returns time in the format: "2024-11-15T14:00:00.0000000"
-        // The timezone is specified separately in start.timeZone
-
-        // Parse the datetime string directly (it's already in the correct timezone)
+        // Timed event — parse datetime string directly (Prefer: Europe/Paris)
         const startDateTimeParts = start.split('T');
-        const startDatePart = startDateTimeParts[0]; // YYYY-MM-DD
-        const startTimePart = startDateTimeParts[1].split('.')[0]; // HH:MM:SS
+        const startDatePart = startDateTimeParts[0];
+        const startTimePart = (startDateTimeParts[1] || '00:00:00').split('.')[0];
 
-        const endDateTimeParts = end.split('T');
-        const endTimePart = endDateTimeParts[1].split('.')[0]; // HH:MM:SS
+        const endDateTimeParts = (end || start).split('T');
+        const endTimePart = (endDateTimeParts[1] || startTimePart).split('.')[0];
 
         eventInfo.startDate = startDatePart;
-        eventInfo.startTimeFormatted = startTimePart.substring(0, 5); // HH:MM
-        eventInfo.endTimeFormatted = endTimePart.substring(0, 5); // HH:MM
+        eventInfo.startTimeFormatted = startTimePart.substring(0, 5);
+        eventInfo.endTimeFormatted = endTimePart.substring(0, 5);
         eventInfo.startTimeLocal = eventInfo.startTimeFormatted;
         eventInfo.startDateLocal = eventInfo.startDate;
         eventInfo.timezone = startTimeZone;
@@ -1409,11 +1985,11 @@ export class EventsService {
         this.logger.log(`📋 Microsoft event time: ${start} to ${end} (timezone: ${startTimeZone})`);
       }
 
-      // Log parsed event
-      this.logger.log(`📋 Parsed Microsoft event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted} - ${eventInfo.endTimeFormatted}`);
+      this.logger.log(
+        `📋 Parsed Microsoft event: ${eventInfo.title} on ${eventInfo.startDate} at ${eventInfo.startTimeFormatted} - ${eventInfo.endTimeFormatted}`,
+      );
 
-      return [eventInfo]; // Return array for consistency
-
+      return [eventInfo];
     } catch (error) {
       this.logger.warn('⚠️ Error parsing Microsoft Calendar event:', error);
       return null;
@@ -1570,6 +2146,19 @@ export class EventsService {
     }
   }
 
+  /**
+   * Truncate a description to the Event schema's maxlength (1000 chars) so that
+   * long HTML/CSS bodies from Outlook/Word (e.g. "JPO", "Fermé") don't silently
+   * fail Mongoose validation and get skipped during save.
+   */
+  private truncateDescription(description: string | undefined | null, maxLength = 1000): string {
+    const value = description || '';
+    if (value.length <= maxLength) {
+      return value;
+    }
+    return value.substring(0, maxLength - 3) + '...';
+  }
+
   private async saveEventsToDatabase(events: any[], userId: any, source: string): Promise<number> {
     try {
       let savedCount = 0;
@@ -1633,8 +2222,9 @@ export class EventsService {
             if (existingExternalEvent.eventName !== eventName) {
               updateFields.eventName = eventName;
             }
-            if (existingExternalEvent.eventDescription !== (eventInfo.description || '')) {
-              updateFields.eventDescription = eventInfo.description || '';
+            const truncatedDescription = this.truncateDescription(eventInfo.description);
+            if (existingExternalEvent.eventDescription !== truncatedDescription) {
+              updateFields.eventDescription = truncatedDescription;
             }
             // Normalize isAllDay to boolean
             const incomingAllDay = !!(eventInfo.isAllDay || false);
@@ -1733,7 +2323,7 @@ export class EventsService {
             eventDate: new Date(eventInfo.startDate),
             eventTime: finalEventTime,
             eventEndTime: finalEventEndTime, // Save the end time
-            eventDescription: eventInfo.description || '',
+            eventDescription: this.truncateDescription(eventInfo.description),
             eventType: 'external',
             externalCalendarSource: source,
             externalEventId: eventInfo.uid,

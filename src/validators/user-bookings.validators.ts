@@ -143,6 +143,8 @@ export const CreateBookingSchema = z.object({
     .optional(),
   
   paymentMethod: PaymentMethodSchema,
+
+  bookingSource: z.enum(['manual', 'widget', 'platform']).optional(),
 })
 .refine((data) => {
   return data.participantsAdults + data.participantsEnfants > 0;

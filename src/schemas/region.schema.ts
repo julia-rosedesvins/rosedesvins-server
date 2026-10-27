@@ -14,6 +14,14 @@ export class Region extends Document {
     denom: string;
 
     @Prop({
+        type: String,
+        unique: true,
+        sparse: true,
+        index: true,
+    })
+    slug?: string;
+
+    @Prop({
         type: Number,
         required: true,
     })
@@ -42,6 +50,18 @@ export class Region extends Document {
         default: '',
     })
     thumbnailUrl: string;
+
+    @Prop({
+        type: String,
+        default: '',
+    })
+    subtitle: string;
+
+    @Prop({
+        type: String,
+        default: '',
+    })
+    description: string;
 
     @Prop({
         type: Boolean,

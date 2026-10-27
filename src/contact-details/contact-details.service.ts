@@ -13,6 +13,7 @@ export interface UserContactDetails {
   codePostal: string | null;
   city: string | null;
   siteWeb: string | null;
+  googleReviewUrl: string | null;
   domainLatitude: number | null;
   domainLongitude: number | null;
 }
@@ -26,6 +27,7 @@ export interface UpdateContactDetailsDto {
   codePostal?: string;
   city?: string;
   siteWeb?: string;
+  googleReviewUrl?: string | null;
   domainLatitude?: number | null;
   domainLongitude?: number | null;
 }
@@ -41,7 +43,7 @@ export class ContactDetailsService {
       _id: userId,
       role: UserRole.USER,
       accountStatus: { $in: [AccountStatus.APPROVED, AccountStatus.ACTIVE] }
-    }).select('firstName lastName email phoneNumber domainName address codePostal city siteWeb domainLatitude domainLongitude');
+    }).select('firstName lastName email phoneNumber domainName address codePostal city siteWeb googleReviewUrl domainLatitude domainLongitude');
 
     if (!user) {
       throw new UnauthorizedException('User not found or access denied');
@@ -57,6 +59,7 @@ export class ContactDetailsService {
       codePostal: user.codePostal,
       city: user.city,
       siteWeb: user.siteWeb,
+      googleReviewUrl: user.googleReviewUrl,
       domainLatitude: user.domainLatitude,
       domainLongitude: user.domainLongitude,
     };
@@ -83,7 +86,7 @@ export class ContactDetailsService {
       userId,
       filteredUpdateData,
       { new: true, runValidators: true }
-    ).select('firstName lastName email phoneNumber domainName address codePostal city siteWeb domainLatitude domainLongitude');
+    ).select('firstName lastName email phoneNumber domainName address codePostal city siteWeb googleReviewUrl domainLatitude domainLongitude');
 
     if (!updatedUser) {
       throw new UnauthorizedException('Failed to update user details');
@@ -99,6 +102,7 @@ export class ContactDetailsService {
       codePostal: updatedUser.codePostal,
       city: updatedUser.city,
       siteWeb: updatedUser.siteWeb,
+      googleReviewUrl: updatedUser.googleReviewUrl,
       domainLatitude: updatedUser.domainLatitude,
       domainLongitude: updatedUser.domainLongitude,
     };

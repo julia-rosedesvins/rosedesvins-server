@@ -123,6 +123,28 @@ export class Event extends Document {
   })
   providerNotificationSentAt?: Date; // When provider notification was sent
 
+  @Prop({
+    default: false
+  })
+  reviewRequestSent?: boolean; // Track if post-experience review request email was sent
+
+  @Prop({
+    type: Date
+  })
+  reviewRequestSentAt?: Date; // When review request email was sent
+
+  @Prop({
+    default: false,
+    index: true,
+  })
+  isDeleted?: boolean;
+
+  @Prop({
+    type: Date,
+    required: false,
+  })
+  deletedAt?: Date;
+
   @Prop()
   createdAt?: Date;
 
