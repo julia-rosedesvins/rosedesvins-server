@@ -138,7 +138,7 @@ export class StaticExperiencesService {
       domainProfile: {
         _id: experience._id,
         userId: '',
-        domainDescription: experience.domain_description || experience.about || experience.category || '',
+        domainDescription: experience.domain_description || '',
         domainProfilePictureUrl: buildFullUrl(experience.domain_profile_pic_url || experience.main_image),
         domainLogoUrl: buildFullUrl(experience.domain_logo_url),
         colorCode: '#3A7B59',

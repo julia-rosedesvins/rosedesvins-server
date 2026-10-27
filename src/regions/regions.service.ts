@@ -441,7 +441,7 @@ export class RegionsService {
             
             return {
                 domainName: exp.domain_name || exp.name,
-                domainDescription: exp.domain_description || exp.about || exp.category || '',
+                domainDescription: exp.domain_description || '',
                 domainProfilePictureUrl: exp.domain_profile_pic_url || exp.main_image || null,
                 domainLogoUrl: exp.domain_logo_url || null,
                 mainImage: exp.main_image || null,
@@ -1354,7 +1354,7 @@ export class RegionsService {
                 domainId,
                 slug: exp.slug || null,
                 domainName: exp.domain_name || exp.name,
-                domainDescription: exp.domain_description || exp.about || exp.category || '',
+                domainDescription: exp.domain_description || '',
                 domainProfilePictureUrl: exp.domain_profile_pic_url || exp.main_image || null,
                 domainLogoUrl: exp.domain_logo_url || null,
                 name: exp.name,

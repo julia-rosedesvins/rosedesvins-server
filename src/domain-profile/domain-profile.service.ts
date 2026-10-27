@@ -243,7 +243,7 @@ export class DomainProfileService {
         _id: staticExperience._id,
         slug: (staticExperience as any).slug || null,
         userId: '',
-        domainDescription: staticExperience.domain_description || staticExperience.about || staticExperience.category || '',
+        domainDescription: staticExperience.domain_description || '',
         domainProfilePictureUrl: this.buildFullMediaUrl(staticExperience.domain_profile_pic_url || staticExperience.main_image),
         domainLogoUrl: this.buildFullMediaUrl(staticExperience.domain_logo_url),
         mainImage: this.buildFullMediaUrl(staticExperience.main_image),
